@@ -34,6 +34,9 @@ Write-Step 'Tracker (pytest + selftest)'
 if ((Invoke-Logged -Exe $python -ArgumentLine '-m pytest -q' -LogFile "$logs\pytest.log" -WorkingDirectory (Join-Path $script:ProjectRoot 'Tracking')) -ne 0) { $failures += 'pytest' }
 if ((Invoke-Logged -Exe $python -ArgumentLine '-m iron_echo_tracker selftest' -LogFile "$logs\selftest.log" -WorkingDirectory (Join-Path $script:ProjectRoot 'Tracking')) -ne 0) { $failures += 'selftest' }
 
+Write-Step 'Tool tests (robot contract checks)'
+if ((Invoke-Logged -Exe $python -ArgumentLine '-m pytest -q Tests\Tools' -LogFile "$logs\tools-tests.log") -ne 0) { $failures += 'tool-tests' }
+
 if ($Unreal) {
     Write-Step 'Unreal automation tests (IronEcho.*)'
     $report = Join-Path $logs 'ue-automation'

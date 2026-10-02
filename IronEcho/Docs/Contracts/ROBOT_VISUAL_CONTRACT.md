@@ -164,6 +164,9 @@ GameMode (BlueprintCallable): `StartBout(BotLevel)`, `StartTraining()`, `ToggleP
 
 ## 12. Проверка соответствия
 
+- **Самопроверка робота до коммита:** в редакторе `py "<путь>/Tools/Unreal/Tech/validate_robot.py" /Game/Art/Robots/<меш>`
+  (без аргумента — меши из `DA_IronEchoVisuals`). Проверяет кости, сокеты, рост, пол, Z-вверх, левую/правую сторону;
+  результат — `Saved/Probe/robot_validation.json` и строки `IRONECHO_ROBOT` в логе. Ошибки = нарушение контракта.
 - В логе при загрузке меша: ошибки об отсутствующих костях, предупреждения об отсутствующих сокетах.
 - Автотест `IronEcho.Contract.EnumsAndSettings`, пробник `Tools/Unreal/Tech/ue_connection_probe.py`
   (видит ли редактор `DA_IronEchoVisuals`).
