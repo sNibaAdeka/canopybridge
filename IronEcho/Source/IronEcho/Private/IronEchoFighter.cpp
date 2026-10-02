@@ -242,7 +242,7 @@ void AIronEchoFighter::UpdatePlaceholder(float DeltaSeconds)
 	HitJolt = FMath::Max(0.0f, HitJolt - DeltaSeconds * 4.0f);
 
 	// Torso: lateral slip (roll about the forward axis at the pelvis) + forward lean + hit jolt.
-	const bool bKO = S.bKnockedOut;
+	const bool bKO = S.bKnockedOut || S.bKnockedDown;
 	const float RollDeg = SmoothedLean * 22.0f;
 	const float PitchDeg = bKO ? -35.0f : (S.LeanForward * 10.0f - HitJolt * 14.0f);
 	const FRotator TorsoRot(PitchDeg, 0.0f, RollDeg);

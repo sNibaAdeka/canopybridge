@@ -57,6 +57,7 @@ namespace IronEchoCore
 		FighterConfig Config = MakeDefaultFighterConfig();
 		Config.bInvulnerable = true;
 		Config.bPassive = true;
+		Config.bKnockdowns = false;
 		Config.MaxHealth = 1000.0f;
 		return Config;
 	}
@@ -69,6 +70,9 @@ namespace IronEchoCore
 		case BotLevel::Easy:
 			Config.ReactionTicks = SecondsToTicks(0.20);
 			Config.GuardAfterHitChance = 0.20f;
+			Config.GetUpChance[0] = 0.60f;
+			Config.GetUpChance[1] = 0.35f;
+			Config.GetUpChance[2] = 0.10f;
 			Config.BlockChance = 0.25f;
 			Config.DodgeChance = 0.10f;
 			Config.AttackIntervalMinTicks = SecondsToTicks(1.2);
@@ -82,6 +86,9 @@ namespace IronEchoCore
 		case BotLevel::Hard:
 			Config.ReactionTicks = SecondsToTicks(0.07);
 			Config.GuardAfterHitChance = 0.65f;
+			Config.GetUpChance[0] = 0.95f;
+			Config.GetUpChance[1] = 0.70f;
+			Config.GetUpChance[2] = 0.40f;
 			Config.BlockChance = 0.50f;
 			Config.DodgeChance = 0.30f;
 			Config.AttackIntervalMinTicks = SecondsToTicks(0.55);

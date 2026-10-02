@@ -90,6 +90,18 @@ void AIronEchoDebugHUD::DrawHUD()
 		*EnumText(StaticEnum<EIronEchoBotLevel>(), static_cast<int64>(Hud.BotLevel)),
 		*EnumText(StaticEnum<EIronEchoMatchPhase>(), static_cast<int64>(Hud.Phase)),
 		*EnumText(StaticEnum<EIronEchoPauseReason>(), static_cast<int64>(Hud.PauseReason))), White, Y);
+	if (Hud.Phase == EIronEchoMatchPhase::Knockdown)
+	{
+		if (Hud.ResumeIn > 0.0f)
+		{
+			Line(FString::Printf(TEXT("UP! Box in %.1f"), Hud.ResumeIn), Good, Y);
+		}
+		else
+		{
+			Line(FString::Printf(TEXT("KNOCKDOWN  count %d   %s"), Hud.KnockdownCount,
+				Hud.Player.bKnockedDown ? *FString::Printf(TEXT("RAISE AND HOLD YOUR GUARD TO GET UP (%d%%)"), Hud.GetUpProgress) : TEXT("opponent is down")), Warn, Y);
+		}
+	}
 	if (Hud.Mode == EIronEchoMatchMode::Training)
 	{
 		Line(FString::Printf(TEXT("Confirmed bag hits: %d"), Hud.TrainingHits), Good, Y);
@@ -99,13 +111,20 @@ void AIronEchoDebugHUD::DrawHUD()
 		Line(FString::Printf(TEXT("Round %d/%d  time %.1f  countdown %.1f  break %.1f  score %d-%d  result %s"),
 			Hud.Round, Hud.Rounds, Hud.RoundTimeRemaining, Hud.CountdownRemaining, Hud.BreakRemaining, Hud.ScorePlayer, Hud.ScoreOpponent,
 			*EnumText(StaticEnum<EIronEchoResultMethod>(), static_cast<int64>(Hud.Result))), White, Y);
+		if (Hud.JudgeScoresPlayer.Num() == 3 && Hud.JudgeScoresOpponent.Num() == 3)
+		{
+			Line(FString::Printf(TEXT("Judges: %d-%d  %d-%d  %d-%d   %s"), Hud.JudgeScoresPlayer[0], Hud.JudgeScoresOpponent[0],
+				Hud.JudgeScoresPlayer[1], Hud.JudgeScoresOpponent[1], Hud.JudgeScoresPlayer[2], Hud.JudgeScoresOpponent[2],
+				*EnumText(StaticEnum<EIronEchoDecisionKind>(), static_cast<int64>(Hud.Decision))), White, Y);
+		}
 	}
 	const FIronEchoFighterHud* Fighters[2] = {&Hud.Player, &Hud.Opponent};
 	for (int32 Index = 0; Index < 2; ++Index)
 	{
 		const FIronEchoFighterHud& F = *Fighters[Index];
-		Line(FString::Printf(TEXT("%s  %s  thrown %d landed %d dodges %d"), Index == 0 ? TEXT("PLAYER  ") : TEXT("OPPONENT"),
-			*EnumText(StaticEnum<EIronEchoActionState>(), static_cast<int64>(F.ActionState)), F.PunchesThrown, F.PunchesLanded, F.DodgesMade), White, Y);
+		Line(FString::Printf(TEXT("%s  %s  thrown %d landed %d  combo %d (max %d)  slips %d blocks %d  counters %d  KD %d"),
+			Index == 0 ? TEXT("PLAYER  ") : TEXT("OPPONENT"), *EnumText(StaticEnum<EIronEchoActionState>(), static_cast<int64>(F.ActionState)),
+			F.PunchesThrown, F.PunchesLanded, F.ComboCount, F.MaxCombo, F.DodgesMade, F.BlocksMade, F.CounterHits, F.KnockdownsSuffered), White, Y);
 		Bar(24.0f, Y, 260.0f, F.MaxHealth > 0 ? F.Health / F.MaxHealth : 0.0f, FLinearColor(0.9f, 0.15f, 0.15f));
 		Bar(300.0f, Y, 160.0f, F.MaxStamina > 0 ? F.Stamina / F.MaxStamina : 0.0f, FLinearColor(0.2f, 0.6f, 1.0f));
 		Y += 18.0f;

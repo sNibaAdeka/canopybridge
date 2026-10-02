@@ -46,6 +46,12 @@ namespace IronEchoCore
 
 		bool bInvulnerable = false; // training bag: takes hits, never loses health
 		bool bPassive = false;      // training bag: never acts, never blocks or dodges
+
+		bool bKnockdowns = true;               // health 0 -> knocked down for a count instead of instant KO
+		float KnockdownRecoverHealth = 0.40f;  // fraction of max health after the first get-up
+		float KnockdownRecoverDecay = 0.70f;   // each further knockdown in the match multiplies the above
+		float GetUpStamina = 0.50f;            // fraction of max stamina after a get-up
+		int32_t ComboWindowTicks = SecondsToTicks(1.0); // next clean hit within this window extends the combo
 	};
 
 	struct MovementConfig
@@ -70,7 +76,22 @@ namespace IronEchoCore
 		float BetweenRoundHealthRecovery = 0.15f; // fraction of max health
 		int32_t TrackingLossGraceTicks = SecondsToTicks(0.5);
 		int32_t ReadyStableTicks = SecondsToTicks(1.0);   // input must be ready this long to start / resume
-		float DrawDamageMargin = 1.0f;                    // round damage difference treated as even
+		float DrawDamageMargin = 1.0f;                    // round score difference treated as even
+
+		// Knockdowns and the referee count.
+		bool bKnockdowns = true;
+		int32_t MaxKnockdownsPerRound = 3;                // the third knockdown in a round is a TKO
+		int32_t CountStepTicks = SecondsToTicks(1.0);
+		int32_t CountTo = 10;
+		int32_t MinDownTicks = SecondsToTicks(2.0);       // nobody beats the count before this
+		int32_t GetUpHoldTicks = SecondsToTicks(1.2);     // player: hold the guard up this long to stand
+		int32_t PostGetUpTicks = SecondsToTicks(1.0);     // "box!" pause before the fight resumes
+		int32_t MinPointsPerRound = 7;
+
+		// Three judges score each round on (damage + LandedWeight*landed + DefenseWeight*defences).
+		// Judge 1 is neutral (damage only), judge 2 rewards volume, judge 3 rewards defence.
+		float JudgeLandedWeight[3] = {0.0f, 3.0f, 0.0f};
+		float JudgeDefenseWeight[3] = {0.0f, 0.0f, 2.5f};
 	};
 
 	enum class BotLevel : uint8_t
@@ -100,6 +121,9 @@ namespace IronEchoCore
 		int32_t GuardUpPeriodTicks = SecondsToTicks(1.0);
 		float GuardAfterHitChance = 0.45f; // covers up after taking a clean hit
 		int32_t GuardAfterHitTicks = SecondsToTicks(0.8);
+		float GetUpChance[3] = {0.80f, 0.50f, 0.25f}; // per knockdown in the match (1st, 2nd, 3rd+)
+		int32_t GetUpCountMin = 3;
+		int32_t GetUpCountMax = 8;
 	};
 
 	// Player fighter: short windups because the camera pipeline already adds ~0.1-0.15 s before the game sees the punch.

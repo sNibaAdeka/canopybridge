@@ -441,6 +441,9 @@ FIronEchoFighterVisualState AIronEchoGameMode::MakeVisualState(IronEchoCore::Fig
 	V.Health01 = S.MaxHealth > 0.0f ? S.Health / S.MaxHealth : 0.0f;
 	V.Stamina01 = S.MaxStamina > 0.0f ? S.Stamina / S.MaxStamina : 0.0f;
 	V.bKnockedOut = S.State == IronEchoCore::ActionState::KnockedOut;
+	V.bKnockedDown = S.State == IronEchoCore::ActionState::KnockedDown;
+	V.KnockdownsSuffered = S.KnockdownsSuffered;
+	V.ComboCount = S.ComboCount;
 	V.DistanceToOpponent = Match->Sim().Gap() * IronEchoConvert::MetersToCm;
 	V.LastHitTakenTime = Memory.LastHitTakenTime;
 	V.LastHitTakenFromHand = Memory.LastHitFromHand;
@@ -509,6 +512,8 @@ void AIronEchoGameMode::DispatchEvents()
 		Event.Damage = Core.Damage;
 		Event.TargetHealthAfter = Core.TargetHealthAfter;
 		Event.AttackId = static_cast<int32>(Core.AttackId);
+		Event.ComboCount = Core.ComboCount;
+		Event.KnockdownNumber = Core.KnockdownNumber;
 		Event.WorldTime = Now;
 		Event.ImpactDirection = RingTransform.TransformVectorNoScale(Core.Actor == IronEchoCore::FighterSlot::Player ? FVector::ForwardVector : -FVector::ForwardVector);
 
@@ -565,9 +570,18 @@ void AIronEchoGameMode::DispatchEvents()
 		Event.CountdownSeconds = Core.CountdownSeconds;
 		Event.ScorePlayer = Core.ScorePlayer;
 		Event.ScoreOpponent = Core.ScoreOpponent;
+		Event.Decision = IronEchoConvert::ToUnreal(Core.Decision);
+		Event.bHasDowned = Core.bHasDowned;
+		Event.Downed = IronEchoConvert::ToUnreal(Core.Downed);
 		if (Core.Type == IronEchoCore::MatchEventType::PhaseChanged)
 		{
 			UE_LOG(LogIronEcho, Log, TEXT("Match phase: %s"), ANSI_TO_TCHAR(IronEchoCore::MatchPhaseName(Core.Phase)));
+		}
+		else if (Core.Type == IronEchoCore::MatchEventType::MatchEnded)
+		{
+			UE_LOG(LogIronEcho, Log, TEXT("Match ended: method %d, decision %d, judges %d-%d / %d-%d / %d-%d"), static_cast<int32>(Core.Method),
+				static_cast<int32>(Core.Decision), Match->Snapshot().JudgeScores[0][0], Match->Snapshot().JudgeScores[0][1],
+				Match->Snapshot().JudgeScores[1][0], Match->Snapshot().JudgeScores[1][1], Match->Snapshot().JudgeScores[2][0], Match->Snapshot().JudgeScores[2][1]);
 		}
 		if (State != nullptr)
 		{
@@ -598,6 +612,17 @@ void AIronEchoGameMode::UpdateHudState()
 	Hud.bHasWinner = M.bHasWinner;
 	Hud.Winner = IronEchoConvert::ToUnreal(M.Winner);
 	Hud.TrainingHits = M.TrainingHits;
+	Hud.Decision = IronEchoConvert::ToUnreal(M.Decision);
+	Hud.JudgeScoresPlayer.SetNum(IronEchoCore::kJudgeCount);
+	Hud.JudgeScoresOpponent.SetNum(IronEchoCore::kJudgeCount);
+	for (int32 Judge = 0; Judge < IronEchoCore::kJudgeCount; ++Judge)
+	{
+		Hud.JudgeScoresPlayer[Judge] = M.JudgeScores[Judge][0];
+		Hud.JudgeScoresOpponent[Judge] = M.JudgeScores[Judge][1];
+	}
+	Hud.KnockdownCount = M.KnockdownCount;
+	Hud.GetUpProgress = M.GetUpProgress;
+	Hud.ResumeIn = static_cast<float>(M.PostGetUpTicksLeft) * TickSeconds;
 	for (int32 Index = 0; Index < 2; ++Index)
 	{
 		const IronEchoCore::FighterSnapshot& S = Match->Sim().Get(Index == 0 ? IronEchoCore::FighterSlot::Player : IronEchoCore::FighterSlot::Opponent).Snapshot();
@@ -610,6 +635,12 @@ void AIronEchoGameMode::UpdateHudState()
 		F.PunchesThrown = S.PunchesThrown;
 		F.PunchesLanded = S.PunchesLanded;
 		F.DodgesMade = S.DodgesMade;
+		F.BlocksMade = S.BlocksMade;
+		F.CounterHits = S.CounterHits;
+		F.ComboCount = S.ComboCount;
+		F.MaxCombo = S.MaxCombo;
+		F.KnockdownsSuffered = S.KnockdownsSuffered;
+		F.bKnockedDown = S.State == IronEchoCore::ActionState::KnockedDown;
 	}
 	if (UIronEchoTrackingSubsystem* Tracking = GetGameInstance() ? GetGameInstance()->GetSubsystem<UIronEchoTrackingSubsystem>() : nullptr)
 	{

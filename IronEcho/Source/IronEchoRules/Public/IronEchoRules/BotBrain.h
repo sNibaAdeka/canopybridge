@@ -19,6 +19,8 @@ namespace IronEchoCore
 
 		void Reset(uint64_t Seed);
 		FighterIntent Think(const CombatSim& Sim, int32_t Tick);
+		// Decided when the bot is knocked down: referee count at which it stands, or -1 to stay down.
+		int32_t DecideGetUpCount(int32_t KnockdownNumber);
 
 		const BotConfig& GetConfig() const { return Config; }
 		void SetConfig(const BotConfig& InConfig) { Config = InConfig; }

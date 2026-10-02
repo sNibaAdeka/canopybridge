@@ -16,6 +16,9 @@ namespace IronEchoCore
 
 		void ResetForMatch();
 		void ResetForRound(float HealthRecoveryFraction);
+		// Both fighters back to the engage distance around the ring centre (after a knockdown).
+		void ResetPositions();
+		Fighter& Mutable(FighterSlot Slot) { return Fighters[SlotIndex(Slot)]; }
 
 		// One fixed tick: timers -> intents -> resolution (both sides from the same snapshot) -> movement.
 		void Step(const FighterIntent& PlayerIntent, const FighterIntent& OpponentIntent, int32_t Tick, CombatEventBuffer& Events);

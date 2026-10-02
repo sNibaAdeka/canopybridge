@@ -165,7 +165,8 @@ IE_TEST(Match_FullBoutReachesResultWithInvariants)
 	if (S.Result == ResultMethod::Decision || S.Result == ResultMethod::Draw)
 	{
 		IE_EXPECT_EQ(R.Count(MatchEventType::RoundEnded), 2);
-		IE_EXPECT(S.ScorePlayer >= 18 && S.ScoreOpponent >= 18);
+		IE_EXPECT(S.ScorePlayer >= 14 && S.ScoreOpponent >= 14 && S.ScorePlayer <= 20 && S.ScoreOpponent <= 20);
+		IE_EXPECT(S.Decision != DecisionKind::None);
 	}
 	// The bot fought back: it threw punches and something connected.
 	int BotPunches = 0;
@@ -215,10 +216,11 @@ IE_TEST(Match_DecisionScoringAndRoundBreakRecovery)
 	IE_EXPECT(R.M.Snapshot().bHasWinner && R.M.Snapshot().Winner == FighterSlot::Player);
 }
 
-IE_TEST(Match_KnockOutEndsImmediately)
+IE_TEST(Match_StayingDownForTenIsKnockOut)
 {
 	MatchSetup Setup = ShortSetup();
 	Setup.OpponentFighter.MaxHealth = 9.0f;
+	Setup.Bot.GetUpChance[0] = 0.0f;
 	Setup.Bot.AttackIntervalMinTicks = 1000000;
 	Setup.Bot.AttackIntervalMaxTicks = 1000000;
 	Setup.Bot.BlockChance = 0.0f;
@@ -229,8 +231,13 @@ IE_TEST(Match_KnockOutEndsImmediately)
 	FighterIntent Cross;
 	Cross.AddPunch(Hand::Right);
 	R.Tick(true, Cross);
-	R.RunUntil(MatchPhase::MatchOver, 60);
+	R.RunUntil(MatchPhase::Knockdown, 60);
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Knockdown);
+	const int32_t Frozen = R.M.Snapshot().RoundTicksLeft;
+	R.RunUntil(MatchPhase::MatchOver, SecondsToTicks(11.0));
 	IE_EXPECT(R.M.Snapshot().Result == ResultMethod::KnockOut);
+	IE_EXPECT_EQ(R.Count(MatchEventType::KnockdownCount), 10);
+	IE_EXPECT_EQ(R.M.Snapshot().RoundTicksLeft, Frozen); // the round clock stops during the count
 	IE_EXPECT(R.M.Snapshot().Winner == FighterSlot::Player);
 	IE_EXPECT_EQ(R.M.Snapshot().Round, 1);
 }
@@ -280,6 +287,7 @@ IE_TEST(Match_RematchResetsEverything)
 {
 	MatchSetup Setup = ShortSetup();
 	Setup.OpponentFighter.MaxHealth = 5.0f;
+	Setup.Bot.GetUpChance[0] = 0.0f;
 	Setup.Bot.AttackIntervalMinTicks = 1000000;
 	Setup.Bot.AttackIntervalMaxTicks = 1000000;
 	Setup.Bot.BlockChance = 0.0f;
@@ -290,7 +298,7 @@ IE_TEST(Match_RematchResetsEverything)
 	FighterIntent Jab;
 	Jab.AddPunch(Hand::Left);
 	R.Tick(true, Jab);
-	R.RunUntil(MatchPhase::MatchOver, 60);
+	R.RunUntil(MatchPhase::MatchOver, SecondsToTicks(12.0));
 	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::MatchOver);
 	R.M.RequestRematch();
 	R.Tick(true);
@@ -356,4 +364,166 @@ IE_TEST(Match_BotDifficultyOrdering)
 	const int Hard = Landed(BotLevel::Hard);
 	std::printf("  info: bot hits on scripted player: easy=%d hard=%d\n", Easy, Hard);
 	IE_EXPECT(Hard > Easy);
+}
+
+namespace
+{
+	MatchSetup PassiveBotSetup()
+	{
+		MatchSetup Setup = ShortSetup();
+		Setup.Bot.AttackIntervalMinTicks = 1000000;
+		Setup.Bot.AttackIntervalMaxTicks = 1000000;
+		Setup.Bot.BlockChance = 0.0f;
+		Setup.Bot.DodgeChance = 0.0f;
+		Setup.Bot.GuardUpChance = 0.0f;
+		Setup.Bot.GuardAfterHitChance = 0.0f;
+		return Setup;
+	}
+}
+
+IE_TEST(Match_PlayerBeatsCountByHoldingGuard)
+{
+	MatchSetup Setup = PassiveBotSetup();
+	Setup.PlayerFighter.MaxHealth = 4.0f;
+	Setup.Bot.AttackIntervalMinTicks = SecondsToTicks(0.3); // aggressive bot knocks the idle player down
+	Setup.Bot.AttackIntervalMaxTicks = SecondsToTicks(0.3);
+	Runner R(Setup);
+	R.RunUntil(MatchPhase::Fighting, SecondsToTicks(5.0));
+	R.RunUntil(MatchPhase::Knockdown, SecondsToTicks(5.0));
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Knockdown);
+	IE_EXPECT(R.M.Sim().Get(FighterSlot::Player).IsKnockedDown());
+
+	FighterIntent Guard;
+	Guard.bBlock = true;
+	R.Tick(true, Guard);
+	for (int32_t Index = 0; Index < SecondsToTicks(1.5); ++Index)
+	{
+		R.Tick(true, Guard); // too early: the count must reach the minimum down time first
+	}
+	IE_EXPECT(R.M.Sim().Get(FighterSlot::Player).IsKnockedDown());
+	IE_EXPECT_EQ(R.M.Snapshot().GetUpProgress, 100);
+	for (int32_t Index = 0; Index < SecondsToTicks(1.0); ++Index)
+	{
+		R.Tick(true, Guard);
+	}
+	IE_EXPECT(!R.M.Sim().Get(FighterSlot::Player).IsKnockedDown());
+	IE_EXPECT_NEAR(R.M.Sim().Get(FighterSlot::Player).Snapshot().Health, 4.0 * 0.40, 1e-4);
+	IE_EXPECT_NEAR(R.M.Sim().Gap(), R.M.Setup().Movement.EngageDistance, 1e-4);
+	R.RunUntil(MatchPhase::Fighting, SecondsToTicks(2.0));
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Fighting);
+	IE_EXPECT_EQ(R.Count(MatchEventType::RoundStarted), 1);
+}
+
+IE_TEST(Match_ReleasingGuardResetsGetUp)
+{
+	MatchSetup Setup = PassiveBotSetup();
+	Setup.PlayerFighter.MaxHealth = 4.0f;
+	Setup.Bot.AttackIntervalMinTicks = SecondsToTicks(0.3);
+	Setup.Bot.AttackIntervalMaxTicks = SecondsToTicks(0.3);
+	Runner R(Setup);
+	R.RunUntil(MatchPhase::Knockdown, SecondsToTicks(10.0));
+	FighterIntent Guard;
+	Guard.bBlock = true;
+	for (int32_t Index = 0; Index < SecondsToTicks(10.5); ++Index)
+	{
+		// Guard flickers every 1.0 s: never held long enough.
+		R.Tick(true, (Index / SecondsToTicks(1.0)) % 2 == 0 ? Guard : FighterIntent{});
+	}
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::MatchOver);
+	IE_EXPECT(R.M.Snapshot().Result == ResultMethod::KnockOut);
+	IE_EXPECT(R.M.Snapshot().Winner == FighterSlot::Opponent);
+}
+
+IE_TEST(Match_ThirdKnockdownInRoundIsTechnicalKnockOut)
+{
+	MatchSetup Setup = PassiveBotSetup();
+	Setup.OpponentFighter.MaxHealth = 9.0f;
+	Setup.Bot.GetUpChance[0] = Setup.Bot.GetUpChance[1] = Setup.Bot.GetUpChance[2] = 1.0f;
+	Setup.Bot.GetUpCountMin = Setup.Bot.GetUpCountMax = 3;
+	Runner R(Setup);
+	R.RunUntil(MatchPhase::Fighting, SecondsToTicks(5.0));
+	int32_t Tick = 0;
+	for (; Tick < SecondsToTicks(60.0) && R.M.Snapshot().Phase != MatchPhase::MatchOver; ++Tick)
+	{
+		FighterIntent Intent;
+		if (R.M.Snapshot().Phase == MatchPhase::Fighting && Tick % 60 == 0)
+		{
+			Intent.AddPunch(Hand::Right);
+		}
+		R.Tick(true, Intent);
+	}
+	const MatchSnapshot& S = R.M.Snapshot();
+	IE_EXPECT(S.Result == ResultMethod::TechnicalKnockOut);
+	IE_EXPECT(S.bHasWinner && S.Winner == FighterSlot::Player);
+	IE_EXPECT_EQ(R.M.Sim().Get(FighterSlot::Opponent).Snapshot().KnockdownsSuffered, 3);
+	IE_EXPECT_EQ(S.Round, 1);
+	int GotUp = 0;
+	for (const CombatEvent& Event : R.CombatLog)
+	{
+		GotUp += Event.Type == CombatEventType::GotUp ? 1 : 0;
+	}
+	IE_EXPECT_EQ(GotUp, 2);
+}
+
+IE_TEST(Match_TrackingLossDuringCountPausesAndResumesCount)
+{
+	MatchSetup Setup = PassiveBotSetup();
+	Setup.OpponentFighter.MaxHealth = 9.0f;
+	Setup.Bot.GetUpChance[0] = 0.0f;
+	Runner R(Setup);
+	R.RunUntil(MatchPhase::Fighting, SecondsToTicks(5.0));
+	FighterIntent Cross;
+	Cross.AddPunch(Hand::Right);
+	R.Tick(true, Cross);
+	R.RunUntil(MatchPhase::Knockdown, 60);
+	R.Run(SecondsToTicks(3.0));
+	const int32_t CountBefore = R.M.Snapshot().KnockdownCount;
+	R.Run(SecondsToTicks(2.0), false);
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Paused);
+	IE_EXPECT(R.M.Snapshot().KnockdownCount <= CountBefore + 1);
+	R.Run(SecondsToTicks(1.2), true);
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Knockdown);
+	R.RunUntil(MatchPhase::MatchOver, SecondsToTicks(10.0));
+	IE_EXPECT(R.M.Snapshot().Result == ResultMethod::KnockOut);
+}
+
+IE_TEST(Judges_ScoreRoundWithStylesAndKnockdowns)
+{
+	MatchConfig Rules;
+	RoundTally Player{20.0f, 4, 0, 0};
+	RoundTally Opponent{19.5f, 8, 6, 0};
+	int32_t Points[kJudgeCount][2] = {};
+	Match::ScoreRound(Rules, Player, Opponent, Points);
+	IE_EXPECT(Points[0][0] == 10 && Points[0][1] == 10); // neutral judge: damage within the margin
+	IE_EXPECT(Points[1][0] == 9 && Points[1][1] == 10);  // volume judge: more punches landed
+	IE_EXPECT(Points[2][0] == 9 && Points[2][1] == 10);  // defence judge: more blocks/slips
+
+	RoundTally Dominant{40.0f, 10, 2, 0};
+	RoundTally Dropped{5.0f, 1, 0, 1};
+	Match::ScoreRound(Rules, Dominant, Dropped, Points);
+	for (int32_t Judge = 0; Judge < kJudgeCount; ++Judge)
+	{
+		IE_EXPECT(Points[Judge][0] == 10 && Points[Judge][1] == 8); // 10-8 knockdown round
+	}
+	RoundTally Wrecked{0.0f, 0, 0, 5};
+	Match::ScoreRound(Rules, Dominant, Wrecked, Points);
+	IE_EXPECT_EQ(Points[0][1], Rules.MinPointsPerRound);
+}
+
+IE_TEST(Judges_DecisionKinds)
+{
+	bool bWinner = false;
+	FighterSlot Winner = FighterSlot::Opponent;
+	const int32_t Unanimous[3][2] = {{30, 27}, {29, 28}, {29, 28}};
+	IE_EXPECT(Match::DecideCards(Unanimous, bWinner, Winner) == DecisionKind::Unanimous && bWinner && Winner == FighterSlot::Player);
+	const int32_t Split[3][2] = {{29, 28}, {28, 29}, {29, 28}};
+	IE_EXPECT(Match::DecideCards(Split, bWinner, Winner) == DecisionKind::Split && bWinner && Winner == FighterSlot::Player);
+	const int32_t Majority[3][2] = {{28, 29}, {28, 28}, {27, 30}};
+	IE_EXPECT(Match::DecideCards(Majority, bWinner, Winner) == DecisionKind::Majority && bWinner && Winner == FighterSlot::Opponent);
+	const int32_t SplitDraw[3][2] = {{29, 28}, {28, 29}, {28, 28}};
+	IE_EXPECT(Match::DecideCards(SplitDraw, bWinner, Winner) == DecisionKind::Split && !bWinner);
+	const int32_t UnanimousDraw[3][2] = {{28, 28}, {28, 28}, {28, 28}};
+	IE_EXPECT(Match::DecideCards(UnanimousDraw, bWinner, Winner) == DecisionKind::Unanimous && !bWinner);
+	const int32_t MajorityDraw[3][2] = {{29, 28}, {28, 28}, {28, 28}};
+	IE_EXPECT(Match::DecideCards(MajorityDraw, bWinner, Winner) == DecisionKind::Majority && !bWinner);
 }

@@ -30,6 +30,16 @@ namespace IronEchoCore
 		LastHealth = -1.0f;
 	}
 
+	int32_t BotBrain::DecideGetUpCount(int32_t KnockdownNumber)
+	{
+		const int32_t Index = Clamp(KnockdownNumber - 1, 0, 2);
+		if (!Rng.Chance(Config.GetUpChance[Index]))
+		{
+			return -1;
+		}
+		return Rng.RangeInclusive(Config.GetUpCountMin, Config.GetUpCountMax);
+	}
+
 	FighterIntent BotBrain::Think(const CombatSim& Sim, int32_t Tick)
 	{
 		FighterIntent Intent;

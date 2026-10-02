@@ -273,10 +273,11 @@ IE_TEST(Fighter_StaminaSpendRegenAndTiredPunch)
 	IE_EXPECT(H.P().Stamina > 0.0f);
 }
 
-IE_TEST(Fighter_KnockOut)
+IE_TEST(Fighter_KnockOutWhenKnockdownsDisabled)
 {
 	FighterConfig Glass = MakeDefaultFighterConfig();
 	Glass.MaxHealth = 4.0f;
+	Glass.bKnockdowns = false;
 	Harness H(MakeDefaultFighterConfig(), Glass);
 	H.Step(PunchIntentFor(Hand::Left), Idle());
 	H.Run(30);
@@ -325,4 +326,76 @@ IE_TEST(Movement_RetreatOpensDistanceTemporarily)
 	IE_EXPECT(H.Sim.Gap() > MakeDefaultFighterConfig().Attacks[1].ReachMeters);
 	H.Run(kTickRate * 3);
 	IE_EXPECT_NEAR(H.Sim.Gap(), MovementConfig().EngageDistance, 0.03);
+}
+
+IE_TEST(Fighter_KnockdownAndGetUpRecovery)
+{
+	FighterConfig Glass = MakeDefaultFighterConfig();
+	Glass.MaxHealth = 4.0f;
+	Harness H(MakeDefaultFighterConfig(), Glass);
+	H.Step(PunchIntentFor(Hand::Left), Idle());
+	H.Run(30);
+	IE_EXPECT(H.O().State == ActionState::KnockedDown);
+	IE_EXPECT_EQ(H.Count(CombatEventType::KnockedDown, FighterSlot::Opponent), 1);
+	IE_EXPECT_EQ(H.O().KnockdownsSuffered, 1);
+	IE_EXPECT_EQ(H.O().RoundKnockdownsSuffered, 1);
+	// A downed fighter cannot be hit again.
+	H.Step(PunchIntentFor(Hand::Right), Idle());
+	H.Run(40);
+	IE_EXPECT_EQ(H.Count(CombatEventType::HitConfirmed, FighterSlot::Player), 1);
+
+	CombatEventBuffer Events;
+	H.Sim.Mutable(FighterSlot::Opponent).GetUp(500, Events);
+	IE_EXPECT(H.O().State == ActionState::Guard);
+	IE_EXPECT_NEAR(H.O().Health, 4.0 * 0.40, 1e-4);
+	IE_EXPECT_NEAR(H.O().Stamina, H.O().MaxStamina * 0.5, 1e-4);
+	IE_EXPECT_EQ(Events.Num(), 1);
+	IE_EXPECT(Events[0].Type == CombatEventType::GotUp);
+}
+
+IE_TEST(Fighter_ComboCountsConsecutiveCleanHits)
+{
+	Harness H;
+	const AttackSpec Jab = MakeDefaultFighterConfig().Attacks[0];
+	H.Step(PunchIntentFor(Hand::Left), Idle());
+	H.Run(Jab.WindupTicks + Jab.ActiveTicks);
+	H.Step(PunchIntentFor(Hand::Right), Idle()); // 1-2 combo cancel
+	H.Run(60);
+	std::vector<int32_t> Combos;
+	for (const CombatEvent& Event : H.Log)
+	{
+		if (Event.Type == CombatEventType::HitConfirmed && Event.Actor == FighterSlot::Player)
+		{
+			Combos.push_back(Event.ComboCount);
+		}
+	}
+	IE_EXPECT_EQ(Combos.size(), 2u);
+	IE_EXPECT(Combos.size() == 2 && Combos[0] == 1 && Combos[1] == 2);
+	IE_EXPECT_EQ(H.P().MaxCombo, 2);
+	H.Run(kTickRate * 2); // outside the combo window
+	H.Step(PunchIntentFor(Hand::Left), Idle());
+	H.Run(30);
+	int32_t LastCombo = 0;
+	for (const CombatEvent& Event : H.Log)
+	{
+		if (Event.Type == CombatEventType::HitConfirmed && Event.Actor == FighterSlot::Player)
+		{
+			LastCombo = Event.ComboCount;
+		}
+	}
+	IE_EXPECT_EQ(LastCombo, 1);
+}
+
+IE_TEST(Fighter_DefenseStatsCountBlocksAndDodges)
+{
+	Harness H;
+	H.Run(2, Idle(), BlockIntent());
+	H.Step(PunchIntentFor(Hand::Left), BlockIntent());
+	H.Run(60, Idle(), BlockIntent());
+	H.Run(10);
+	H.Step(PunchIntentFor(Hand::Right), DodgeIntent(DodgeDir::Left));
+	H.Run(40, Idle(), DodgeIntent(DodgeDir::Left));
+	IE_EXPECT_EQ(H.O().BlocksMade, 1);
+	IE_EXPECT_EQ(H.O().DodgesMade, 1);
+	IE_EXPECT_EQ(H.O().RoundDefenses, 2);
 }

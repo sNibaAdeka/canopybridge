@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Версия | **1.0** (`IRONECHO_VISUAL_CONTRACT_VERSION = 1`, поле `SchemaVersion` в структурах) |
+| Версия | **1.1** (`IRONECHO_VISUAL_CONTRACT_VERSION = 1`, `IRONECHO_VISUAL_CONTRACT_MINOR = 1`; поля `SchemaVersion`/`SchemaMinor`) |
 | Писатель | Claude (Codex запрашивает изменения через `Docs/Handoffs` или берёт блокировку в `LOCKS.md`) |
 | Читатель | Codex |
 | C++ API | `Source/IronEcho/Public/`: `IronEchoTypes.h`, `IronEchoVisualConfig.h`, `IronEchoRobotAnimInstance.h`, `IronEchoGameState.h`, `IronEchoGameMode.h`, `IronEchoFighter.h`, `IronEchoRingAnchor.h`, `IronEchoPunchingBag.h` |
@@ -71,7 +71,7 @@ clavicle_r, upperarm_r, lowerarm_r, hand_r, thigh_l, calf_l, foot_l, thigh_r, ca
 | Поле | Смысл |
 |---|---|
 | `Role`, `MatchPhase` | игрок/соперник; фаза матча (для idle, празднования, поражения) |
-| `ActionState` | Guard, Attack, Block, HitStun, BlockStun, KnockedOut |
+| `ActionState` | Guard, Attack, Block, HitStun, BlockStun, KnockedOut, **KnockedDown** (1.1) |
 | `AttackStage`, `AttackHand` | None/Windup/Active/Recovery; рука |
 | `AttackStageAlpha` | 0→1 внутри текущей стадии — **единственный источник времени удара** |
 | `AttackStageDuration` | длительность стадии, с (уже с учётом усталости/промаха) |
@@ -82,6 +82,8 @@ clavicle_r, upperarm_r, lowerarm_r, hand_r, thigh_l, calf_l, foot_l, thigh_r, ca
 | `LeanLateral`, `LeanForward` | непрерывное повторение корпуса игрока (−1..1); у бота уклон ±0.8 |
 | `HandTargetLeft/Right`, `HandTrackingAlphaLeft/Right` | цели кистей в длинах руки и вес следования |
 | `Health01`, `Stamina01`, `bKnockedOut` | |
+| `bKnockedDown`, `KnockdownsSuffered` (1.1) | на настиле во время счёта; число нокдаунов в бою |
+| `ComboCount` (1.1) | текущая серия чистых попаданий этого бойца |
 | `DistanceToOpponent` | см, для IK дотягивания |
 | `LastHitTakenTime`, `LastHitTakenFromHand`, `HitsTaken`, `LastBlockTime` | реакции: изменение времени = новое событие |
 
@@ -97,6 +99,8 @@ clavicle_r, upperarm_r, lowerarm_r, hand_r, thigh_l, calf_l, foot_l, thigh_r, ca
 3. Стойка игрока: при `HandTrackingAlpha* = 1` кисти следуют `HandIKTarget*` (Two Bone IK или аналог),
    корпус — `LeanLateral/LeanForward`. Во время своего удара, стана и KO вес 0.
 4. Реакции на попадание/блок — по изменению `LastHitTakenTime` / `LastBlockTime` (или событиям §7).
+6. (1.1) Нокдаун: при `bKnockedDown` — падение и поза на настиле, по событию `GotUp` — подъём (≈1 с, столько длится
+   «бокс!»-пауза `ResumeIn`). Нокаут (`bKnockedOut`) — финальное падение без подъёма.
 5. Без root motion; позицию по линии задаёт геймплей.
 
 ## 6. Данные HUD
@@ -105,11 +109,17 @@ clavicle_r, upperarm_r, lowerarm_r, hand_r, thigh_l, calf_l, foot_l, thigh_r, ca
 `Mode` (Bout/Training), `BotLevel`, `Phase`, `ResumePhase`, `PauseReason` (Manual/TrackingLost), `Round`, `Rounds`,
 `RoundTimeRemaining`, `CountdownRemaining`, `BreakRemaining`, `ScorePlayer`, `ScoreOpponent`, `Result`
 (KnockOut/Decision/Draw), `bHasWinner`, `Winner`, `TrainingHits`, `Player`/`Opponent` (`Health`, `MaxHealth`,
-`Stamina`, `MaxStamina`, `ActionState`, `PunchesThrown`, `PunchesLanded`, `DodgesMade`) и `Tracking`
+`Stamina`, `MaxStamina`, `ActionState`, `PunchesThrown`, `PunchesLanded`, `DodgesMade`, 1.1: `BlocksMade`, `CounterHits`,
+`ComboCount`, `MaxCombo`, `KnockdownsSuffered`, `bKnockedDown`) и `Tracking`
 (`InputSource`, `Status`, `CalibrationStep`, `CalibrationProgress`, `CalibrationFailure`, `bMirrorApplied`, `LastError`,
 `bTrackerProcessRunning`, `CameraFps`, `InferenceMs`, `PipelineLatencyMs`, разрешение, модель, счётчики пакетов).
 
-Тексты калибровки и статусов — `INPUT_CONTRACT.md` §4 и §8 (RU/EN). Обязательно показывать: шаг калибровки с прогрессом,
+1.1: `Decision` (Unanimous/Split/Majority), `JudgeScoresPlayer[3]` / `JudgeScoresOpponent[3]` (судья 1 нейтральный — по урону,
+2 — за объём попаданий, 3 — за защиту), `KnockdownCount` (0..10), `GetUpProgress` (0..100 — игрок держит защиту, чтобы встать),
+`ResumeIn` (с до продолжения после подъёма).
+
+Тексты калибровки и статусов — `INPUT_CONTRACT.md` §4 и §8 (RU/EN). Нокдаун игрока: «Поднимите руки в защиту и держите,
+чтобы встать» / «Raise and hold your guard to get up». Обязательно показывать: шаг калибровки с прогрессом,
 причину паузы (особенно «Встаньте в кадр»), отсчёт, раунд/время/счёт, итог и подсказку реванша.
 
 ## 7. События
@@ -125,10 +135,14 @@ clavicle_r, upperarm_r, lowerarm_r, hand_r, thigh_l, calf_l, foot_l, thigh_r, ca
 | KnockedOut | нокаут | финальная камера |
 | StaminaExhausted | выносливость 0 | индикатор усталости |
 | BlockStarted/Ended, DodgeStarted/Ended | начало/конец защиты | |
+| **KnockedDown** (1.1) | здоровье 0 → нокдаун (`KnockdownNumber`) | падение, замедление, «вспышка» |
+| **GotUp** (1.1) | встал до счёта 10 | подъём, реакция зала |
 | InputDropped | буферизованный удар истёк | (по желанию) |
 
 `OnMatchEvent(FIronEchoMatchEvent)`: `PhaseChanged`, `RoundStarted`, `RoundEnded` (счёт, победитель раунда),
-`MatchEnded` (Method, Winner), `Paused` (Reason), `Resumed`, `CountdownTick` (3, 2, 1).
+`MatchEnded` (Method: KnockOut / TechnicalKnockOut / Decision / Draw; Winner; Decision), `Paused` (Reason), `Resumed`,
+`CountdownTick` (3, 2, 1), **`KnockdownCount`** (1.1: `CountdownSeconds` = 1..10, `Downed` = кто на настиле).
+`HitConfirmed` несёт `ComboCount` (1 = одиночный, 2+ = серия) — для «3-HIT COMBO» и нарастающих эффектов.
 В тренировке `HitConfirmed` по груше приходит с `Target = Opponent`, `ImpactLocation` = точка груши.
 
 ## 8. Команды для меню и камера
@@ -183,3 +197,4 @@ GameMode (BlueprintCallable): `StartBout(BotLevel)`, `StartTraining()`, `ToggleP
 | Версия | Дата | Изменение |
 |---|---|---|
 | 1.0 | 2026-10-02 | Первая версия |
+| 1.1 | 2026-10-02 | Нокдауны и счёт (ActionState KnockedDown, Phase Knockdown, события KnockedDown/GotUp/KnockdownCount), TKO, три судьи и тип решения, комбо и расширенная статистика. Только добавления в конец перечислений — совместимо с 1.0 |

@@ -53,15 +53,36 @@ namespace IronEchoCore
 		bool bHasWinner = false;
 		FighterSlot Winner = FighterSlot::Player;
 		int32_t TrainingHits = 0;
+		// Judges' cumulative cards: JudgeScores[judge][0] = player, [1] = opponent. Judge 1 = ScorePlayer/ScoreOpponent.
+		int32_t JudgeScores[kJudgeCount][2] = {};
+		DecisionKind Decision = DecisionKind::None;
+		// Referee count (phase Knockdown).
+		int32_t KnockdownCount = 0;        // 0..CountTo
+		int32_t GetUpProgress = 0;         // player's "hold the guard" progress, 0..100
+		int32_t PostGetUpTicksLeft = 0;    // > 0: everyone is up, fight resumes when it reaches 0
 		int32_t Tick = 0;              // match clock, advances every Tick() call
 		int32_t SimTick = 0;           // advances only when the fight simulation steps
 		uint64_t Seed = 0;
+	};
+
+	// Per-fighter round numbers the judges look at.
+	struct RoundTally
+	{
+		float Damage = 0.0f;
+		int32_t Landed = 0;
+		int32_t Defenses = 0;
+		int32_t KnockdownsSuffered = 0;
 	};
 
 	class Match
 	{
 	public:
 		explicit Match(const MatchSetup& InSetup);
+
+		// 10-point-must scoring of one round by each judge: OutPoints[judge][0] player, [1] opponent.
+		static void ScoreRound(const MatchConfig& Rules, const RoundTally& Player, const RoundTally& Opponent, int32_t OutPoints[kJudgeCount][2]);
+		// Verdict from the judges' totals; returns the kind (Unanimous / Split / Majority) and the winner if any.
+		static DecisionKind DecideCards(const int32_t Totals[kJudgeCount][2], bool& bOutHasWinner, FighterSlot& OutWinner);
 
 		void Restart(MatchMode Mode, uint64_t Seed);
 
@@ -83,6 +104,8 @@ namespace IronEchoCore
 		void Resume(MatchEventBuffer& Events);
 		void StepFight(const MatchInput& Input, bool bTraining, CombatEventBuffer& CombatEvents, MatchEventBuffer& MatchEvents);
 		void EndRound(MatchEventBuffer& Events);
+		void BeginKnockdown(MatchEventBuffer& Events);
+		void StepKnockdown(const MatchInput& Input, CombatEventBuffer& CombatEvents, MatchEventBuffer& MatchEvents);
 		void FinishMatch(ResultMethod Method, bool bHasWinner, FighterSlot Winner, MatchEventBuffer& Events);
 		MatchEvent MakeEvent(MatchEventType Type) const;
 		static CombatSim MakeSim(const MatchSetup& Setup, MatchMode Mode);
@@ -97,6 +120,9 @@ namespace IronEchoCore
 		int32_t ReadyTicks = 0;
 		int32_t NotReadyTicks = 0;
 		int32_t LastCountdownSecond = 0;
+		int32_t CountTicks = 0;
+		int32_t BotGetUpCount = -1;
+		int32_t PlayerGuardHeldTicks = 0;
 
 		bool bPauseRequested = false;
 		bool bResumeRequested = false;

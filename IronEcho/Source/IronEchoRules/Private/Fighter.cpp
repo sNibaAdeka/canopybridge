@@ -15,6 +15,7 @@ namespace IronEchoCore
 		case ActionState::HitStun: return "HitStun";
 		case ActionState::BlockStun: return "BlockStun";
 		case ActionState::KnockedOut: return "KnockedOut";
+		case ActionState::KnockedDown: return "KnockedDown";
 		}
 		return "Unknown";
 	}
@@ -69,9 +70,59 @@ namespace IronEchoCore
 		Snap.bDodgeEffective = false;
 		Snap.LeanLateral = 0.0f;
 		Snap.Position = Position;
-		Snap.RoundDamageDealt = 0.0f;
+		ClearRoundStats();
+		Snap.ComboCount = 0;
 		bWantsBlock = false;
 		bHasBuffered = false;
+	}
+
+	void Fighter::ClearRoundStats()
+	{
+		Snap.RoundDamageDealt = 0.0f;
+		Snap.RoundPunchesLanded = 0;
+		Snap.RoundDefenses = 0;
+		Snap.RoundKnockdownsSuffered = 0;
+	}
+
+	void Fighter::NoteDodge()
+	{
+		++Snap.DodgesMade;
+		++Snap.RoundDefenses;
+	}
+
+	void Fighter::GetUp(int32_t Tick, CombatEventBuffer& Events)
+	{
+		if (Snap.State != ActionState::KnockedDown)
+		{
+			return;
+		}
+		float Fraction = Config.KnockdownRecoverHealth;
+		for (int32_t Index = 1; Index < Snap.KnockdownsSuffered; ++Index)
+		{
+			Fraction *= Config.KnockdownRecoverDecay;
+		}
+		Snap.Health = Clamp(Config.MaxHealth * Fraction, 1.0f, Config.MaxHealth);
+		Snap.Stamina = Clamp(Config.MaxStamina * Config.GetUpStamina, 0.0f, Config.MaxStamina);
+		Snap.State = ActionState::Guard;
+		Snap.StateTicksLeft = 0;
+		bWantsBlock = false;
+		bHasBuffered = false;
+		CombatEvent Event = MakeEvent(CombatEventType::GotUp, Tick);
+		Event.KnockdownNumber = Snap.KnockdownsSuffered;
+		Events.Push(Event);
+	}
+
+	void Fighter::ForceKnockOut(int32_t Tick, CombatEventBuffer& Events)
+	{
+		if (Snap.State == ActionState::KnockedOut)
+		{
+			return;
+		}
+		Snap.State = ActionState::KnockedOut;
+		Snap.Health = 0.0f;
+		Snap.Dodge = DodgeDir::None;
+		Snap.bDodgeEffective = false;
+		Events.Push(MakeEvent(CombatEventType::KnockedOut, Tick));
 	}
 
 	CombatEvent Fighter::MakeEvent(CombatEventType Type, int32_t Tick) const
@@ -106,7 +157,7 @@ namespace IronEchoCore
 	void Fighter::AdvanceTimers(int32_t Tick, CombatEventBuffer& Events)
 	{
 		CurrentTick = Tick;
-		if (Snap.State == ActionState::KnockedOut)
+		if (Snap.State == ActionState::KnockedOut || Snap.State == ActionState::KnockedDown)
 		{
 			return;
 		}
@@ -201,6 +252,7 @@ namespace IronEchoCore
 		case ActionState::HitStun:
 		case ActionState::BlockStun:
 		case ActionState::KnockedOut:
+		case ActionState::KnockedDown:
 			return false;
 		}
 		return false;
@@ -242,7 +294,7 @@ namespace IronEchoCore
 	void Fighter::ApplyIntent(const FighterIntent& Intent, int32_t Tick, CombatEventBuffer& Events)
 	{
 		CurrentTick = Tick;
-		if (Snap.State == ActionState::KnockedOut || Config.bPassive)
+		if (Snap.State == ActionState::KnockedOut || Snap.State == ActionState::KnockedDown || Config.bPassive)
 		{
 			Snap.LeanLateral = 0.0f;
 			return;
@@ -365,7 +417,7 @@ namespace IronEchoCore
 		return Damage;
 	}
 
-	void Fighter::OnAttackResolved(AttackOutcome Outcome, float DamageDealt)
+	void Fighter::OnAttackResolved(AttackOutcome Outcome, float DamageDealt, bool bCounter, int32_t Tick)
 	{
 		Snap.bAttackResolved = true;
 		LastOutcome = Outcome;
@@ -374,6 +426,19 @@ namespace IronEchoCore
 		if (Outcome == AttackOutcome::Hit || Outcome == AttackOutcome::GuardBroken)
 		{
 			++Snap.PunchesLanded;
+			++Snap.RoundPunchesLanded;
+			if (bCounter)
+			{
+				++Snap.CounterHits;
+			}
+			// A combo continues while clean hits keep landing inside the window and this fighter is not hit back
+			// (ReceiveHit resets ComboCount).
+			Snap.ComboCount = (Snap.ComboCount > 0 && Tick - LastLandedTick <= Config.ComboWindowTicks) ? Snap.ComboCount + 1 : 1;
+			LastLandedTick = Tick;
+			if (Snap.ComboCount > Snap.MaxCombo)
+			{
+				Snap.MaxCombo = Snap.ComboCount;
+			}
 		}
 		else if (Outcome == AttackOutcome::Blocked)
 		{
@@ -404,13 +469,26 @@ namespace IronEchoCore
 		Snap.StageTicksLeft = 0;
 		Snap.StageTicksTotal = 0;
 		bHasBuffered = false;
+		Snap.ComboCount = 0;
 
 		if (!Config.bInvulnerable && Snap.Health <= 0.0f)
 		{
-			Snap.State = ActionState::KnockedOut;
 			Snap.Dodge = DodgeDir::None;
 			Snap.bDodgeEffective = false;
-			Events.Push(MakeEvent(CombatEventType::KnockedOut, Tick));
+			if (Config.bKnockdowns)
+			{
+				Snap.State = ActionState::KnockedDown;
+				++Snap.KnockdownsSuffered;
+				++Snap.RoundKnockdownsSuffered;
+				CombatEvent Down = MakeEvent(CombatEventType::KnockedDown, Tick);
+				Down.KnockdownNumber = Snap.KnockdownsSuffered;
+				Events.Push(Down);
+			}
+			else
+			{
+				Snap.State = ActionState::KnockedOut;
+				Events.Push(MakeEvent(CombatEventType::KnockedOut, Tick));
+			}
 			return Applied;
 		}
 		if (Config.bPassive)
@@ -442,6 +520,8 @@ namespace IronEchoCore
 		}
 		Snap.Stamina = Clamp(Snap.Stamina - Config.BlockStaminaCost, 0.0f, Config.MaxStamina);
 		LastStaminaSpendTick = Tick;
+		++Snap.BlocksMade;
+		++Snap.RoundDefenses;
 		if (!Config.bPassive)
 		{
 			Snap.State = ActionState::BlockStun;

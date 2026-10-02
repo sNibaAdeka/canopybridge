@@ -25,6 +25,13 @@ namespace IronEchoCore
 		Fighters[1].ResetForRound(Half, HealthRecoveryFraction);
 	}
 
+	void CombatSim::ResetPositions()
+	{
+		const float Half = MovementCfg.EngageDistance * 0.5f;
+		Fighters[0].SetPosition(-Half);
+		Fighters[1].SetPosition(Half);
+	}
+
 	float CombatSim::Gap() const
 	{
 		return Fighters[1].Snapshot().Position - Fighters[0].Snapshot().Position;
@@ -49,7 +56,7 @@ namespace IronEchoCore
 	CombatSim::PendingOutcome CombatSim::Evaluate(const Fighter& Attacker, const Fighter& Defender) const
 	{
 		PendingOutcome Result;
-		if (!Attacker.HasPendingActiveAttack() || Attacker.IsKnockedOut() || Defender.IsKnockedOut())
+		if (!Attacker.HasPendingActiveAttack() || Attacker.IsDown() || Defender.IsDown())
 		{
 			return Result;
 		}
@@ -130,7 +137,8 @@ namespace IronEchoCore
 			return;
 		}
 
-		Attacker.OnAttackResolved(Result.Outcome, Applied);
+		Attacker.OnAttackResolved(Result.Outcome, Applied, Result.bCounter, Tick);
+		Event.ComboCount = (Event.Type == CombatEventType::HitConfirmed) ? Attacker.Snapshot().ComboCount : 0;
 		Event.Damage = Applied;
 		Event.TargetHealthAfter = Defender.Snapshot().Health;
 		Event.TargetStaminaAfter = Defender.Snapshot().Stamina;
@@ -150,8 +158,8 @@ namespace IronEchoCore
 		const float Dt = static_cast<float>(kTickSeconds);
 		Fighter& PlayerF = Fighters[0];
 		Fighter& OpponentF = Fighters[1];
-		const bool bOpponentMobile = !OpponentF.GetConfig().bPassive && !OpponentF.IsKnockedOut();
-		const bool bPlayerMobile = !PlayerF.IsKnockedOut();
+		const bool bOpponentMobile = !OpponentF.GetConfig().bPassive && !OpponentF.IsDown();
+		const bool bPlayerMobile = !PlayerF.IsDown();
 
 		// Opponent: step back when asked, otherwise close in to the engage distance.
 		if (bOpponentMobile)

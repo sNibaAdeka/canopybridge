@@ -8,6 +8,7 @@
 #include "IronEchoTypes.generated.h"
 
 #define IRONECHO_VISUAL_CONTRACT_VERSION 1
+#define IRONECHO_VISUAL_CONTRACT_MINOR 1
 
 IRONECHO_API DECLARE_LOG_CATEGORY_EXTERN(LogIronEcho, Log, All);
 
@@ -33,7 +34,8 @@ enum class EIronEchoActionState : uint8
 	Block,
 	HitStun,
 	BlockStun,
-	KnockedOut
+	KnockedOut,
+	KnockedDown
 };
 
 UENUM(BlueprintType)
@@ -130,7 +132,8 @@ enum class EIronEchoMatchPhase : uint8
 	RoundBreak,
 	MatchOver,
 	Paused,
-	Training
+	Training,
+	Knockdown
 };
 
 UENUM(BlueprintType)
@@ -147,7 +150,17 @@ enum class EIronEchoResultMethod : uint8
 	None,
 	KnockOut,
 	Decision,
-	Draw
+	Draw,
+	TechnicalKnockOut
+};
+
+UENUM(BlueprintType)
+enum class EIronEchoDecisionKind : uint8
+{
+	None,
+	Unanimous,
+	Split,
+	Majority
 };
 
 UENUM(BlueprintType)
@@ -169,7 +182,9 @@ enum class EIronEchoCombatEventType : uint8
 	BlockEnded,
 	DodgeStarted,
 	DodgeEnded,
-	InputDropped
+	InputDropped,
+	KnockedDown,
+	GotUp
 };
 
 UENUM(BlueprintType)
@@ -181,7 +196,8 @@ enum class EIronEchoMatchEventType : uint8
 	MatchEnded,
 	Paused,
 	Resumed,
-	CountdownTick
+	CountdownTick,
+	KnockdownCount
 };
 
 /** Everything a robot's AnimBP / VFX needs each frame. Units: cm, seconds; body frame X fwd, Y right, Z up. */
@@ -226,6 +242,11 @@ struct IRONECHO_API FIronEchoFighterVisualState
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Stats") float Health01 = 1.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Stats") float Stamina01 = 1.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Stats") bool bKnockedOut = false;
+	/** Down for the referee count (1.1): play the knockdown / on-the-canvas pose; GotUp event ends it. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Stats") bool bKnockedDown = false;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Stats") int32 KnockdownsSuffered = 0;
+	/** Current run of clean hits by this fighter (1.1). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Stats") int32 ComboCount = 0;
 
 	/** Centre-to-centre distance to the opponent along the fight line, cm. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Space") float DistanceToOpponent = 135.0f;
@@ -250,6 +271,12 @@ struct IRONECHO_API FIronEchoFighterHud
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 PunchesThrown = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 PunchesLanded = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 DodgesMade = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 BlocksMade = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 CounterHits = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 ComboCount = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 MaxCombo = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 KnockdownsSuffered = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bKnockedDown = false;
 };
 
 USTRUCT(BlueprintType)
@@ -300,6 +327,18 @@ struct IRONECHO_API FIronEchoHudState
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bHasWinner = false;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") EIronEchoFighterRole Winner = EIronEchoFighterRole::Player;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 TrainingHits = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 SchemaMinor = IRONECHO_VISUAL_CONTRACT_MINOR;
+	/** Final verdict of the three judges (Decision / Draw). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") EIronEchoDecisionKind Decision = EIronEchoDecisionKind::None;
+	/** Judges' cumulative cards, index = judge (0 neutral, 1 volume, 2 defence). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") TArray<int32> JudgeScoresPlayer;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") TArray<int32> JudgeScoresOpponent;
+	/** Referee count 0..10 during Phase == Knockdown. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 KnockdownCount = 0;
+	/** Player down: progress 0..100 of "raise and hold the guard to get up". */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 GetUpProgress = 0;
+	/** Everyone is up; seconds until "box!". */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") float ResumeIn = 0.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") FIronEchoFighterHud Player;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") FIronEchoFighterHud Opponent;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") FIronEchoTrackingHud Tracking;
@@ -320,6 +359,10 @@ struct IRONECHO_API FIronEchoCombatEvent
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") float Damage = 0.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") float TargetHealthAfter = 0.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 AttackId = 0;
+	/** HitConfirmed: consecutive clean hits by Actor (1 = single). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 ComboCount = 0;
+	/** KnockedDown / GotUp: the Actor's knockdown number in this match. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 KnockdownNumber = 0;
 	/** HitConfirmed / Blocked / GuardBroken: world location of the contact (target's hit_head socket or fallback). */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") FVector ImpactLocation = FVector::ZeroVector;
 	/** Unit vector from attacker toward target along the fight line. */
@@ -343,6 +386,10 @@ struct IRONECHO_API FIronEchoMatchEvent
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 CountdownSeconds = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 ScorePlayer = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 ScoreOpponent = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") EIronEchoDecisionKind Decision = EIronEchoDecisionKind::None;
+	/** KnockdownCount: who is down (CountdownSeconds carries the count 1..10). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bHasDowned = false;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") EIronEchoFighterRole Downed = EIronEchoFighterRole::Player;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FIronEchoCombatEventSignature, const FIronEchoCombatEvent&, Event);

@@ -26,6 +26,8 @@ namespace IronEchoCore
 		DodgeStarted,
 		DodgeEnded,
 		InputDropped,       // buffered punch expired
+		KnockedDown,        // health reached 0: down for the count (1.1)
+		GotUp,              // beat the count (1.1)
 	};
 
 	const char* CombatEventName(CombatEventType Type);
@@ -43,6 +45,8 @@ namespace IronEchoCore
 		float TargetHealthAfter = 0.0f;
 		float TargetStaminaAfter = 0.0f;
 		uint32_t AttackId = 0;
+		int32_t ComboCount = 0;      // HitConfirmed: consecutive clean hits by Actor (1 = single hit)
+		int32_t KnockdownNumber = 0; // KnockedDown / GotUp: knockdowns suffered by Actor in this match
 		int32_t Tick = 0;
 	};
 
@@ -55,6 +59,7 @@ namespace IronEchoCore
 		MatchOver,
 		Paused,
 		Training,
+		Knockdown, // count in progress (1.1)
 	};
 
 	enum class PauseReason : uint8_t
@@ -70,7 +75,19 @@ namespace IronEchoCore
 		KnockOut,
 		Decision,
 		Draw,
+		TechnicalKnockOut, // third knockdown in one round (1.1)
 	};
+
+	// How the three judges agreed (decisions and draws on the cards).
+	enum class DecisionKind : uint8_t
+	{
+		None = 0,
+		Unanimous,
+		Split,
+		Majority,
+	};
+
+	inline constexpr int32_t kJudgeCount = 3;
 
 	enum class MatchEventType : uint8_t
 	{
@@ -81,6 +98,7 @@ namespace IronEchoCore
 		Paused,
 		Resumed,
 		CountdownTick,
+		KnockdownCount, // referee count: CountdownSeconds = 1..10, Downed = who is down (1.1)
 	};
 
 	const char* MatchPhaseName(MatchPhase Phase);
@@ -97,8 +115,11 @@ namespace IronEchoCore
 		FighterSlot Winner = FighterSlot::Player;
 		int32_t Round = 0;            // 1-based
 		int32_t CountdownSeconds = 0;
-		int32_t ScorePlayer = 0;      // cumulative 10-point-must totals
+		int32_t ScorePlayer = 0;      // cumulative 10-point-must totals of judge 1 (the neutral card)
 		int32_t ScoreOpponent = 0;
+		DecisionKind Decision = DecisionKind::None;
+		bool bHasDowned = false;
+		FighterSlot Downed = FighterSlot::Player;
 		int32_t Tick = 0;
 	};
 

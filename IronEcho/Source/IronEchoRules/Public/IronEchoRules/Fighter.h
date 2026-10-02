@@ -17,6 +17,7 @@ namespace IronEchoCore
 		HitStun,
 		BlockStun,
 		KnockedOut,
+		KnockedDown, // down for the count (1.1)
 	};
 
 	enum class AttackStage : uint8_t
@@ -59,6 +60,14 @@ namespace IronEchoCore
 		int32_t PunchesLanded = 0;
 		int32_t PunchesBlocked = 0;   // this fighter's punches that were blocked
 		int32_t DodgesMade = 0;
+		int32_t BlocksMade = 0;
+		int32_t CounterHits = 0;
+		int32_t ComboCount = 0;       // current run of clean hits
+		int32_t MaxCombo = 0;
+		int32_t KnockdownsSuffered = 0;     // match total
+		int32_t RoundKnockdownsSuffered = 0;
+		int32_t RoundPunchesLanded = 0;
+		int32_t RoundDefenses = 0;          // dodges + blocks this round
 
 		// Normalised progress of the current attack stage, 0 at stage start, 1 at stage end.
 		float StageAlpha() const
@@ -103,17 +112,23 @@ namespace IronEchoCore
 		bool IsBlocking() const { return Snap.bBlocking; }
 		bool IsWindingUp() const { return Snap.State == ActionState::Attack && Snap.Stage == AttackStage::Windup; }
 		bool IsKnockedOut() const { return Snap.State == ActionState::KnockedOut; }
+		bool IsKnockedDown() const { return Snap.State == ActionState::KnockedDown; }
+		bool IsDown() const { return IsKnockedOut() || IsKnockedDown(); }
 		bool CanAffordBlock() const { return Snap.Stamina >= Config.BlockStaminaCost; }
 		float CurrentAttackDamage(bool bCounter) const;
 
 		// Phase C: outcome application. Return the damage actually applied.
-		void OnAttackResolved(AttackOutcome Outcome, float DamageDealt);
+		void OnAttackResolved(AttackOutcome Outcome, float DamageDealt, bool bCounter, int32_t Tick);
 		float ReceiveHit(const AttackSpec& Spec, float Damage, int32_t Tick, CombatEventBuffer& Events, uint32_t AttackerAttackId);
 		float ReceiveBlockedHit(const AttackSpec& Spec, float Damage, int32_t Tick);
 
 		void SetPosition(float NewPosition) { Snap.Position = NewPosition; }
-		void ClearRoundStats() { Snap.RoundDamageDealt = 0.0f; }
-		void NoteDodge() { ++Snap.DodgesMade; }
+		void ClearRoundStats();
+		void NoteDodge();
+
+		// Knockdown resolution (driven by Match).
+		void GetUp(int32_t Tick, CombatEventBuffer& Events);
+		void ForceKnockOut(int32_t Tick, CombatEventBuffer& Events);
 
 		const FighterSnapshot& Snapshot() const { return Snap; }
 		const FighterConfig& GetConfig() const { return Config; }
@@ -136,5 +151,6 @@ namespace IronEchoCore
 		bool bHasBuffered = false;
 		PunchRequest Buffered;
 		int32_t BufferedExpiresTick = 0;
+		int32_t LastLandedTick = -1000000;
 	};
 }
