@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "root": "IronEcho/",
+  "note": "Единственный источник правды о владении файлами. AGENTS.md и CLAUDE.md содержат сгенерированную копию (python Tools/Build/ownership.py sync). Пути — от корня проекта IronEcho/. Срабатывает первое совпадение.",
+  "rules": [
+    {
+      "pattern": "Docs/Handoffs/*_claude-to-codex_*",
+      "owner": "claude",
+      "why": "исходящие передачи Claude"
+    },
+    {
+      "pattern": "Docs/Handoffs/*_codex-to-claude_*",
+      "owner": "codex",
+      "why": "исходящие передачи Codex"
+    },
+    {
+      "pattern": "Docs/Handoffs/LOCKS.md",
+      "owner": "shared-lock",
+      "why": "реестр блокировок; правь только свои строки"
+    },
+    {
+      "pattern": "Docs/Contracts/**",
+      "owner": "claude",
+      "why": "один писатель контрактов; Codex просит изменения через handoff или берёт блокировку"
+    },
+    {
+      "pattern": "Docs/Art/**",
+      "owner": "codex",
+      "why": "арт-направление, бюджеты, заметки по ассетам"
+    },
+    {
+      "pattern": "Content/Art/**",
+      "owner": "codex",
+      "why": "роботы, арена, материалы, VFX, камера, меню, виджеты HUD, DA_IronEchoVisuals"
+    },
+    {
+      "pattern": "Content/Tech/**",
+      "owner": "claude",
+      "why": "технический тестовый контент, создаётся скриптами"
+    },
+    {
+      "pattern": "Content/**",
+      "owner": "unassigned",
+      "why": "новые папки верхнего уровня — сначала решение о владельце"
+    },
+    {
+      "pattern": "ArtSource/**",
+      "owner": "codex",
+      "why": "исходники Blender, текстуры, референсы"
+    },
+    {
+      "pattern": "Tools/Blender/**",
+      "owner": "codex",
+      "why": "автоматизация Blender"
+    },
+    {
+      "pattern": "Tools/Unreal/Art/**",
+      "owner": "codex",
+      "why": "редакторский Python для импорта/настройки арта"
+    },
+    {
+      "pattern": "Plugins/IronEchoVisuals/**",
+      "owner": "codex",
+      "why": "согласованный визуальный плагин (C++/Blueprint-помощники для визуала)"
+    },
+    {
+      "pattern": "Tools/Unreal/Tech/**",
+      "owner": "claude",
+      "why": "редакторский Python для технических операций и пробников"
+    },
+    {
+      "pattern": "Tools/Build/**",
+      "owner": "claude",
+      "why": "сборка, упаковка, окружение, инструменты владения"
+    },
+    {
+      "pattern": "Tools/local.settings.example.json",
+      "owner": "claude",
+      "why": "шаблон локальных путей инструментов"
+    },
+    {
+      "pattern": "Tracking/**",
+      "owner": "claude",
+      "why": "процесс трекинга"
+    },
+    {
+      "pattern": "Tests/**",
+      "owner": "claude",
+      "why": "воспроизводимые технические тесты и golden-векторы"
+    },
+    {
+      "pattern": "Source/**",
+      "owner": "claude",
+      "why": "C++-модули геймплея и техники"
+    },
+    {
+      "pattern": "Config/**",
+      "owner": "claude",
+      "why": "конфиги движка/игры; настройки рендера Codex предлагает через handoff"
+    },
+    {
+      "pattern": "IronEcho.uproject",
+      "owner": "claude",
+      "why": "общий файл проекта"
+    },
+    {
+      "pattern": "Docs/**",
+      "owner": "claude",
+      "why": "техническая документация"
+    },
+    {
+      "pattern": "PROJECT_STATE.md",
+      "owner": "claude",
+      "why": "состояние проекта у интегратора; Codex сообщает через handoff"
+    },
+    {
+      "pattern": "AGENTS.md",
+      "owner": "claude",
+      "why": "генерируется из ownership.json"
+    },
+    {
+      "pattern": "CLAUDE.md",
+      "owner": "claude",
+      "why": "генерируется из ownership.json"
+    },
+    {
+      "pattern": "README.md",
+      "owner": "claude",
+      "why": "описание проекта"
+    },
+    {
+      "pattern": ".gitignore",
+      "owner": "claude",
+      "why": "гигиена репозитория"
+    },
+    {
+      "pattern": ".gitattributes",
+      "owner": "claude",
+      "why": "LFS и блокируемые бинарные файлы"
+    },
+    {
+      "pattern": "**",
+      "owner": "unassigned",
+      "why": "всё прочее: спросить до создания"
+    }
+  ]
+}

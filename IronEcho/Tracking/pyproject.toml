@@ -1,0 +1,13 @@
+[project]
+name = "iron-echo-tracker"
+version = "0.1.0"
+description = "IRON ECHO camera tracker process (MediaPipe pose -> local UDP game input)"
+requires-python = ">=3.12,<3.14"
+dependencies = ["mediapipe==1.0.1", "numpy==2.5.3", "opencv-contrib-python==5.0.0.93"]
+
+[project.scripts]
+IronEchoTracker = "iron_echo_tracker.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

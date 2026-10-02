@@ -1,0 +1,5 @@
+# Runtime of the tracker process (Windows x64 and Linux CI). Python 3.12.
+# Verified on 2026-10-02: wheels exist for win_amd64 (see Docs/Reports/2026-10-02_env_cloud_linux.md).
+mediapipe==1.0.1
+numpy==2.5.3
+opencv-contrib-python==5.0.0.93
