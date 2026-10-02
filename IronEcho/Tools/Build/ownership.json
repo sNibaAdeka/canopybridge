@@ -44,6 +44,16 @@
       "why": "новые папки верхнего уровня — сначала решение о владельце"
     },
     {
+      "pattern": "ArtSource/Realistic/**",
+      "owner": "claude",
+      "why": "реалистичные робот и ринг — поручено автором 2026-10-02 (Docs/Visual/REALISM_BRIEF.md)"
+    },
+    {
+      "pattern": "Tools/Blender/Realistic/**",
+      "owner": "claude",
+      "why": "генераторы реалистичных робота и ринга — поручено автором 2026-10-02"
+    },
+    {
       "pattern": "ArtSource/**",
       "owner": "codex",
       "why": "исходники Blender, текстуры, референсы"

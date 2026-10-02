@@ -59,6 +59,8 @@
 | `Content/Art/**` | Codex | роботы, арена, материалы, VFX, камера, меню, виджеты HUD, DA_IronEchoVisuals |
 | `Content/Tech/**` | Claude | технический тестовый контент, создаётся скриптами |
 | `Content/**` | не назначен — спросить | новые папки верхнего уровня — сначала решение о владельце |
+| `ArtSource/Realistic/**` | Claude | реалистичные робот и ринг — поручено автором 2026-10-02 (Docs/Visual/REALISM_BRIEF.md) |
+| `Tools/Blender/Realistic/**` | Claude | генераторы реалистичных робота и ринга — поручено автором 2026-10-02 |
 | `ArtSource/**` | Codex | исходники Blender, текстуры, референсы |
 | `Tools/Blender/**` | Codex | автоматизация Blender |
 | `Tools/Unreal/Art/**` | Codex | редакторский Python для импорта/настройки арта |

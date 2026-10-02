@@ -9,3 +9,4 @@
 | `Docs/Contracts/*` | Claude | 2026-10-02 | писатель по умолчанию | постоянно |
 | `IronEcho.uproject`, `Config/*` | Claude | 2026-10-02 | писатель по умолчанию | постоянно |
 | `Content/Art/**`, `ArtSource/**` | Codex | 2026-10-02 | писатель по умолчанию | постоянно |
+| `ArtSource/Realistic/**`, `Tools/Blender/Realistic/**` | Claude | 2026-10-02 | реалистичные робот IE-1 и ринг — решение автора (`Docs/Visual/REALISM_BRIEF.md`) | до приёмки вида автором |
