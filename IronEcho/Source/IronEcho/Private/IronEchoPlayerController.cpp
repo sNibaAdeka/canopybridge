@@ -12,12 +12,13 @@ AIronEchoPlayerController::AIronEchoPlayerController()
 {
 	bAutoManageActiveCameraTarget = false; // the game mode chooses the view target
 	bShowMouseCursor = false;
+	// Read here, not in BeginPlay: the game mode may hide the overlay before this controller begins play.
+	bShowDebugOverlay = GetDefault<UIronEchoSettings>()->bShowDebugOverlay;
 }
 
 void AIronEchoPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
-	bShowDebugOverlay = GetDefault<UIronEchoSettings>()->bShowDebugOverlay;
 	SetInputMode(FInputModeGameOnly());
 }
 

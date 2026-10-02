@@ -212,6 +212,13 @@ void AIronEchoGameMode::SetupView(APlayerController* Player)
 			if (HudWidget != nullptr)
 			{
 				HudWidget->AddToViewport();
+				if (VisualConfig->bHideDebugOverlay)
+				{
+					if (AIronEchoPlayerController* Controller = Cast<AIronEchoPlayerController>(Player))
+					{
+						Controller->SetDebugOverlayVisible(false);
+					}
+				}
 			}
 		}
 	}
