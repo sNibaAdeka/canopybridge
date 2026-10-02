@@ -25,3 +25,6 @@
 *.ogg filter=lfs diff=lfs merge=lfs -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.task filter=lfs diff=lfs merge=lfs -text
+
+# Report screenshots are small and should render on GitHub and travel in git bundles: plain git, not LFS.
+Docs/Reports/**/*.png -filter -diff -merge -text binary
