@@ -1,0 +1,45 @@
+--- a/IronEcho/IronEcho.uproject
++++ b/IronEcho/IronEcho.uproject
+@@ -18,6 +18,11 @@
+ 				"CoreUObject",
+ 				"UMG"
+ 			]
++		},
++		{
++			"Name": "IronEchoContractVisuals",
++			"Type": "Runtime",
++			"LoadingPhase": "PostDefault"
+ 		}
+ 	],
+ 	"Plugins": [
+@@ -34,6 +39,10 @@
+ 			"TargetAllowList": [
+ 				"Editor"
+ 			]
++		},
++		{
++			"Name": "IronEchoVisuals",
++			"Enabled": true
+ 		}
+ 	],
+ 	"TargetPlatforms": [
+--- a/IronEcho/Source/IronEcho.Target.cs
++++ b/IronEcho/Source/IronEcho.Target.cs
+@@ -7,6 +7,6 @@
+ 		Type = TargetType.Game;
+ 		DefaultBuildSettings = BuildSettingsVersion.Latest;
+ 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
+-		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules" });
++		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules", "IronEchoContractVisuals" });
+ 	}
+ }
+--- a/IronEcho/Source/IronEchoEditor.Target.cs
++++ b/IronEcho/Source/IronEchoEditor.Target.cs
+@@ -7,6 +7,6 @@
+ 		Type = TargetType.Editor;
+ 		DefaultBuildSettings = BuildSettingsVersion.Latest;
+ 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
+-		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules" });
++		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules", "IronEchoContractVisuals" });
+ 	}
+ }

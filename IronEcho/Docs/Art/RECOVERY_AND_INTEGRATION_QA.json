@@ -1,0 +1,46 @@
+{
+  "source_commit": "2b3773eb2a4f042ec1bf9c7b242b39af958fbfc7",
+  "contract": "1.1",
+  "environment": "macOS AppleClang 21, Python 3.12 (bundled runtime)",
+  "bundle_sha256": "4f6ae5a42d2542e3c701291b8fdef23b55c6c5d5232e66e123194bf8f3363613",
+  "core_tests": {
+    "passed": 58,
+    "failed": 0,
+    "sanitizers": "ASan+UBSan"
+  },
+  "tracker_tests": {
+    "passed": 36,
+    "skipped": 1,
+    "skip_reason": "MediaPipe model weights not downloaded; camera/inference not tested"
+  },
+  "robot_contract_tests": {
+    "passed": 6
+  },
+  "contact_policy_tests": {
+    "passed": 10,
+    "scope": "portable IEContactPolicy.h; unchanged byte-for-byte in copied plugin"
+  },
+  "source_checks": {
+    "python_ast": true,
+    "descriptor_json": true,
+    "generated_include_order": true,
+    "integration_patch_check": true
+  },
+  "unreal_compiled": false,
+  "unreal_runtime_verified": false,
+  "registration_patch_applied": false,
+  "generated_robot_binaries_present": false,
+  "assets_sha256": {
+    "Tools/Unreal/Art/Integration/register_contract_module.patch": "04db0142168a3143bd9ab7ef3da4effa15a166e0e33cdbf113926f1ea103ecfa",
+    "Tools/Unreal/Art/Integration/IronEchoContractVisuals/IronEchoContractVisuals.Build.cs": "6f42dc65c45db85bddfaed994e3270fa4469d5421ba16c6e6a48fd5577e3d638",
+    "Tools/Unreal/Art/Integration/IronEchoContractVisuals/Public/IEContractCameraRig.h": "cacd64f8902192fffe2611f6a90b10215ec2106d6758adbb1f1b75e362d5c224",
+    "Tools/Unreal/Art/Integration/IronEchoContractVisuals/Private/IEContractCameraRig.cpp": "b2504c3c129d164461547902da4732d586ada551b7f785d86d2196e7465bbfcd",
+    "Tools/Unreal/Art/Integration/IronEchoContractVisuals/Private/IronEchoContractVisualsModule.cpp": "e1d4cce30702799e2fd594fb71bc36445f433bd04ea908ce656f88b9b1137958",
+    "Tools/Unreal/Art/prepare_contract_camera.py": "637def8beffda568b4c6d083d162cc60247c9454265c379557f32f9ccb9402e3"
+  },
+  "official_sources": [
+    "https://code.claude.com/docs/en/claude-code-on-the-web",
+    "https://dev.epicgames.com/documentation/en-us/unreal-engine/plugins-in-unreal-engine",
+    "https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/class/MaterialUsage?application_version=5.6"
+  ]
+}
