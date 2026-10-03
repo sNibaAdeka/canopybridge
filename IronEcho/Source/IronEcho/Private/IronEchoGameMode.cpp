@@ -4,9 +4,11 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/LightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/PostProcessVolume.h"
+#include "Engine/SpotLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
@@ -146,17 +148,42 @@ void AIronEchoGameMode::SpawnTechGym()
 		SpawnMesh(Cylinder, Location, FVector(0.15f, 0.15f, 1.5f));
 	}
 
-	ADirectionalLight* Key = World->SpawnActor<ADirectionalLight>(ADirectionalLight::StaticClass(), FTransform(FRotator(-50.0f, 35.0f, 0.0f)), Params);
-	if (Key != nullptr)
+	// TV-boxing rig as in the realistic arena (Tools/Blender/Realistic/ring.py): hard spots from a square truss over
+	// the ring give crisp, overlapping contact shadows under the robots; a weak shadowless fill keeps the dark side readable.
+	const float TrussHalf = 390.0f;
+	const float TrussHeight = 620.0f;
+	const float SpotOffsets[] = {-260.0f, 260.0f};
+	for (int32 Side = 0; Side < 4; ++Side)
 	{
-		Key->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		Key->GetLightComponent()->SetIntensity(6.0f);
+		const FRotator SideRot(0.0f, 90.0f * static_cast<float>(Side), 0.0f);
+		for (const float Offset : SpotOffsets)
+		{
+			const FVector Location = SideRot.RotateVector(FVector(TrussHalf, Offset, TrussHeight));
+			const FVector Target(Location.X * 0.1f, Location.Y * 0.1f, 120.0f);
+			ASpotLight* Spot = World->SpawnActor<ASpotLight>(ASpotLight::StaticClass(), FTransform((Target - Location).Rotation(), Location), Params);
+			USpotLightComponent* Light = Spot != nullptr ? Cast<USpotLightComponent>(Spot->GetLightComponent()) : nullptr;
+			if (Light == nullptr)
+			{
+				continue;
+			}
+			Light->SetMobility(EComponentMobility::Movable);
+			Light->SetIntensityUnits(ELightUnits::Candelas);
+			Light->SetIntensity(45.0f);
+			Light->SetLightColor(FLinearColor(1.0f, 0.95f, 0.88f));
+			Light->SetOuterConeAngle(30.0f);
+			Light->SetInnerConeAngle(18.0f);
+			Light->SetSourceRadius(4.0f);
+			Light->SetAttenuationRadius(1500.0f);
+			Light->SetCastShadows(true);
+			Light->ContactShadowLength = 0.05f;
+			Light->MarkRenderStateDirty();
+		}
 	}
 	ADirectionalLight* Fill = World->SpawnActor<ADirectionalLight>(ADirectionalLight::StaticClass(), FTransform(FRotator(-30.0f, -150.0f, 0.0f)), Params);
 	if (Fill != nullptr)
 	{
 		Fill->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		Fill->GetLightComponent()->SetIntensity(2.0f);
+		Fill->GetLightComponent()->SetIntensity(0.8f);
 		Fill->GetLightComponent()->SetCastShadows(false);
 	}
 	APostProcessVolume* Post = World->SpawnActor<APostProcessVolume>(APostProcessVolume::StaticClass(), FTransform::Identity, Params);

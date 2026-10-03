@@ -183,7 +183,7 @@ def _truss_beam(name, a: Vector, b: Vector, mat, w=0.32):
 def build_ring(blue_corner_pad=BLUE, red_corner_pad=RED, with_arena=True):
     col = R.collection("Ring")
     R.set_collection(col)
-    steel = R.mat_metal("PostSteel", (0.04, 0.04, 0.045), rough=0.35, brushed=False)
+    steel = R.mat_rusty_steel("PostSteel")
     chrome = R.mat_metal("Turnbuckle", (0.8, 0.8, 0.82), rough=0.12, brushed=False)
     apron_mat = R.mat_cloth("ApronVinyl", (0.012, 0.012, 0.014), 0.5, 300)
     rope_mat = R.mat_rough("RopeVinyl", (0.62, 0.62, 0.63), 0.35, coat=0.3, spec=0.6)
@@ -269,8 +269,8 @@ def build_arena():
     col = R.collection("Arena")
     R.set_collection(col)
     fz = -RING_HEIGHT
-    floor = R.mat_rough("ArenaFloor", (0.02, 0.02, 0.022), 0.55, coat=0.2)
-    R.box("arena_floor", (60, 60, 0.02), (0, 0, fz - 0.01), mat=floor, bevel=0)
+    floor = R.mat_concrete("ArenaFloor", base=(0.11, 0.11, 0.105), floor_z=fz - 5.0, wet=0.8)
+    R.box("arena_floor", (40, 40, 0.02), (0, 0, fz - 0.01), mat=floor, bevel=0)
     led = R.mat_emissive("LEDBoard", (0.03, 0.12, 0.6), 1.1)
     led_red = R.mat_emissive("LEDBoardRed", (0.6, 0.04, 0.02), 1.1)
     led_txt = R.mat_emissive("LEDText", (0.9, 0.9, 1.0), 8.0)
@@ -296,8 +296,9 @@ def build_arena():
                       screen, bevel=0.005)
                 R.box(f"chair{side}{j}", (0.5, 0.5, 0.9), ((x + 0.65) * c - y * s, (x + 0.65) * s + y * c,
                                                            fz + 0.45), (0, 0, rot), chair, bevel=0.03)
-    crowd, stands = _crowd()
-    del crowd, stands
+    crowd, stands = _crowd(count_rows=9)
+    stands.data.materials[0] = R.mat_concrete("StandConcrete", base=(0.16, 0.16, 0.15), floor_z=fz - 5.0)
+    _venue(fz)
     # lighting truss over the ring
     alu = R.mat_metal("TrussAlu", (0.55, 0.56, 0.58), rough=0.4)
     tz = 6.2
@@ -320,13 +321,67 @@ def build_arena():
     return col
 
 
+WALL = 18.2       # distance of the venue walls from the ring centre
+CEILING = 12.5    # above the arena floor
+
+
+def _venue(fz):
+    """Underground industrial hall: worn concrete walls with a peeling painted band, columns, pipes, caged wall
+    lamps washing the walls, steel beams, exit doors."""
+    wall = R.mat_concrete("WallConcrete", paint=(0.055, 0.1, 0.095), paint_height=2.3, floor_z=fz,
+                          base=(0.40, 0.385, 0.36))
+    column = R.mat_concrete("ColumnConcrete", paint=(0.35, 0.3, 0.06), paint_height=1.2, floor_z=fz,
+                            base=(0.36, 0.35, 0.33))
+    ceiling = R.mat_concrete("CeilingConcrete", base=(0.05, 0.05, 0.05), floor_z=fz + 50)
+    beam = R.mat_rusty_steel("BeamSteel", paint=(0.08, 0.075, 0.07))
+    pipe = R.mat_rusty_steel("PipeSteel", paint=(0.12, 0.13, 0.12))
+    door = R.mat_rusty_steel("DoorSteel", paint=(0.18, 0.04, 0.03))
+    lamp_glass = R.mat_emissive("LampGlass", (1.0, 0.72, 0.42), 25.0)
+    exit_mat = R.mat_emissive("ExitSign", (0.05, 0.9, 0.25), 6.0)
+    exit_txt = R.mat_emissive("ExitText", (0.9, 1.0, 0.9), 12.0)
+    H = CEILING
+    for side in range(4):
+        rot = side * math.pi / 2
+        c, s = math.cos(rot), math.sin(rot)
+
+        def at(x, y):
+            return x * c - y * s, x * s + y * c
+
+        wx, wy = at(WALL + 0.25, 0)
+        R.box(f"wall{side}", (0.5, 2 * WALL + 1.0, H), (wx, wy, fz + H / 2), (0, 0, rot), wall, bevel=0)
+        for k in range(-3, 4):
+            u = k * 5.6
+            px, py = at(WALL - 0.35, u)
+            R.box(f"col{side}{k}", (0.7, 0.8, H), (px, py, fz + H / 2), (0, 0, rot), column, bevel=0.02)
+            # caged wall lamp washing the wall, mid-height
+            lx, ly = at(WALL - 0.85, u + 2.8)
+            R.cylinder(f"lamp{side}{k}", 0.09, 0.22, (lx, ly, fz + 7.6), (0, D(90), rot), lamp_glass, 16, bevel=0)
+            R.spot_light(f"wallwash{side}{k}", Vector((lx, ly, fz + 7.5)), Vector((*at(WALL, u + 2.8), fz)), 1000,
+                         angle=95, blend=0.8, radius=0.08, color=(1.0, 0.72, 0.45))
+        for zz, rr in ((fz + 9.2, 0.16), (fz + 9.65, 0.11), (fz + 10.0, 0.08)):
+            pxx, pyy = at(WALL - 0.75, 0)
+            R.cylinder(f"pipe{side}{zz}", rr, 2 * WALL, (pxx, pyy, zz), (D(90), 0, rot), pipe, 16, bevel=0)
+        # exit door + sign on two walls
+        if side in (1, 3):
+            dx, dy = at(WALL - 0.02, 9.0)
+            R.box(f"door{side}", (0.12, 1.9, 2.4), (dx, dy, fz + 1.2), (0, 0, rot), door, bevel=0.01)
+            sx, sy = at(WALL - 0.1, 9.0)
+            R.box(f"exit{side}", (0.08, 0.6, 0.25), (sx, sy, fz + 2.8), (0, 0, rot), exit_mat, bevel=0.005)
+            tx, ty = at(WALL - 0.145, 9.0)
+            R.text_mesh(f"exit_txt{side}", "EXIT", 0.15, exit_txt, (tx, ty, fz + 2.8), (D(90), 0, rot + D(90)),
+                        extrude=0.0005)
+    R.box("ceiling", (2 * WALL + 1, 2 * WALL + 1, 0.4), (0, 0, fz + H + 0.2), mat=ceiling, bevel=0)
+    for k in range(-4, 5):
+        R.box(f"beam{k}", (0.35, 2 * WALL, 0.7), (k * 4.2, 0, fz + H - 0.35), mat=beam, bevel=0.01)
+
+
 def light_arena(strength=1.0, haze=0.0008):
     """TV boxing lighting: bright soft top from the over-ring rig, hard spots from the truss, dark house."""
     col = R.collection("Lights")
     R.set_collection(col)
     R.world((0.004, 0.0045, 0.006), 1.0, haze=haze, haze_box=((0, 0, 3.0), (26, 26, 9.0)))
     tz = 6.1
-    R.area_light("top_softbox", (0, 0, tz - 0.1), (0, 0, 0), 700 * strength, 4.0, (1.0, 0.97, 0.93), spread=50)
+    R.area_light("top_softbox", (0, 0, tz - 0.1), (0, 0, 0), 300 * strength, 4.0, (1.0, 0.97, 0.93), spread=50)
     fixture = R.mat_rough("FixtureBody", (0.02, 0.02, 0.022), 0.4)
     lens = R.mat_emissive("FixtureLens", (1.0, 0.95, 0.88), 40.0)
     h = 3.9
@@ -337,7 +392,7 @@ def light_arena(strength=1.0, haze=0.0008):
             x, y = h, u
             p = Vector((x * c - y * s, x * s + y * c, tz - 0.35))
             target = Vector((0.45 * (x * c - y * s) * 0.2, 0.45 * (x * s + y * c) * 0.2, 1.2))
-            R.spot_light(f"spot{side}{u}", p, target, 1500 * strength, angle=30, blend=0.35, radius=0.05,
+            R.spot_light(f"spot{side}{u}", p, target, 2000 * strength, angle=30, blend=0.3, radius=0.04,
                          color=(1.0, 0.95, 0.88))
             body = R.cylinder(f"fixture{side}{u}", 0.14, 0.32, p, mat=fixture, verts=24, bevel=0.01)
             body.rotation_euler = (target - p).to_track_quat("Z", "Y").to_euler()
@@ -349,5 +404,5 @@ def light_arena(strength=1.0, haze=0.0008):
     R.area_light("rim_blue", (-9, -9, 7), (0, 0, 1.2), 1400 * strength, 2.0, (0.55, 0.7, 1.0), spread=30)
     R.area_light("rim_red", (9, 9, 7), (0, 0, 1.2), 1200 * strength, 2.0, (1.0, 0.62, 0.45), spread=30)
     # dim house fill so the crowd is just readable
-    R.area_light("house", (0, 0, 14), (0, 0, 0), 90 * strength, 30, (0.6, 0.65, 0.8), spread=160)
+    R.area_light("house", (0, 0, 10.4), (0, 0, 0), 90 * strength, 24, (0.6, 0.65, 0.8), spread=160)
     return col

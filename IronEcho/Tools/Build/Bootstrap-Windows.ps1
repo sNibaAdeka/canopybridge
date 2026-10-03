@@ -115,7 +115,7 @@ if ($blender) {
     $blenderVersion = (& $blender --version 2>$null | Select-Object -First 1)
     Set-StepResult 'blender' 'ok' "$blenderVersion at $blender"
 } else {
-    Set-StepResult 'blender' 'warn' 'not found (needed by Codex for ArtSource; not needed by the game)'
+    Set-StepResult 'blender' 'warn' 'not found (needed for ArtSource and Tools\Build\Bake-Realistic.ps1; not needed by the packaged game)'
 }
 
 Write-Step 'Python 3.12 (tracker development)'

@@ -540,6 +540,41 @@ def _bump(nt, bsdf, height_socket, strength=0.15, distance=0.002, target="Normal
     return bp
 
 
+def _scratches(nt, scale=1.0, density=0.5):
+    """Thin random scratches in two directions, clustered (object space, metres). Returns a 0..1 mask socket."""
+    masks = []
+    for k, (rot, sc) in enumerate((((0.3, 0.9, 0.2), (2.2, 2.2, 70.0)), ((1.1, -0.4, 1.3), (2.6, 60.0, 2.6)),
+                                      ((-0.7, 0.2, 2.1), (55.0, 2.4, 2.4)))):
+        tc = nt.nodes.new("ShaderNodeTexCoord")
+        mp = nt.nodes.new("ShaderNodeMapping")
+        mp.inputs["Rotation"].default_value = rot
+        mp.inputs["Scale"].default_value = tuple(v * scale for v in sc)
+        mp.inputs["Location"].default_value = (k * 3.7, k * 1.3, k * 2.1)
+        nt.links.new(tc.outputs["Object"], mp.inputs["Vector"])
+        nz = nt.nodes.new("ShaderNodeTexNoise")
+        nz.inputs["Scale"].default_value = 1.0
+        nz.inputs["Detail"].default_value = 3.0
+        nz.inputs["Roughness"].default_value = 0.4
+        nz.inputs["Distortion"].default_value = 0.35  # meandering, not ruler-straight
+        nt.links.new(mp.outputs["Vector"], nz.inputs["Vector"])
+        line = _maprange(nt, nz.outputs["Fac"], 0.63 - 0.05 * density, 0.665 - 0.05 * density)
+        breaker = _noise(nt, 22.0 * scale, 2.0, 0.5)  # chop lines into short strokes of varying length
+        masks.append(_math(nt, "MULTIPLY", line, _maprange(nt, breaker.outputs["Fac"], 0.5, 0.58)))
+    m = _math(nt, "MAXIMUM", _math(nt, "MAXIMUM", masks[0], masks[1]), masks[2])
+    cluster = _noise(nt, 4.0 * scale, 3.0, 0.5)
+    return _math(nt, "MULTIPLY", m, _maprange(nt, cluster.outputs["Fac"], 0.38, 0.56))
+
+
+def _dust(nt, amount=0.3):
+    """Dust settles on upward-facing surfaces, broken up by noise. 0..1 mask."""
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(geo.outputs["Normal"], sep.inputs[0])
+    up = _maprange(nt, sep.outputs[2], 0.35, 0.95)
+    nz = _noise(nt, 9.0, 6.0, 0.65)
+    return _math(nt, "MULTIPLY", _math(nt, "MULTIPLY", up, _maprange(nt, nz.outputs["Fac"], 0.4, 0.7)), amount)
+
+
 _MATS: dict = {}
 
 
@@ -568,6 +603,13 @@ def mat_painted(name, color, wear=0.55, rough=0.34, coat=0.45, metal_under=(0.55
     cav = _cavity(nt, 0.04)
     grime = _mix_rgb(nt, _math(nt, "MULTIPLY", _math(nt, "SUBTRACT", 1.0, cav), 1.4), paint.outputs[2],
                      tuple(c * 0.22 for c in color))
+    scr = _math(nt, "MULTIPLY", _scratches(nt, 1.0, wear), 0.35 + wear)
+    chip_mask = _math(nt, "MINIMUM", _math(nt, "MAXIMUM", chip_mask, scr), 1.0)
+    dust = _dust(nt, 0.22 + 0.2 * wear)
+    grime = _mix_rgb(nt, dust, grime, (0.30, 0.28, 0.25))
+    smudge_n = _noise(nt, 5.0, 8.0, 0.7)
+    smudge = _math(nt, "MULTIPLY", _maprange(nt, smudge_n.outputs["Fac"], 0.56, 0.72), 0.25 + 0.4 * wear)
+    grime = _mix_rgb(nt, smudge, grime, (0.07, 0.065, 0.06))  # grease / hand-off marks
     base = _mix_rgb(nt, chip_mask, grime, metal_under)
     nt.links.new(base, bsdf.inputs["Base Color"])
     nt.links.new(chip_mask, bsdf.inputs["Metallic"])
@@ -575,11 +617,13 @@ def mat_painted(name, color, wear=0.55, rough=0.34, coat=0.45, metal_under=(0.55
     r = _maprange(nt, rn.outputs["Fac"], 0.3, 0.7, rough - 0.06, rough + 0.08)
     r = _math(nt, "ADD", r, _math(nt, "MULTIPLY", chip_mask, 0.12))
     r = _math(nt, "ADD", r, _math(nt, "MULTIPLY", _math(nt, "SUBTRACT", 1.0, cav), 0.25))
+    r = _math(nt, "ADD", r, _math(nt, "MULTIPLY", dust, 0.4))
     nt.links.new(r, bsdf.inputs["Roughness"])
-    bsdf.inputs["Coat Weight"].default_value = coat
+    nt.links.new(_math(nt, "MULTIPLY", _math(nt, "SUBTRACT", 1.0, chip_mask), coat), bsdf.inputs["Coat Weight"])
     bsdf.inputs["Coat Roughness"].default_value = 0.12
     fine = _noise(nt, 220.0, 4.0, 0.5)
-    _bump(nt, bsdf, fine.outputs["Fac"], 0.04, 0.0005)
+    h = _math(nt, "SUBTRACT", _math(nt, "MULTIPLY", fine.outputs["Fac"], 0.25), scr)
+    _bump(nt, bsdf, h, 0.12, 0.0006)
     _MATS[name] = mat
     return mat
 
@@ -599,8 +643,15 @@ def mat_metal(name, color=(0.60, 0.61, 0.63), rough=0.32, aniso=0.6, brushed=Tru
     nt.links.new(r, bsdf.inputs["Roughness"])
     bsdf.inputs["Anisotropic"].default_value = aniso if brushed else 0.0
     edge = _edge_mask(nt, 0.003, 0.08)
-    bright = _mix_rgb(nt, _math(nt, "MULTIPLY", edge, 0.6), col, tuple(min(1.0, c * 1.35) for c in color))
-    nt.links.new(bright, bsdf.inputs["Base Color"])
+    scr = _scratches(nt, 1.3, 0.7)
+    wearm = _math(nt, "MINIMUM", _math(nt, "ADD", _math(nt, "MULTIPLY", edge, 0.6), scr), 1.0)
+    bright = _mix_rgb(nt, wearm, col, tuple(min(1.0, c * 1.45 + 0.08) for c in color))
+    dust = _dust(nt, 0.25 * grime)
+    nt.links.new(_mix_rgb(nt, dust, bright, (0.28, 0.26, 0.23)), bsdf.inputs["Base Color"])
+    r2 = _math(nt, "SUBTRACT", r, _math(nt, "MULTIPLY", scr, 0.18))
+    r2 = _math(nt, "ADD", r2, _math(nt, "MULTIPLY", dust, 0.4))
+    nt.links.new(r2, bsdf.inputs["Roughness"])
+    _bump(nt, bsdf, _math(nt, "MULTIPLY", scr, -1.0), 0.15, 0.0003)
     _MATS[name] = mat
     return mat
 
@@ -721,7 +772,8 @@ def mat_leather(name, color, rough=0.42):
         nt.links.new(tint, comb.inputs[i])
     nt.links.new(comb.outputs[0], base.inputs[7])
     dark = _mix_rgb(nt, _math(nt, "SUBTRACT", 1.0, cav), base.outputs[2], tuple(c * 0.4 for c in color))
-    worn = _mix_rgb(nt, _math(nt, "MULTIPLY", edge, 0.35), dark, tuple(min(1, c * 1.5 + 0.05) for c in color))
+    scuff = _math(nt, "MAXIMUM", _math(nt, "MULTIPLY", edge, 0.35), _math(nt, "MULTIPLY", _scratches(nt, 0.8, 0.9), 0.7))
+    worn = _mix_rgb(nt, scuff, dark, tuple(min(1, c * 1.6 + 0.07) for c in color))
     nt.links.new(worn, bsdf.inputs["Base Color"])
     nt.links.new(_maprange(nt, nz.outputs["Fac"], 0.3, 0.7, rough - 0.08, rough + 0.1), bsdf.inputs["Roughness"])
     bsdf.inputs["Sheen Weight"].default_value = 0.15
@@ -732,6 +784,117 @@ def mat_leather(name, color, rough=0.42):
     tc = nt.nodes.new("ShaderNodeTexCoord")
     nt.links.new(tc.outputs["Object"], vor.inputs["Vector"])
     _bump(nt, bsdf, vor.outputs["Distance"], 0.12, 0.0006)
+    _MATS[name] = mat
+    return mat
+
+
+def mat_concrete(name, paint=None, paint_height=1.8, floor_z=-1.0, wet=0.0, base=(0.30, 0.29, 0.27)):
+    """Worn industrial concrete. paint=(r,g,b) adds a lower painted band (below paint_height above floor_z) that
+    peels off in patches; water streaks run down from the top, grime collects at the floor, hairline cracks.
+    wet>0 gives glossy damp/oily patches (floors)."""
+    if name in _MATS:
+        return _MATS[name]
+    mat = bpy.data.materials.new(name)
+    nt, bsdf = _nodes(mat)
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(geo.outputs["Position"], sep.inputs[0])
+    z = sep.outputs[2]
+    big = _noise(nt, 0.6, 5.0, 0.6)
+    mid = _noise(nt, 4.0, 8.0, 0.65)
+    pores = _noise(nt, 160.0, 4.0, 0.6)
+    tone = _math(nt, "MULTIPLY", _maprange(nt, big.outputs["Fac"], 0.3, 0.7, 0.75, 1.15),
+                 _maprange(nt, mid.outputs["Fac"], 0.3, 0.7, 0.85, 1.08))
+    comb = nt.nodes.new("ShaderNodeCombineColor")
+    for i in range(3):
+        nt.links.new(tone, comb.inputs[i])
+    col = nt.nodes.new("ShaderNodeMix")
+    col.data_type = "RGBA"
+    col.blend_type = "MULTIPLY"
+    col.inputs[0].default_value = 1.0
+    col.inputs[6].default_value = (*base, 1)
+    nt.links.new(comb.outputs[0], col.inputs[7])
+    c = col.outputs[2]
+    rough = _maprange(nt, mid.outputs["Fac"], 0.3, 0.7, 0.78, 0.95)
+    height = _math(nt, "MULTIPLY", pores.outputs["Fac"], 0.3)
+    if paint is not None:
+        band = _maprange(nt, z, floor_z + paint_height + 0.02, floor_z + paint_height - 0.02)
+        peel_n = _noise(nt, 2.5, 10.0, 0.7)
+        peel = _maprange(nt, peel_n.outputs["Fac"], 0.56, 0.585)  # 1 = paint gone
+        keep = _math(nt, "MULTIPLY", band, _math(nt, "SUBTRACT", 1.0, peel))
+        ptone = _maprange(nt, big.outputs["Fac"], 0.3, 0.7, 0.8, 1.05)
+        pc = nt.nodes.new("ShaderNodeCombineColor")
+        for i, v in enumerate(paint):
+            nt.links.new(_math(nt, "MULTIPLY", ptone, v), pc.inputs[i])
+        c = _mix_rgb(nt, keep, c, pc.outputs[0])
+        rough = _mix_rgb(nt, keep, rough, (0.45, 0.45, 0.45))
+        edge_lip = _maprange(nt, peel_n.outputs["Fac"], 0.54, 0.56)  # raised paint edge around peeled holes
+        height = _math(nt, "ADD", height, _math(nt, "MULTIPLY", _math(nt, "ADD", keep, edge_lip), 0.6))
+    # water streaks from above (vary fast across, slow down the wall) and grime at the floor
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    mp = nt.nodes.new("ShaderNodeMapping")
+    mp.inputs["Scale"].default_value = (7.0, 7.0, 0.25)
+    nt.links.new(tc.outputs["Object"], mp.inputs["Vector"])
+    st = nt.nodes.new("ShaderNodeTexNoise")
+    st.inputs["Scale"].default_value = 1.0
+    st.inputs["Detail"].default_value = 6.0
+    nt.links.new(mp.outputs["Vector"], st.inputs["Vector"])
+    streak = _maprange(nt, st.outputs["Fac"], 0.5, 0.68, 0.0, 0.8)
+    floor_grime = _maprange(nt, z, floor_z + 0.9, floor_z, 0.0, 0.7)
+    dirt = _math(nt, "MINIMUM", _math(nt, "ADD", streak, floor_grime), 0.85)
+    c = _mix_rgb(nt, dirt, c, (0.06, 0.055, 0.05))
+    # hairline cracks
+    vor = nt.nodes.new("ShaderNodeTexVoronoi")
+    vor.feature = "DISTANCE_TO_EDGE"
+    vor.inputs["Scale"].default_value = 1.6
+    vor.inputs["Randomness"].default_value = 1.0
+    tc2 = nt.nodes.new("ShaderNodeTexCoord")
+    warp = _noise(nt, 3.0, 4.0, 0.5)
+    add = nt.nodes.new("ShaderNodeVectorMath")
+    add.operation = "ADD"
+    nt.links.new(tc2.outputs["Object"], add.inputs[0])
+    sc = nt.nodes.new("ShaderNodeVectorMath")
+    sc.operation = "SCALE"
+    sc.inputs["Scale"].default_value = 0.15
+    nt.links.new(warp.outputs["Color"], sc.inputs[0])
+    nt.links.new(sc.outputs[0], add.inputs[1])
+    nt.links.new(add.outputs[0], vor.inputs["Vector"])
+    crack_mask = _noise(nt, 1.1, 2.0, 0.5)
+    crack = _math(nt, "MULTIPLY", _maprange(nt, vor.outputs["Distance"], 0.012, 0.0),
+                  _maprange(nt, crack_mask.outputs["Fac"], 0.5, 0.62))
+    c = _mix_rgb(nt, crack, c, (0.02, 0.02, 0.02))
+    height = _math(nt, "SUBTRACT", height, _math(nt, "MULTIPLY", crack, 1.2))
+    if wet > 0:
+        wn = _noise(nt, 0.9, 4.0, 0.5)
+        wetm = _math(nt, "MULTIPLY", _maprange(nt, wn.outputs["Fac"], 0.52, 0.62), wet)
+        rough = _mix_rgb(nt, wetm, rough, (0.12, 0.12, 0.12))
+        c = _mix_rgb(nt, _math(nt, "MULTIPLY", wetm, 0.5), c, (0.02, 0.02, 0.022))
+    nt.links.new(c, bsdf.inputs["Base Color"])
+    nt.links.new(rough, bsdf.inputs["Roughness"])
+    _bump(nt, bsdf, height, 0.35, 0.004)
+    _MATS[name] = mat
+    return mat
+
+
+def mat_rusty_steel(name, paint=(0.03, 0.03, 0.035)):
+    """Painted steel with scratches to bright metal and rust blooming from the bottom and from scratches."""
+    if name in _MATS:
+        return _MATS[name]
+    mat = bpy.data.materials.new(name)
+    nt, bsdf = _nodes(mat)
+    scr = _scratches(nt, 0.7, 1.0)
+    edge = _edge_mask(nt, 0.006, 0.1)
+    rn = _noise(nt, 6.0, 10.0, 0.7)
+    rust = _math(nt, "MULTIPLY", _maprange(nt, rn.outputs["Fac"], 0.5, 0.7),
+                 _math(nt, "ADD", 0.25, _math(nt, "MAXIMUM", edge, scr)))
+    rust = _math(nt, "MINIMUM", rust, 1.0)
+    bare = _math(nt, "MINIMUM", _math(nt, "ADD", scr, _math(nt, "MULTIPLY", edge, 0.5)), 1.0)
+    c = _mix_rgb(nt, bare, paint, (0.45, 0.45, 0.46))
+    c = _mix_rgb(nt, rust, c, (0.22, 0.08, 0.03))
+    nt.links.new(c, bsdf.inputs["Base Color"])
+    nt.links.new(_math(nt, "MULTIPLY", bare, _math(nt, "SUBTRACT", 1.0, rust)), bsdf.inputs["Metallic"])
+    nt.links.new(_math(nt, "ADD", 0.4, _math(nt, "MULTIPLY", rust, 0.5)), bsdf.inputs["Roughness"])
+    _bump(nt, bsdf, _math(nt, "SUBTRACT", rust, scr), 0.25, 0.0008)
     _MATS[name] = mat
     return mat
 

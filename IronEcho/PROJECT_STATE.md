@@ -91,8 +91,11 @@ Bootstrap сам скажет, чего не хватает.
 
 ## Следующие шаги
 
-0. Автор смотрит реалистичные рендеры → одобряет вид или даёт правки. После одобрения: запекание материалов
-   в BaseColor/Normal/ORM, LOD, импорт в Unreal на Windows (`import_realistic_robot.py` → `validate_robot.py`).
+0. Реализм v2 (автор: «тени, обшарпанные стены, роботы с царапинами»): царапины/пыль/масляные следы на роботах,
+   подземный зал с обшарпанным бетоном, жёсткие тени ТВ-света (`Docs/Reports/2026-10-03_realistic_v2/`).
+   Игровой путь проверен в облаке: `bake_robot.py` → 4K BaseColor/Normal/ORM/Emissive + FBX (контракт 0 ошибок,
+   `bake_check_*.png`). На Windows: `Tools\Build\Bake-Realistic.ps1 -Import` → `validate_robot.py` → VisualConfig.
+   Unreal-часть (импорт, материал, Lumen/VSM в `DefaultEngine.ini`, прожекторы техзала) **не запускалась**.
    Один репозиторий вместо двух (`canopybridge/IronEcho` и `iron-echo`) — решение автора.
 
 1. Windows: bootstrap → сборка редактора → пробник (лог) → `Run-Tests.ps1 -Unreal` → замер VRAM в этот файл.
