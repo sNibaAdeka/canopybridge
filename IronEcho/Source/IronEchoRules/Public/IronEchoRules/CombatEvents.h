@@ -35,8 +35,8 @@ namespace IronEchoCore
 	struct CombatEvent
 	{
 		CombatEventType Type = CombatEventType::AttackStarted;
-		FighterSlot Actor = FighterSlot::Player;   // who did it (attacker / blocker / dodger)
-		FighterSlot Target = FighterSlot::Opponent;
+		FighterSlot Actor = FighterSlot::Player;   // contact events (Hit/Blocked/GuardBroken/Dodged/Whiffed): attacker; own-action events: the fighter itself
+		FighterSlot Target = FighterSlot::Opponent; // contact events: defender (draw impacts/reactions on Target)
 		Hand AttackHand = Hand::Left;
 		DodgeDir Dodge = DodgeDir::None;
 		bool bCounterHit = false;

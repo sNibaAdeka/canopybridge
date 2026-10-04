@@ -18,6 +18,11 @@
 				"CoreUObject",
 				"UMG"
 			]
+		},
+		{
+			"Name": "IronEchoContractVisuals",
+			"Type": "Runtime",
+			"LoadingPhase": "PostDefault"
 		}
 	],
 	"Plugins": [
@@ -34,6 +39,10 @@
 			"TargetAllowList": [
 				"Editor"
 			]
+		},
+		{
+			"Name": "IronEchoVisuals",
+			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [

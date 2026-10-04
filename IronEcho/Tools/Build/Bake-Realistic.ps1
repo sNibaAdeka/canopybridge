@@ -38,5 +38,5 @@ if ($Import) {
     $importScript = Join-Path $script:ProjectRoot 'Tools\Unreal\Tech\import_realistic_robot.py'
     $ueArgs = (Quote $script:UProject) + ' -run=pythonscript -script=' + (Quote $importScript) + ' -unattended -nop4 -nosplash -stdout -FullStdOutLogOutput'
     if ((Invoke-Logged -Exe (Get-EditorCmd) -ArgumentLine $ueArgs -LogFile "$logs\ue-import.log") -ne 0) { Write-Fail "import failed; log: $logs\ue-import.log"; exit 1 }
-    Write-Ok 'imported; next: Tools\Unreal\Tech\validate_robot.py and set VisualConfig (see log line IRONECHO_IMPORT)'
+    Write-Ok 'imported; next: Tools\Unreal\Tech\validate_robot.py, then Codex''s Tools\Unreal\Art\prepare_contract_camera.py (wires robots + camera into DA_IronEchoVisuals)'
 }

@@ -124,7 +124,9 @@ clavicle_r, upperarm_r, lowerarm_r, hand_r, thigh_l, calf_l, foot_l, thigh_r, ca
 
 ## 7. События
 
-`AIronEchoGameState::OnCombatEvent(FIronEchoCombatEvent)`:
+`AIronEchoGameState::OnCombatEvent(FIronEchoCombatEvent)`. Для контактных событий (HitConfirmed, Blocked, GuardBroken,
+Dodged, Whiffed) `Actor` — атакующий, `Target` — защитник: эффект и реакцию рисовать на `Target`.
+GuardBroken всегда сопровождается HitConfirmed того же удара — эффект рисовать один раз (по HitConfirmed).
 
 | Type | Когда | Рекомендуемая реакция (решает Codex) |
 |---|---|---|
@@ -198,3 +200,4 @@ GameMode (BlueprintCallable): `StartBout(BotLevel)`, `StartTraining()`, `ToggleP
 |---|---|---|
 | 1.0 | 2026-10-02 | Первая версия |
 | 1.1 | 2026-10-02 | Нокдауны и счёт (ActionState KnockedDown, Phase Knockdown, события KnockedDown/GotUp/KnockdownCount), TKO, три судьи и тип решения, комбо и расширенная статистика. Только добавления в конец перечислений — совместимо с 1.0 |
+| 1.1 (уточнение) | 2026-10-04 | Без изменения API: явно записано, что в контактных событиях Actor = атакующий, Target = защитник, и что GuardBroken дублируется HitConfirmed (так уже работало; найдено при интеграции адаптера камеры Codex) |

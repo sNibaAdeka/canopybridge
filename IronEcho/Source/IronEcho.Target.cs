@@ -7,6 +7,6 @@ public class IronEchoTarget : TargetRules
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
-		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules" });
+		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules", "IronEchoContractVisuals" });
 	}
 }

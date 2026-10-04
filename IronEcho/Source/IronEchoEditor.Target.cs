@@ -7,6 +7,6 @@ public class IronEchoEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
-		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules" });
+		ExtraModuleNames.AddRange(new string[] { "IronEcho", "IronEchoRules", "IronEchoContractVisuals" });
 	}
 }

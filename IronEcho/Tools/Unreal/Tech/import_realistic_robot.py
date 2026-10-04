@@ -176,8 +176,9 @@ def main():
     if "Ember" in meshes:
         da.set_editor_property("opponent_robot_mesh", meshes["Ember"])
     unreal.EditorAssetLibrary.save_loaded_asset(da)
-    log(f"visual config {da_path} ready; to use it set VisualConfig in Config/DefaultGame.ini "
-        f"([/Script/IronEcho.IronEchoSettings]) to {da_path}.DA_IronEchoVisuals_Realistic")
+    log(f"visual config {da_path} ready. Next (Codex art step): run Tools/Unreal/Art/prepare_contract_camera.py — it "
+        f"copies these robot references into /Game/Art/Config/DA_IronEchoVisuals (the one Config/DefaultGame.ini "
+        f"uses) and sets GameCameraClass to IEContractCameraRig")
 
 
 main()
