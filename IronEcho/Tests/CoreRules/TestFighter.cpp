@@ -2,6 +2,8 @@
 
 #include "IronEchoRules/CombatSim.h"
 
+#include <algorithm>
+#include <cmath>
 #include <vector>
 
 using namespace IronEchoCore;
@@ -264,7 +266,7 @@ IE_TEST(Fighter_StaminaSpendRegenAndTiredPunch)
 	H.Run(Cfg.Attacks[0].WindupTicks + Cfg.Attacks[0].ActiveTicks + Cfg.Attacks[0].RecoveryTicks);
 	H.Step(PunchIntentFor(Hand::Right), Idle()); // cross needs 10: tired
 	IE_EXPECT(H.P().bAttackTired);
-	IE_EXPECT_EQ(H.P().StageTicksTotal, 24); // 17 * 1.4 = 23.8 -> 24
+	IE_EXPECT_EQ(H.P().StageTicksTotal, static_cast<int32_t>(std::lround(Cfg.Attacks[1].WindupTicks * static_cast<double>(Cfg.TiredWindupMultiplier))));
 	IE_EXPECT_EQ(H.Count(CombatEventType::StaminaExhausted, FighterSlot::Player), 1);
 	H.Run(60);
 	const float Hp = H.O().Health;
@@ -276,7 +278,7 @@ IE_TEST(Fighter_StaminaSpendRegenAndTiredPunch)
 IE_TEST(Fighter_KnockOutWhenKnockdownsDisabled)
 {
 	FighterConfig Glass = MakeDefaultFighterConfig();
-	Glass.MaxHealth = 4.0f;
+	Glass.MaxHealth = Glass.Attacks[0].Damage; // one jab empties it
 	Glass.bKnockdowns = false;
 	Harness H(MakeDefaultFighterConfig(), Glass);
 	H.Step(PunchIntentFor(Hand::Left), Idle());
@@ -294,7 +296,7 @@ IE_TEST(Fighter_TrainingBagTakesHitsForever)
 	for (int Round = 0; Round < 40; ++Round)
 	{
 		H.Step(PunchIntentFor(Round % 2 == 0 ? Hand::Left : Hand::Right), Idle());
-		H.Run(60);
+		H.Run(120); // a sustainable pace: the player never empties the stamina tank
 	}
 	IE_EXPECT(H.Count(CombatEventType::HitConfirmed, FighterSlot::Player) >= 39);
 	IE_EXPECT(H.O().State != ActionState::KnockedOut);
@@ -331,7 +333,7 @@ IE_TEST(Movement_RetreatOpensDistanceTemporarily)
 IE_TEST(Fighter_KnockdownAndGetUpRecovery)
 {
 	FighterConfig Glass = MakeDefaultFighterConfig();
-	Glass.MaxHealth = 4.0f;
+	Glass.MaxHealth = Glass.Attacks[0].Damage; // one jab empties it
 	Harness H(MakeDefaultFighterConfig(), Glass);
 	H.Step(PunchIntentFor(Hand::Left), Idle());
 	H.Run(30);
@@ -347,7 +349,7 @@ IE_TEST(Fighter_KnockdownAndGetUpRecovery)
 	CombatEventBuffer Events;
 	H.Sim.Mutable(FighterSlot::Opponent).GetUp(500, Events);
 	IE_EXPECT(H.O().State == ActionState::Guard);
-	IE_EXPECT_NEAR(H.O().Health, 4.0 * 0.40, 1e-4);
+	IE_EXPECT_NEAR(H.O().Health, (std::max)(1.0f, Glass.MaxHealth * Glass.KnockdownRecoverHealth), 1e-4); // never below 1 HP
 	IE_EXPECT_NEAR(H.O().Stamina, H.O().MaxStamina * 0.5, 1e-4);
 	IE_EXPECT_EQ(Events.Num(), 1);
 	IE_EXPECT(Events[0].Type == CombatEventType::GotUp);
@@ -398,4 +400,118 @@ IE_TEST(Fighter_DefenseStatsCountBlocksAndDodges)
 	IE_EXPECT_EQ(H.O().BlocksMade, 1);
 	IE_EXPECT_EQ(H.O().DodgesMade, 1);
 	IE_EXPECT_EQ(H.O().RoundDefenses, 2);
+}
+
+// ---- 1.2 balance rules: cover-up, arm punches, guard drain, gassed ----
+
+IE_TEST(Fighter_CoverUpFromHitStunKeepsPunchesLocked)
+{
+	Harness H;
+	const FighterConfig Cfg = MakeDefaultFighterConfig();
+	const AttackSpec Jab = Cfg.Attacks[0];
+	H.Step(PunchIntentFor(Hand::Left), Idle()); // tick 1: the jab lands on tick 1 + windup
+	H.Run(Jab.WindupTicks);
+	IE_EXPECT(H.O().State == ActionState::HitStun);
+	const int32_t HitTick = H.FirstTick(CombatEventType::HitConfirmed, FighterSlot::Player);
+	IE_EXPECT_EQ(HitTick, H.Tick);
+	// Flinch: the guard cannot come up before CoverUpTicks of the stun have passed.
+	H.Run(Cfg.CoverUpTicks - 1, Idle(), BlockIntent());
+	IE_EXPECT(H.O().State == ActionState::HitStun);
+	H.Step(Idle(), BlockIntent());
+	IE_EXPECT(H.O().State == ActionState::Block);
+	IE_EXPECT(H.O().bBlocking);
+	IE_EXPECT(HitTick + Jab.HitStunTicks > H.Tick); // earlier than the stun would have ended
+	// Covering up never shortens the punch lock: a cross requested now starts when the stun would have ended.
+	FighterIntent BlockAndPunch = BlockIntent();
+	BlockAndPunch.AddPunch(Hand::Right);
+	H.Step(Idle(), BlockAndPunch);
+	H.Run(Jab.HitStunTicks, Idle(), Idle());
+	IE_EXPECT_EQ(H.FirstTick(CombatEventType::AttackStarted, FighterSlot::Opponent), HitTick + Jab.HitStunTicks);
+}
+
+IE_TEST(Fighter_TiredPunchIsAWeakArmPunch)
+{
+	FighterConfig Tired = MakeDefaultFighterConfig();
+	Tired.MaxStamina = 1.0f; // every punch is thrown without enough stamina
+	const FighterConfig Bot = MakeBotFighterConfig(BotLevel::Normal);
+	Harness H(Tired, Bot);
+	// The bot starts a long telegraphed cross; the tired jab lands in its windup and does NOT interrupt it.
+	H.Step(Idle(), PunchIntentFor(Hand::Right));
+	H.Step(PunchIntentFor(Hand::Left), Idle());
+	IE_EXPECT(H.P().bAttackTired);
+	H.Run(static_cast<int32_t>(std::lround(Tired.Attacks[0].WindupTicks * static_cast<double>(Tired.TiredWindupMultiplier))));
+	IE_EXPECT_EQ(H.Count(CombatEventType::HitConfirmed, FighterSlot::Player), 1);
+	IE_EXPECT_EQ(H.Count(CombatEventType::AttackCancelled, FighterSlot::Opponent), 0);
+	IE_EXPECT(H.O().State == ActionState::Attack && H.O().Stage == AttackStage::Windup);
+	// Landing in a windup is still a counter hit (x CounterHitMultiplier), just a weak one.
+	IE_EXPECT_NEAR(100.0 - H.O().Health, Tired.Attacks[0].Damage * Tired.TiredDamageMultiplier * Tired.CounterHitMultiplier, 1e-4);
+	// ...and the bot's cross still lands.
+	H.Run(Bot.Attacks[1].WindupTicks);
+	IE_EXPECT_EQ(H.Count(CombatEventType::HitConfirmed, FighterSlot::Opponent), 1);
+
+	// On a fighter that is not winding up, a tired punch stuns for only TiredHitStunMultiplier of the time.
+	Harness S(Tired, MakeDefaultFighterConfig());
+	S.Step(PunchIntentFor(Hand::Right), Idle());
+	S.Run(static_cast<int32_t>(std::lround(Tired.Attacks[1].WindupTicks * static_cast<double>(Tired.TiredWindupMultiplier))));
+	IE_EXPECT(S.O().State == ActionState::HitStun);
+	IE_EXPECT_EQ(S.O().StateTicksLeft, static_cast<int32_t>(std::lround(Tired.Attacks[1].HitStunTicks * static_cast<double>(Tired.TiredHitStunMultiplier))));
+}
+
+IE_TEST(Fighter_GuardDrainScalesWithPowerAndKeepsRegen)
+{
+	const FighterConfig Cfg = MakeDefaultFighterConfig();
+	// Full-power jab into a guard: the guard pays BlockStaminaCost.
+	Harness H;
+	H.Step(PunchIntentFor(Hand::Left), BlockIntent());
+	H.Run(Cfg.Attacks[0].WindupTicks, Idle(), BlockIntent());
+	IE_EXPECT_EQ(H.Count(CombatEventType::Blocked, FighterSlot::Player), 1);
+	IE_EXPECT_NEAR(H.O().Stamina, Cfg.MaxStamina - Cfg.BlockStaminaCost, 1e-4);
+	// Absorbing is not spending: regeneration (at the blocking rate) continues on the very next tick.
+	const float After = H.O().Stamina;
+	H.Step(Idle(), BlockIntent());
+	IE_EXPECT(H.O().Stamina > After);
+
+	// A tired punch drains the guard in proportion to its reduced damage.
+	FighterConfig Tired = MakeDefaultFighterConfig();
+	Tired.MaxStamina = 1.0f;
+	Harness T(Tired, Cfg);
+	T.Step(PunchIntentFor(Hand::Left), BlockIntent());
+	T.Run(static_cast<int32_t>(std::lround(Cfg.Attacks[0].WindupTicks * static_cast<double>(Tired.TiredWindupMultiplier))), Idle(), BlockIntent());
+	IE_EXPECT_EQ(T.Count(CombatEventType::Blocked, FighterSlot::Player), 1);
+	IE_EXPECT_NEAR(Cfg.MaxStamina - T.O().Stamina, Cfg.BlockStaminaCost * Tired.TiredDamageMultiplier, 0.05);
+
+	// An empty tank cannot pay for the punch: the guard breaks.
+	FighterConfig Empty = MakeDefaultFighterConfig();
+	Empty.MaxStamina = Cfg.BlockStaminaCost * 0.5f;
+	Harness B(Cfg, Empty);
+	B.Step(PunchIntentFor(Hand::Left), BlockIntent());
+	B.Run(Cfg.Attacks[0].WindupTicks, Idle(), BlockIntent());
+	IE_EXPECT_EQ(B.Count(CombatEventType::GuardBroken, FighterSlot::Player), 1);
+	IE_EXPECT_EQ(B.Count(CombatEventType::HitConfirmed, FighterSlot::Player), 1);
+}
+
+IE_TEST(Fighter_EmptyingStaminaCostsABreath)
+{
+	FighterConfig Cfg = MakeDefaultFighterConfig();
+	Cfg.MaxStamina = Cfg.Attacks[0].StaminaCost; // one jab empties the tank
+	Harness H(Cfg, MakeTrainingBagConfig());
+	H.Step(PunchIntentFor(Hand::Left), Idle());
+	IE_EXPECT_EQ(H.Count(CombatEventType::StaminaExhausted, FighterSlot::Player), 1);
+	IE_EXPECT_EQ(H.P().GassedTicksLeft, Cfg.GassedTicks);
+	// Keep asking for punches every tick: nothing starts until the breath is over.
+	for (int32_t Index = 0; Index < Cfg.GassedTicks + 5; ++Index)
+	{
+		H.Step(PunchIntentFor(Index % 2 == 0 ? Hand::Left : Hand::Right), Idle());
+	}
+	int32_t Second = -1;
+	int Started = 0;
+	for (const CombatEvent& Event : H.Log)
+	{
+		if (Event.Type == CombatEventType::AttackStarted && Event.Actor == FighterSlot::Player && ++Started == 2)
+		{
+			Second = Event.Tick;
+		}
+	}
+	IE_EXPECT_EQ(Second, 1 + Cfg.GassedTicks);
+	IE_EXPECT(H.P().bAttackTired); // it comes back as an arm punch
 }

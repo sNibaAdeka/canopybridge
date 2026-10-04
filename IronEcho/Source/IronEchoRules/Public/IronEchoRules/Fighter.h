@@ -47,6 +47,7 @@ namespace IronEchoCore
 		int32_t StageTicksTotal = 0;
 		int32_t StageTicksLeft = 0;
 		int32_t StateTicksLeft = 0;   // remaining stun ticks
+		int32_t GassedTicksLeft = 0;  // > 0: out of breath after emptying the stamina, cannot start a punch
 		bool bBlocking = false;
 		DodgeDir Dodge = DodgeDir::None;
 		int32_t DodgeHeldTicks = 0;
@@ -114,12 +115,23 @@ namespace IronEchoCore
 		bool IsKnockedOut() const { return Snap.State == ActionState::KnockedOut; }
 		bool IsKnockedDown() const { return Snap.State == ActionState::KnockedDown; }
 		bool IsDown() const { return IsKnockedOut() || IsKnockedDown(); }
-		bool CanAffordBlock() const { return Snap.Stamina >= Config.BlockStaminaCost; }
+		// Stamina a guard pays to stop a punch of this damage from an attack with this full damage.
+		float BlockDrain(float Damage, float FullDamage) const
+		{
+			const float Power = FullDamage > 0.0f ? Clamp(Damage / FullDamage, 0.0f, 2.0f) : 1.0f;
+			return Config.BlockStaminaCost * Power;
+		}
+		// The guard holds while it can pay for the punch; an empty tank breaks it.
+		bool CanAffordBlock(float Drain) const { return Snap.Stamina >= Drain; }
 		float CurrentAttackDamage(bool bCounter) const;
+		int32_t CurrentAttackHitStun() const;
 
 		// Phase C: outcome application. Return the damage actually applied.
 		void OnAttackResolved(AttackOutcome Outcome, float DamageDealt, bool bCounter, int32_t Tick);
-		float ReceiveHit(const AttackSpec& Spec, float Damage, int32_t Tick, CombatEventBuffer& Events, uint32_t AttackerAttackId);
+		// StunTicks < 0: the attack's full HitStunTicks. bArmPunch: a tired punch, which cannot interrupt a punch
+		// this fighter is already winding up (the damage still counts).
+		float ReceiveHit(const AttackSpec& Spec, float Damage, int32_t Tick, CombatEventBuffer& Events, uint32_t AttackerAttackId,
+			int32_t StunTicks = -1, bool bArmPunch = false);
 		float ReceiveBlockedHit(const AttackSpec& Spec, float Damage, int32_t Tick);
 
 		void SetPosition(float NewPosition) { Snap.Position = NewPosition; }
@@ -152,5 +164,8 @@ namespace IronEchoCore
 		PunchRequest Buffered;
 		int32_t BufferedExpiresTick = 0;
 		int32_t LastLandedTick = -1000000;
+		int32_t StunTicksElapsed = 0;
+		int32_t GassedUntilTick = -1000000;
+		int32_t AttackLockedUntilTick = -1000000; // cover-up keeps the rest of the hit stun for punches
 	};
 }

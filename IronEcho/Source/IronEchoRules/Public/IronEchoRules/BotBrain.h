@@ -47,6 +47,7 @@ namespace IronEchoCore
 		int32_t DefenseUntilTick = 0;
 
 		int32_t NextAttackTick = 0;
+		Hand PlannedHand = Hand::Left;
 		bool bComboQueued = false;
 		Hand ComboHand = Hand::Left;
 		int32_t ComboTick = 0;
@@ -56,5 +57,9 @@ namespace IronEchoCore
 		int32_t NextGuardRollTick = 0;
 		int32_t GuardUpUntilTick = -1;
 		float LastHealth = -1.0f;
+
+		int32_t FlurryCount = 0;
+		int32_t LastPlayerAttackTick = -1000000;
+		int32_t LastDefenses = -1;
 	};
 }

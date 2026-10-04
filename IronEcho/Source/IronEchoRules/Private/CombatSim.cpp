@@ -76,7 +76,8 @@ namespace IronEchoCore
 		}
 		if (Defender.IsBlocking())
 		{
-			Result.Outcome = Defender.CanAffordBlock() ? AttackOutcome::Blocked : AttackOutcome::GuardBroken;
+			const float Drain = Defender.BlockDrain(Attacker.CurrentAttackDamage(false), Spec.Damage);
+			Result.Outcome = Defender.CanAffordBlock(Drain) ? AttackOutcome::Blocked : AttackOutcome::GuardBroken;
 			return Result;
 		}
 		Result.Outcome = AttackOutcome::Hit;
@@ -114,7 +115,7 @@ namespace IronEchoCore
 				Events.Push(Broken);
 			}
 			const float Damage = Attacker.CurrentAttackDamage(Result.bCounter);
-			Applied = Defender.ReceiveHit(Spec, Damage, Tick, Events, A.AttackId);
+			Applied = Defender.ReceiveHit(Spec, Damage, Tick, Events, A.AttackId, Attacker.CurrentAttackHitStun(), A.bAttackTired);
 			Knockback(Defender.Snapshot().Slot, Spec.KnockbackMeters);
 			Event.Type = CombatEventType::HitConfirmed;
 			Event.bCounterHit = Result.bCounter;

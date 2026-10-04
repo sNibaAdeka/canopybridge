@@ -1,5 +1,7 @@
 #include "IronEchoRules/BotBrain.h"
 
+#include <algorithm>
+
 namespace IronEchoCore
 {
 	BotBrain::BotBrain(const BotConfig& InConfig, uint64_t Seed)
@@ -20,6 +22,7 @@ namespace IronEchoCore
 		ActiveDefense = Defense::None;
 		DefenseUntilTick = 0;
 		NextAttackTick = 0;
+		PlannedHand = Hand::Left;
 		bComboQueued = false;
 		ComboHand = Hand::Left;
 		ComboTick = 0;
@@ -28,6 +31,9 @@ namespace IronEchoCore
 		NextGuardRollTick = 0;
 		GuardUpUntilTick = -1;
 		LastHealth = -1.0f;
+		FlurryCount = 0;
+		LastPlayerAttackTick = -1000000;
+		LastDefenses = -1;
 	}
 
 	int32_t BotBrain::DecideGetUpCount(int32_t KnockdownNumber)
@@ -56,6 +62,7 @@ namespace IronEchoCore
 		{
 			bInitialized = true;
 			NextAttackTick = Tick + Rng.RangeInclusive(Config.AttackIntervalMinTicks, Config.AttackIntervalMaxTicks);
+			PlannedHand = Rng.Chance(Config.CrossChance) ? Hand::Right : Hand::Left;
 			NextGuardRollTick = Tick + Config.GuardUpPeriodTicks;
 			NextRetreatRollTick = Tick;
 		}
@@ -64,13 +71,20 @@ namespace IronEchoCore
 		if (FoeSnap.State == ActionState::Attack && FoeSnap.AttackId != LastSeenPlayerAttackId)
 		{
 			LastSeenPlayerAttackId = FoeSnap.AttackId;
+			// A flurry is easy to read: each punch after the second one raises the block chance.
+			FlurryCount = (Tick - LastPlayerAttackTick <= Config.FlurryGapTicks) ? FlurryCount + 1 : 1;
+			LastPlayerAttackTick = Tick;
+			const float Read = Config.FlurryBlockBonus * static_cast<float>(FlurryCount > 2 ? FlurryCount - 2 : 0);
+			const bool bHurt = MySnap.Health < Config.HurtHealthFraction * MySnap.MaxHealth;
+			const float Hurt = bHurt ? Config.HurtBlockBonus : 0.0f;
+			const float BlockChance = Clamp(Config.BlockChance + Read + Hurt, 0.0f, (std::max)(Config.MaxBlockChance, Config.BlockChance));
 			const float Roll = Rng.NextFloat01();
 			Defense Planned = Defense::None;
-			if (Roll < Config.BlockChance)
+			if (Roll < BlockChance)
 			{
 				Planned = Defense::Block;
 			}
-			else if (Roll < Config.BlockChance + Config.DodgeChance)
+			else if (Roll < BlockChance + Config.DodgeChance)
 			{
 				Planned = Rng.Chance(0.5f) ? Defense::DodgeLeft : Defense::DodgeRight;
 			}
@@ -79,12 +93,15 @@ namespace IronEchoCore
 			ReactionTick = Tick + Config.ReactionTicks;
 			ReactingToAttackId = FoeSnap.AttackId;
 		}
+		const bool bFoeGassed = FoeSnap.Stamina < Config.PressureStaminaThreshold;
 		if (bReactionPending && Tick >= ReactionTick)
 		{
 			bReactionPending = false;
 			const bool bThreatStillLive = FoeSnap.State == ActionState::Attack && FoeSnap.AttackId == ReactingToAttackId
 				&& (FoeSnap.Stage == AttackStage::Windup || (FoeSnap.Stage == AttackStage::Active && !FoeSnap.bAttackResolved));
-			if (bThreatStillLive)
+			// A gassed player's arm punch is not worth covering up for while the bot's own punch is coming.
+			const bool bIgnore = bFoeGassed && FoeSnap.bAttackTired && MySnap.State == ActionState::Attack;
+			if (bThreatStillLive && !bIgnore)
 			{
 				ActiveDefense = PlannedDefense;
 				DefenseUntilTick = Tick + Config.DefenseHoldTicks;
@@ -94,6 +111,18 @@ namespace IronEchoCore
 		{
 			ActiveDefense = Defense::None;
 		}
+
+		// ---- block-and-counter: a successful block or slip opens a chance to fire back at once ----
+		const int32_t Defenses = MySnap.BlocksMade + MySnap.DodgesMade;
+		if (LastDefenses >= 0 && Defenses > LastDefenses && !bComboQueued && Rng.Chance(Config.CounterChance))
+		{
+			ActiveDefense = Defense::None;
+			bReactionPending = false;
+			GuardUpUntilTick = -1;
+			NextAttackTick = Tick + Config.CounterDelayTicks;
+			PlannedHand = Rng.Chance(Config.CounterCrossChance) ? Hand::Right : Hand::Left;
+		}
+		LastDefenses = Defenses;
 
 		// ---- stamina management: step out of range to recover ----
 		if (Tick >= RetreatUntilTick && MySnap.Stamina < Config.RetreatStaminaThreshold && Tick >= NextRetreatRollTick)
@@ -122,7 +151,9 @@ namespace IronEchoCore
 		if (Tick >= NextGuardRollTick)
 		{
 			NextGuardRollTick = Tick + Config.GuardUpPeriodTicks;
-			if (bFoeInRange && ActiveDefense == Defense::None && Rng.Chance(Config.GuardUpChance))
+			const bool bHurtNow = MySnap.Health < Config.HurtHealthFraction * MySnap.MaxHealth;
+			const float GuardUp = Config.GuardUpChance + (bHurtNow ? Config.HurtGuardUpBonus : 0.0f);
+			if (bFoeInRange && ActiveDefense == Defense::None && Rng.Chance(GuardUp))
 			{
 				GuardUpUntilTick = Tick + Config.GuardUpTicks;
 			}
@@ -142,12 +173,13 @@ namespace IronEchoCore
 				AttackHand = ComboHand;
 			}
 		}
-		else if (Tick >= NextAttackTick && !Intent.bRetreat && ActiveDefense == Defense::None)
+		else if (Tick >= NextAttackTick && !Intent.bRetreat && (ActiveDefense == Defense::None || bFoeGassed))
 		{
-			NextAttackTick = Tick + Rng.RangeInclusive(Config.AttackIntervalMinTicks, Config.AttackIntervalMaxTicks);
-			const Hand Choice = Rng.Chance(Config.CrossChance) ? Hand::Right : Hand::Left;
+			const Hand Choice = PlannedHand;
 			const AttackSpec& Spec = Me.GetConfig().Attacks[HandIndex(Choice)];
-			if (bFree && MySnap.State != ActionState::Attack && Sim.Gap() <= Spec.ReachMeters && MySnap.Stamina >= Spec.StaminaCost)
+			const bool bFoeCommitted = FoeSnap.State == ActionState::Attack && FoeSnap.Stage != AttackStage::Recovery;
+			const bool bWaitOut = bFoeCommitted && Rng.Chance(Config.AvoidTradeChance);
+			if (bFree && !bWaitOut && MySnap.State != ActionState::Attack && Sim.Gap() <= Spec.ReachMeters && MySnap.Stamina >= Spec.StaminaCost)
 			{
 				bAttackNow = true;
 				AttackHand = Choice;
@@ -157,6 +189,22 @@ namespace IronEchoCore
 					ComboHand = OtherHand(Choice);
 					ComboTick = Tick + Spec.WindupTicks + Spec.ActiveTicks;
 				}
+				int32_t Interval = Rng.RangeInclusive(Config.AttackIntervalMinTicks, Config.AttackIntervalMaxTicks);
+				if (bFoeGassed)
+				{
+					Interval = static_cast<int32_t>(static_cast<float>(Interval) * Config.PressureIntervalScale);
+				}
+				else if (MySnap.Health < Config.HurtHealthFraction * MySnap.MaxHealth)
+				{
+					Interval = static_cast<int32_t>(static_cast<float>(Interval) * Config.HurtIntervalScale);
+				}
+				NextAttackTick = Tick + Interval;
+				PlannedHand = Rng.Chance(Config.CrossChance) ? Hand::Right : Hand::Left;
+				ActiveDefense = Defense::None;
+			}
+			else
+			{
+				NextAttackTick = Tick + Config.AttackRetryTicks; // not now: try again soon, keep the plan
 			}
 		}
 

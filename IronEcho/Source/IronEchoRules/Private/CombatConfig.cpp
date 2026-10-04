@@ -10,7 +10,7 @@ namespace IronEchoCore
 		Jab.WindupTicks = SecondsToTicks(0.09);
 		Jab.ActiveTicks = SecondsToTicks(0.07);
 		Jab.RecoveryTicks = SecondsToTicks(0.20);
-		Jab.Damage = 5.0f;
+		Jab.Damage = 1.6f;
 		Jab.StaminaCost = 6.0f;
 		Jab.ReachMeters = 1.50f;
 		Jab.KnockbackMeters = 0.06f;
@@ -20,7 +20,7 @@ namespace IronEchoCore
 		Cross.WindupTicks = SecondsToTicks(0.14);
 		Cross.ActiveTicks = SecondsToTicks(0.07);
 		Cross.RecoveryTicks = SecondsToTicks(0.28);
-		Cross.Damage = 9.0f;
+		Cross.Damage = 2.8f;
 		Cross.StaminaCost = 10.0f;
 		Cross.ReachMeters = 1.45f;
 		Cross.KnockbackMeters = 0.15f;
@@ -43,12 +43,17 @@ namespace IronEchoCore
 		case BotLevel::Normal:
 			break;
 		case BotLevel::Hard:
-			JabWindup = 0.32;
-			CrossWindup = 0.45;
+			JabWindup = 0.34;
+			CrossWindup = 0.48;
 			break;
 		}
 		Config.Attacks[HandIndex(Hand::Left)].WindupTicks = SecondsToTicks(JabWindup);
 		Config.Attacks[HandIndex(Hand::Right)].WindupTicks = SecondsToTicks(CrossWindup);
+		// The telegraphed windup is there for the human, not a choice of the bot: it would keep the bot out of
+		// regeneration (no regen while attacking) and starve it. Cheaper punches and faster regen compensate.
+		Config.Attacks[HandIndex(Hand::Left)].StaminaCost *= 0.75f;
+		Config.Attacks[HandIndex(Hand::Right)].StaminaCost *= 0.75f;
+		Config.StaminaRegenPerSecond = 18.0f;
 		return Config;
 	}
 
@@ -68,31 +73,36 @@ namespace IronEchoCore
 		switch (Level)
 		{
 		case BotLevel::Easy:
-			Config.ReactionTicks = SecondsToTicks(0.20);
+			Config.ReactionTicks = SecondsToTicks(0.09); // cannot defend a jab, only crosses
+			Config.CounterChance = 0.15f;
+			Config.FlurryBlockBonus = 0.06f;
 			Config.GuardAfterHitChance = 0.20f;
-			Config.GetUpChance[0] = 0.60f;
-			Config.GetUpChance[1] = 0.35f;
-			Config.GetUpChance[2] = 0.10f;
-			Config.BlockChance = 0.25f;
+			Config.GetUpChance[0] = 0.75f;
+			Config.GetUpChance[1] = 0.45f;
+			Config.GetUpChance[2] = 0.20f;
+			Config.BlockChance = 0.30f;
 			Config.DodgeChance = 0.10f;
-			Config.AttackIntervalMinTicks = SecondsToTicks(1.2);
-			Config.AttackIntervalMaxTicks = SecondsToTicks(2.4);
+			Config.AttackIntervalMinTicks = SecondsToTicks(1.5);
+			Config.AttackIntervalMaxTicks = SecondsToTicks(2.8);
+			Config.AvoidTradeChance = 0.0f;
 			Config.ComboChance = 0.15f;
 			Config.CrossChance = 0.35f;
-			Config.GuardUpChance = 0.15f;
+			Config.GuardUpChance = 0.30f;
 			break;
 		case BotLevel::Normal:
 			break;
 		case BotLevel::Hard:
-			Config.ReactionTicks = SecondsToTicks(0.07);
+			Config.ReactionTicks = SecondsToTicks(0.04);
+			Config.CounterChance = 0.55f;
 			Config.GuardAfterHitChance = 0.65f;
-			Config.GetUpChance[0] = 0.95f;
-			Config.GetUpChance[1] = 0.70f;
-			Config.GetUpChance[2] = 0.40f;
+			Config.GetUpChance[0] = 0.97f;
+			Config.GetUpChance[1] = 0.80f;
+			Config.GetUpChance[2] = 0.50f;
 			Config.BlockChance = 0.50f;
-			Config.DodgeChance = 0.30f;
-			Config.AttackIntervalMinTicks = SecondsToTicks(0.55);
-			Config.AttackIntervalMaxTicks = SecondsToTicks(1.2);
+			Config.DodgeChance = 0.22f;
+			Config.AttackIntervalMinTicks = SecondsToTicks(0.60);
+			Config.AttackIntervalMaxTicks = SecondsToTicks(1.25);
+			Config.AvoidTradeChance = 0.80f;
 			Config.ComboChance = 0.45f;
 			Config.CrossChance = 0.45f;
 			Config.GuardUpChance = 0.35f;

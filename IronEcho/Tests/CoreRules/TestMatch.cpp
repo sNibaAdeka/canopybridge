@@ -219,7 +219,7 @@ IE_TEST(Match_DecisionScoringAndRoundBreakRecovery)
 IE_TEST(Match_StayingDownForTenIsKnockOut)
 {
 	MatchSetup Setup = ShortSetup();
-	Setup.OpponentFighter.MaxHealth = 9.0f;
+	Setup.OpponentFighter.MaxHealth = Setup.PlayerFighter.Attacks[1].Damage; // one cross puts it down
 	Setup.Bot.GetUpChance[0] = 0.0f;
 	Setup.Bot.AttackIntervalMinTicks = 1000000;
 	Setup.Bot.AttackIntervalMaxTicks = 1000000;
@@ -286,7 +286,7 @@ IE_TEST(Match_ManualPauseNeedsResumeRequest)
 IE_TEST(Match_RematchResetsEverything)
 {
 	MatchSetup Setup = ShortSetup();
-	Setup.OpponentFighter.MaxHealth = 5.0f;
+	Setup.OpponentFighter.MaxHealth = Setup.PlayerFighter.Attacks[0].Damage; // one jab puts it down
 	Setup.Bot.GetUpChance[0] = 0.0f;
 	Setup.Bot.AttackIntervalMinTicks = 1000000;
 	Setup.Bot.AttackIntervalMaxTicks = 1000000;
@@ -306,7 +306,7 @@ IE_TEST(Match_RematchResetsEverything)
 	IE_EXPECT_EQ(R.M.Snapshot().Round, 0);
 	IE_EXPECT_EQ(R.M.Snapshot().ScorePlayer, 0);
 	IE_EXPECT(R.M.Snapshot().Result == ResultMethod::None);
-	IE_EXPECT_NEAR(R.M.Sim().Get(FighterSlot::Opponent).Snapshot().Health, 5.0, 1e-5);
+	IE_EXPECT_NEAR(R.M.Sim().Get(FighterSlot::Opponent).Snapshot().Health, Setup.OpponentFighter.MaxHealth, 1e-5);
 	IE_EXPECT(R.M.Snapshot().Seed == Setup.Seed + 1);
 	R.RunUntil(MatchPhase::Fighting, SecondsToTicks(6.0));
 	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Fighting);
@@ -384,7 +384,7 @@ namespace
 IE_TEST(Match_PlayerBeatsCountByHoldingGuard)
 {
 	MatchSetup Setup = PassiveBotSetup();
-	Setup.PlayerFighter.MaxHealth = 4.0f;
+	Setup.PlayerFighter.MaxHealth = Setup.OpponentFighter.Attacks[0].Damage; // any clean bot punch puts the player down
 	Setup.Bot.AttackIntervalMinTicks = SecondsToTicks(0.3); // aggressive bot knocks the idle player down
 	Setup.Bot.AttackIntervalMaxTicks = SecondsToTicks(0.3);
 	Runner R(Setup);
@@ -407,7 +407,8 @@ IE_TEST(Match_PlayerBeatsCountByHoldingGuard)
 		R.Tick(true, Guard);
 	}
 	IE_EXPECT(!R.M.Sim().Get(FighterSlot::Player).IsKnockedDown());
-	IE_EXPECT_NEAR(R.M.Sim().Get(FighterSlot::Player).Snapshot().Health, 4.0 * 0.40, 1e-4);
+	IE_EXPECT_NEAR(R.M.Sim().Get(FighterSlot::Player).Snapshot().Health,
+		(std::max)(1.0f, Setup.PlayerFighter.MaxHealth * Setup.PlayerFighter.KnockdownRecoverHealth), 1e-4); // never below 1 HP
 	IE_EXPECT_NEAR(R.M.Sim().Gap(), R.M.Setup().Movement.EngageDistance, 1e-4);
 	R.RunUntil(MatchPhase::Fighting, SecondsToTicks(2.0));
 	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Fighting);
@@ -417,7 +418,7 @@ IE_TEST(Match_PlayerBeatsCountByHoldingGuard)
 IE_TEST(Match_ReleasingGuardResetsGetUp)
 {
 	MatchSetup Setup = PassiveBotSetup();
-	Setup.PlayerFighter.MaxHealth = 4.0f;
+	Setup.PlayerFighter.MaxHealth = Setup.OpponentFighter.Attacks[0].Damage;
 	Setup.Bot.AttackIntervalMinTicks = SecondsToTicks(0.3);
 	Setup.Bot.AttackIntervalMaxTicks = SecondsToTicks(0.3);
 	Runner R(Setup);
@@ -437,7 +438,7 @@ IE_TEST(Match_ReleasingGuardResetsGetUp)
 IE_TEST(Match_ThirdKnockdownInRoundIsTechnicalKnockOut)
 {
 	MatchSetup Setup = PassiveBotSetup();
-	Setup.OpponentFighter.MaxHealth = 9.0f;
+	Setup.OpponentFighter.MaxHealth = Setup.PlayerFighter.Attacks[1].Damage; // every cross is a knockdown
 	Setup.Bot.GetUpChance[0] = Setup.Bot.GetUpChance[1] = Setup.Bot.GetUpChance[2] = 1.0f;
 	Setup.Bot.GetUpCountMin = Setup.Bot.GetUpCountMax = 3;
 	Runner R(Setup);
@@ -468,7 +469,7 @@ IE_TEST(Match_ThirdKnockdownInRoundIsTechnicalKnockOut)
 IE_TEST(Match_TrackingLossDuringCountPausesAndResumesCount)
 {
 	MatchSetup Setup = PassiveBotSetup();
-	Setup.OpponentFighter.MaxHealth = 9.0f;
+	Setup.OpponentFighter.MaxHealth = Setup.PlayerFighter.Attacks[1].Damage;
 	Setup.Bot.GetUpChance[0] = 0.0f;
 	Runner R(Setup);
 	R.RunUntil(MatchPhase::Fighting, SecondsToTicks(5.0));
