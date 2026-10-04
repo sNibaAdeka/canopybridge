@@ -29,9 +29,9 @@ class Livery:
     wear: float
 
 
-FORGE = Livery("Forge", (0.56, 0.57, 0.58), (0.015, 0.09, 0.42), (0.085, 0.09, 0.10), (0.012, 0.05, 0.36),
+FORGE = Livery("Forge", (0.56, 0.57, 0.58), (0.015, 0.09, 0.42), (0.085, 0.09, 0.10), (0.006, 0.03, 0.24),
                (0.25, 0.6, 1.0), "07", 0.45)
-EMBER = Livery("Ember", (0.045, 0.047, 0.052), (0.55, 0.035, 0.012), (0.16, 0.16, 0.17), (0.42, 0.018, 0.012),
+EMBER = Livery("Ember", (0.045, 0.047, 0.052), (0.55, 0.035, 0.012), (0.16, 0.16, 0.17), (0.3, 0.012, 0.008),
                (1.0, 0.28, 0.05), "13", 0.6)
 
 # Rest pose (A-pose), metres. name: (head, tail, parent)
@@ -122,19 +122,28 @@ D = math.radians
 
 
 def _head(k: Kit, lv: Livery):
-    z = 1.815
-    p = [R.blob("helmet", (0.19, 0.158, 0.21), (-0.008, 0, z), mat=k.shell, cuboid=0.28),
-         R.curved_plate("visor", 0.086, 150, 0.125, 0.014, (0.022, 0, z - 0.012), mat=k.glass, bulge=0.008,
-                        taper=0.82, lean=0.012, bevel=0.005),
-         R.curved_plate("brow", 0.099, 96, 0.012, 0.006, (0.014, 0, z + 0.06), mat=k.accent, bevel=0.002),
-         R.curved_plate("brow_led", 0.1015, 60, 0.004, 0.003, (0.014, 0, z + 0.06), mat=k.led, bevel=0.001),
-         R.blob("jaw", (0.085, 0.12, 0.05), (0.045, 0, z - 0.095), mat=k.frame, cuboid=0.4),
-         R.fins("rear_vent", 5, (0.006, 0.09, 0.012), 0.02, 2, (-0.112, 0, z + 0.005), mat=k.plastic),
-         R.cylinder("lidar", 0.038, 0.022, (-0.03, 0, z + 0.115), mat=k.plastic, verts=64, bevel=0.004),
-         R.cylinder("lidar_glass", 0.036, 0.012, (-0.03, 0, z + 0.12), mat=k.glass, verts=64, bevel=0.001)]
+    """Armoured combat head: a helmet dome over the back and top, a separate face mask in front (deep-set dark visor
+    under a brow ridge, faceted jaw with vents), cheek guards bridging dome and mask, short crest, flush slit sensors.
+    Reads like a fighter's helmet on an electric humanoid; no round cartoon eyes."""
+    z = 1.81
+    p = [R.blob("skull_core", (0.165, 0.142, 0.19), (-0.012, 0, z - 0.005), mat=k.frame, cuboid=0.4),
+         R.blob("dome", (0.19, 0.166, 0.14), (-0.034, 0, z + 0.042), mat=k.shell, cuboid=0.62),
+         R.curved_plate("visor", 0.088, 112, 0.07, 0.012, (-0.02, 0, z + 0.004), mat=k.glass, lean=0.016,
+                        bulge=0.003, bevel=0.004),
+         R.curved_plate("visor_line", 0.0915, 64, 0.004, 0.002, (-0.02, 0, z + 0.012), mat=k.led, lean=0.004,
+                        bevel=0.0005),
+         R.curved_plate("brow", 0.095, 104, 0.026, 0.012, (-0.02, 0, z + 0.05), mat=k.shell, lean=-0.003,
+                        taper=1.03, bevel=0.006, screws=k.bolt),
+         R.curved_plate("jaw", 0.086, 106, 0.056, 0.016, (-0.02, 0, z - 0.058), mat=k.frame, lean=0.026, taper=0.74,
+                        bevel=0.005),
+         R.fins("jaw_vent", 4, (0.004, 0.05, 0.006), 0.011, 2, (0.06, 0, z - 0.062), mat=k.plastic),
+         R.box("crest", (0.13, 0.018, 0.026), (-0.05, 0, z + 0.122), mat=k.accent, bevel=0.006, taper=(0.7, 0.6)),
+         R.fins("rear_vent", 4, (0.006, 0.08, 0.01), 0.018, 2, (-0.13, 0, z + 0.02), mat=k.plastic)]
     for s in (-1, 1):
-        p.append(R.cylinder(f"ear{s}", 0.038, 0.022, (-0.012, s * 0.088, z), (D(90), 0, 0), k.frame, 48, bevel=0.004))
-        p.append(R.tube(f"earring{s}", 0.04, 0.004, 0.012, (-0.012, s * 0.094, z), (D(90), 0, 0), k.alu))
+        p.append(R.curved_plate(f"cheek{s}", 0.094, 44, 0.115, 0.016, (-0.02, 0, z - 0.012), (0, 0, s * D(58)),
+                                k.accent, bulge=0.006, taper=0.72, lean=0.008, bevel=0.005, screws=k.bolt))
+        p.append(R.box(f"slit{s}", (0.05, 0.006, 0.01), (-0.05, s * 0.083, z + 0.03), mat=k.plastic, bevel=0.002))
+        p.append(R.box(f"slit_led{s}", (0.03, 0.002, 0.003), (-0.05, s * 0.0858, z + 0.03), mat=k.led, bevel=0.0006))
     return p
 
 
@@ -240,17 +249,39 @@ def _lowerarm(k: Kit, s):
 
 
 def _glove(k: Kit, s):
-    """16 oz pro boxing glove, scaled to the robot (~34 cm incl. cuff). Hand frame: z = punch direction,
-    +x = back of the hand, inner side = +s*y."""
+    """16 oz boxing glove as one continuous padded leather form (metaballs: fist, knuckle bulge, curled-finger palm,
+    thumb tucked along the side, tapering cuff), with piping seams that follow the surface, a velcro strap and a
+    logo. Hand frame: z = punch direction, +x = back of the hand, inner (thumb) side = +s*y. ~33 cm long."""
     g = k.glove
-    return [R.blob("glove_body", (0.155, 0.142, 0.235), (0.004, 0, 0.14), mat=g, cuboid=0.3),
-            R.blob("glove_knuckle", (0.13, 0.15, 0.12), (0.03, 0, 0.215), mat=g, cuboid=0.25),
-            R.blob("glove_palm", (0.08, 0.12, 0.13), (-0.045, 0, 0.17), mat=g, cuboid=0.3),
-            R.blob("glove_thumb", (0.058, 0.06, 0.15), (-0.035, s * 0.06, 0.13), (D(-8), 0, 0), g, cuboid=0.2),
-            R.cylinder("glove_cuff", 0.062, 0.12, (0, 0, -0.02), mat=g, verts=48, bevel=0.012, radius_top=0.068),
-            R.tube("glove_tape", 0.067, 0.004, 0.055, (0, 0, -0.04), mat=k.tape, verts=48),
-            R.tube("glove_trim", 0.07, 0.006, 0.012, (0, 0, 0.035), mat=k.tape, verts=48),
-            R.text_mesh("glove_logo", "IE", 0.034, k.tape, (0.083, 0, 0.12), (0, D(90), D(90)), extrude=0.001)]
+    D_ = D
+    # elements in normalised units with generous overlap so they fuse into one surface; fit= sets real size
+    body = R.metaball_mesh("glove_body", [
+        ((0.0, 0.0, 0.55), 1.0, (0.92, 1.0, 1.15), (0, 0, 0)),            # fist mass
+        ((0.12, 0.0, 0.95), 0.85, (0.95, 1.12, 0.72), (0, 0, 0)),         # knuckle bulge (striking face)
+        ((-0.28, 0.0, 0.72), 0.72, (0.8, 1.0, 1.05), (0, 0, 0)),          # curled fingers / palm
+        ((-0.2, s * 0.58, 0.32), 0.42, (0.8, 0.75, 1.7), (D_(-6), s * D_(12), 0)),  # thumb, tucked to the side
+        ((0.0, 0.0, -0.3), 0.86, (0.95, 0.95, 1.15), (0, 0, 0)),          # cuff
+        ((0.0, 0.0, -0.95), 0.76, (0.9, 0.9, 1.0), (0, 0, 0)),            # wrist opening
+    ], mat=g, resolution=0.035, threshold=0.6, fit=(0.13, 0.14, 0.335))
+    body.location = (0.0, 0.0, 0.085)  # fist front ends ~0.25 m past the wrist, cuff reaches back over the forearm
+    bpy.context.view_layer.update()
+    parts = [body]
+    for nm, co, no in (("glove_seam_side", (0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),        # top/palm panel seam
+                       ("glove_seam_cuff", (0.0, 0.0, -0.035), (0.0, 0.0, 1.0))):   # cuff/fist seam
+        seam = R.surface_seam(nm, body, co, no, 0.0024, g, offset=0.0012)
+        if seam is not None:
+            parts.append(seam)
+    strap = R.curved_plate("glove_strap", 0.05, 250, 0.048, 0.005, (0, 0, 0.012), (0, 0, D_(180)), g, bevel=0.002,
+                           segs=(40, 6), wrap=body)
+    parts.append(strap)
+    for i, zz in enumerate((0.035, -0.011)):
+        parts.append(R.curved_plate(f"glove_strap_edge{i}", 0.05, 250, 0.003, 0.0018, (0, 0, zz), (0, 0, D_(180)),
+                                    k.tape, bevel=0.0006, segs=(40, 2), wrap=body))
+    parts.append(R.text_mesh("glove_logo", "IE", 0.034, k.tape, (0.075, 0, 0.165), R.orient((1, 0, 0), (0, 0, 1)),
+                             extrude=0.0008, wrap=body))
+    parts.append(R.text_mesh("glove_oz", "16 OZ", 0.012, k.tape, (0.062, 0, 0.01), R.orient((1, 0, 0), (0, 0, 1)),
+                             extrude=0.0006, wrap=strap))
+    return parts
 
 
 def _thigh(k: Kit, s):

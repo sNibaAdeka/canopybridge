@@ -148,7 +148,7 @@ def soft_box(name, size, loc=(0, 0, 0), rot=(0, 0, 0), mat=None, roundness=0.25,
 
 
 def curved_plate(name, radius, arc_deg, height, thickness, loc=(0, 0, 0), rot=(0, 0, 0), mat=None, taper=1.0,
-                 bulge=0.0, lean=0.0, segs=(28, 10), bevel=0.004, flare=0.0, screws=None):
+                 bulge=0.0, lean=0.0, segs=(28, 10), bevel=0.004, flare=0.0, screws=None, wrap=None):
     """Armour plate wrapped on a vertical cylinder (local Z axis), centred on +X. taper scales the arc at the top,
     bulge pushes the middle outward (muscle/padding), lean tilts the top inward (+) or outward (-), flare widens
     the radius at the top. Solidified inward with rounded edges: reads as a real moulded shell with thickness."""
@@ -171,9 +171,15 @@ def curved_plate(name, radius, arc_deg, height, thickness, loc=(0, 0, 0), rot=(0
     obj = mesh_object(name, v, f, mat, 0.0, smooth=True)
     for m in list(obj.modifiers):
         obj.modifiers.remove(m)
+    if wrap is not None:  # hug another surface (straps, bands): shrink-wrap first, then grow the thickness outward
+        sw = obj.modifiers.new("Shrinkwrap", "SHRINKWRAP")
+        sw.target = wrap
+        sw.wrap_method = "NEAREST_SURFACEPOINT"
+        sw.wrap_mode = "OUTSIDE_SURFACE"
+        sw.offset = 0.0004
     sol = obj.modifiers.new("Solidify", "SOLIDIFY")
     sol.thickness = thickness
-    sol.offset = -1
+    sol.offset = 1 if wrap is not None else -1
     sol.use_even_offset = True
     b = obj.modifiers.new("Bevel", "BEVEL")
     b.width = min(bevel, thickness * 0.45)
@@ -247,6 +253,109 @@ def blob(name, size, loc=(0, 0, 0), rot=(0, 0, 0), mat=None, cuboid=0.3, levels=
     obj.location = loc
     obj.rotation_euler = rot
     return obj
+
+
+def metaball_mesh(name, elements, mat=None, resolution=0.004, threshold=0.6, fit=None, subdiv=1):
+    """One continuous organic surface from blended ellipsoids (padding, gloves): Blender metaballs converted to a
+    mesh. elements: list of (center, radius, (sx, sy, sz), euler). fit=(dx, dy, dz) rescales the result to an exact
+    bounding box so proportions don't depend on metaball falloff."""
+    from mathutils import Euler
+
+    mb = bpy.data.metaballs.new(name + "_mb")
+    mb.resolution = mb.render_resolution = resolution
+    mb.threshold = threshold
+    for co, radius, size, rot in elements:
+        el = mb.elements.new(type="ELLIPSOID")
+        el.co = co
+        el.radius = radius
+        el.size_x, el.size_y, el.size_z = size
+        el.rotation = Euler(rot).to_quaternion()
+        el.stiffness = 2.0
+    ob = _link(bpy.data.objects.new(name + "_mbobj", mb))
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg), depsgraph=dg)
+    bpy.data.objects.remove(ob, do_unlink=True)
+    bpy.data.metaballs.remove(mb)
+    if fit is not None and len(me.vertices):
+        import numpy as np
+        co = np.empty(len(me.vertices) * 3, dtype=np.float64)
+        me.vertices.foreach_get("co", co)
+        co = co.reshape(-1, 3)
+        lo, hi = co.min(axis=0), co.max(axis=0)
+        mid = (lo + hi) / 2
+        target_mid = np.array([0.0, 0.0, 0.0])
+        co = (co - mid) * (np.array(fit) / np.maximum(hi - lo, 1e-6)) + target_mid
+        me.vertices.foreach_set("co", co.reshape(-1))
+        me.update()
+    obj = _link(bpy.data.objects.new(name, me))
+    if mat is not None:
+        me.materials.append(mat)
+    me.shade_smooth()
+    if subdiv:
+        sub = obj.modifiers.new("Subsurf", "SUBSURF")
+        sub.levels = sub.render_levels = 0 if game() else subdiv
+    if game():  # metaball meshes are dense and uniform: decimate for the game budget, the bake keeps the detail
+        dec = obj.modifiers.new("Decimate", "DECIMATE")
+        dec.ratio = 0.2
+    return obj
+
+
+def surface_seam(name, obj, plane_co, plane_no, radius, mat, offset=0.0015):
+    """Piping/seam that hugs a surface: cross-section of obj's mesh (in obj local space) by a plane, turned into a
+    thin closed tube slightly proud of the surface. Returns the curve object placed with obj's transform."""
+    import bmesh
+
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    res = bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], dist=1e-6,
+                                 plane_co=plane_co, plane_no=plane_no, clear_inner=False, clear_outer=False)
+    cut_edges = [e for e in res["geom_cut"] if isinstance(e, bmesh.types.BMEdge)]
+    # walk the cut into loops, keep the longest
+    adj = {}
+    for e in cut_edges:
+        a, b = e.verts
+        adj.setdefault(a, []).append(b)
+        adj.setdefault(b, []).append(a)
+    seen, best = set(), []
+    for start in adj:
+        if start in seen:
+            continue
+        loop, prev, cur = [start], None, start
+        seen.add(start)
+        while True:
+            nxt = [v for v in adj[cur] if v is not prev and v not in seen]
+            if not nxt:
+                break
+            prev, cur = cur, nxt[0]
+            seen.add(cur)
+            loop.append(cur)
+        if len(loop) > len(best):
+            best = loop
+    pts = [v.co.copy() for v in best]
+    bm.free()
+    if len(pts) < 8:
+        return None
+    centre = sum(pts, Vector()) / len(pts)
+    step = max(1, len(pts) // 96)
+    pts = pts[::step]
+    cu = bpy.data.curves.new(name, "CURVE")
+    cu.dimensions = "3D"
+    cu.bevel_depth = radius
+    cu.bevel_resolution = 2
+    sp = cu.splines.new("POLY")
+    sp.points.add(len(pts) - 1)
+    for p_, q in zip(sp.points, pts):
+        d = q - centre
+        n = Vector(plane_no).normalized()
+        d = d - n * d.dot(n)
+        q2 = q + (d.normalized() * offset if d.length > 1e-6 else Vector())
+        p_.co = (q2.x, q2.y, q2.z, 1.0)
+    sp.use_cyclic_u = True
+    seam = _link(bpy.data.objects.new(name, cu))
+    seam.data.materials.append(mat)
+    seam.matrix_world = obj.matrix_basis.copy()
+    return seam
 
 
 def capsule(name, radius, length, loc=(0, 0, 0), rot=(0, 0, 0), mat=None, scale=(1, 1, 1), verts=32):
@@ -766,24 +875,32 @@ def mat_leather(name, color, rough=0.42):
     base.data_type = "RGBA"
     base.blend_type = "MULTIPLY"
     base.inputs[0].default_value = 1.0
-    base.inputs[6].default_value = (*color, 1.0)
+    base.inputs[6].default_value = (*(c * 0.78 for c in color), 1.0)
     comb = nt.nodes.new("ShaderNodeCombineColor")
     for i in range(3):
         nt.links.new(tint, comb.inputs[i])
     nt.links.new(comb.outputs[0], base.inputs[7])
-    dark = _mix_rgb(nt, _math(nt, "SUBTRACT", 1.0, cav), base.outputs[2], tuple(c * 0.4 for c in color))
-    scuff = _math(nt, "MAXIMUM", _math(nt, "MULTIPLY", edge, 0.35), _math(nt, "MULTIPLY", _scratches(nt, 0.8, 0.9), 0.7))
-    worn = _mix_rgb(nt, scuff, dark, tuple(min(1, c * 1.6 + 0.07) for c in color))
+    dark = _mix_rgb(nt, _math(nt, "SUBTRACT", 1.0, cav), base.outputs[2], tuple(c * 0.3 for c in color))
+    scuff = _math(nt, "MAXIMUM", _math(nt, "MULTIPLY", edge, 0.25), _math(nt, "MULTIPLY", _scratches(nt, 1.6, 0.6), 0.45))
+    worn = _mix_rgb(nt, scuff, dark, tuple(min(1, c * 1.35 + 0.025) for c in color))
     nt.links.new(worn, bsdf.inputs["Base Color"])
     nt.links.new(_maprange(nt, nz.outputs["Fac"], 0.3, 0.7, rough - 0.08, rough + 0.1), bsdf.inputs["Roughness"])
-    bsdf.inputs["Sheen Weight"].default_value = 0.15
-    bsdf.inputs["Coat Weight"].default_value = 0.25
-    bsdf.inputs["Coat Roughness"].default_value = 0.25
+    bsdf.inputs["Sheen Weight"].default_value = 0.04
+    bsdf.inputs["Coat Weight"].default_value = 0.35
+    bsdf.inputs["Coat Roughness"].default_value = 0.18
     vor = nt.nodes.new("ShaderNodeTexVoronoi")
-    vor.inputs["Scale"].default_value = 420.0
+    vor.inputs["Scale"].default_value = 520.0
     tc = nt.nodes.new("ShaderNodeTexCoord")
     nt.links.new(tc.outputs["Object"], vor.inputs["Vector"])
-    _bump(nt, bsdf, vor.outputs["Distance"], 0.12, 0.0006)
+    # leather: fine grain + soft creases where the padding folds
+    fold = nt.nodes.new("ShaderNodeTexMusgrave") if hasattr(bpy.types, "ShaderNodeTexMusgrave") else None
+    if fold is None:
+        fold = _noise(nt, 14.0, 5.0, 0.7, stretch=(1.0, 1.0, 3.0))
+        fold_h = fold.outputs["Fac"]
+    else:
+        fold_h = fold.outputs[0]
+    h = _math(nt, "ADD", _math(nt, "MULTIPLY", vor.outputs["Distance"], 0.6), _math(nt, "MULTIPLY", fold_h, 0.9))
+    _bump(nt, bsdf, h, 0.35, 0.0012)
     _MATS[name] = mat
     return mat
 
