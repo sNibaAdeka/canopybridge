@@ -10,7 +10,12 @@ const CONFIG = {
   DAYS_BACK: 120,
   // Ученики. aliases — как они могут отображаться в Meet (имя на аккаунте/устройстве)
   STUDENTS: [
-    // {id:'s1', name:'Айдар Нурлан', email:'', aliases:['Aidar N']},
+    {id:'s1', name:'Сагынгали Азамат', email:'', aliases:[]},
+    {id:'s2', name:'Алихан Жумабек', email:'', aliases:[]},
+    {id:'s3', name:'Амирхан Тасмагамбетов', email:'', aliases:[]},
+    {id:'s4', name:'Alina Iskakova', email:'', aliases:[]},
+    {id:'s5', name:'Abukhan Bolat', email:'', aliases:[]},
+    {id:'s6', name:'Бассаров Таир', email:'', aliases:[]}
   ],
   NOTES_TITLE_HINTS: ['Notes by Gemini', 'Заметки Gemini', 'Заметки от Gemini']
 };

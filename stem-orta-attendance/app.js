@@ -30,7 +30,7 @@ function render(){
     return {s,st,pr,pct:sessions.length?Math.round(pr/sessions.length*100):0};
   });
   $("#matrix").innerHTML="<thead><tr><th>Ученик</th>"+sessions.map(x=>`<th title="${x.title||""}">${fmt(x.date)}</th>`).join("")+"<th>Итого</th></tr></thead><tbody>"+
-    rows.map(r=>`<tr><td>${r.s.name}</td>${r.st.map((x,i)=>`<td title="${mins[i][r.s.id]||0} мин"><i class="d ${x}"></i></td>`).join("")}<td><span class="pct ${r.pct>=80?"hi":r.pct>=60?"mid":"lo"}">${r.pct}%</span></td></tr>`).join("")+"</tbody>";
+    rows.map(r=>`<tr><td>${r.s.name}</td>${r.st.map((x,i)=>`<td title="${mins[i][r.s.id]||0} мин"><i class="d ${x}"></i></td>`).join("")}<td>${sessions.length?`<span class="pct ${r.pct>=80?"hi":r.pct>=60?"mid":"lo"}">${r.pct}%</span>`:'<span class="muted">—</span>'}</td></tr>`).join("")+"</tbody>";
   window._rows=rows;
 }
 function stats(){
@@ -38,7 +38,7 @@ function stats(){
   const present=data.students.reduce((a,s)=>a+sessions.filter((_,i)=>status(i,s,thr)==="p").length,0);
   const avg=tot?Math.round(present/tot*100):0;
   const last=sessions.length-1, lastP=last>=0?data.students.filter(s=>status(last,s,thr)==="p").length:0;
-  $("#stats").innerHTML=[[data.students.length,"учеников"],[sessions.length,"уроков проведено"],[avg+"%","средняя посещаемость"],[last>=0?`${lastP}/${data.students.length}`:"—","на последнем уроке"]]
+  $("#stats").innerHTML=[[data.students.length,"учеников"],[sessions.length,"уроков проведено"],[sessions.length?avg+"%":"—","средняя посещаемость"],[last>=0?`${lastP}/${data.students.length}`:"—","на последнем уроке"]]
     .map(([a,b])=>`<div class="stat"><b>${a}</b><span>${b}</span></div>`).join("");
 }
 function sessionList(){
