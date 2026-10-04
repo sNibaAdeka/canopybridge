@@ -1,0 +1,241 @@
+{
+ "demo": true,
+ "course": "STEM Orta",
+ "updatedAt": "2026-10-04T12:00:00Z",
+ "students": [
+  {
+   "id": "s1",
+   "name": "Айдар Нурлан",
+   "email": "",
+   "aliases": []
+  },
+  {
+   "id": "s2",
+   "name": "Алия Касымова",
+   "email": "",
+   "aliases": []
+  },
+  {
+   "id": "s3",
+   "name": "Данияр Сериков",
+   "email": "",
+   "aliases": []
+  },
+  {
+   "id": "s4",
+   "name": "Амина Ахметова",
+   "email": "",
+   "aliases": []
+  },
+  {
+   "id": "s5",
+   "name": "Тимур Жумабаев",
+   "email": "",
+   "aliases": []
+  },
+  {
+   "id": "s6",
+   "name": "Мадина Омарова",
+   "email": "",
+   "aliases": []
+  },
+  {
+   "id": "s7",
+   "name": "Руслан Ибраев",
+   "email": "",
+   "aliases": []
+  },
+  {
+   "id": "s8",
+   "name": "Зарина Беков",
+   "email": "",
+   "aliases": []
+  }
+ ],
+ "sessions": [
+  {
+   "id": "2026-09-14",
+   "date": "2026-09-14",
+   "title": "Введение в робототехнику",
+   "duration": 60,
+   "meetCode": "abc-defg-hij",
+   "notesUrl": "",
+   "summary": "Демо-описание урока. Реальные заметки подтянутся из Gemini.",
+   "attendees": [
+    {
+     "name": "Айдар Нурлан",
+     "email": "",
+     "minutes": 16
+    },
+    {
+     "name": "Алия Касымова",
+     "email": "",
+     "minutes": 57
+    },
+    {
+     "name": "Данияр Сериков",
+     "email": "",
+     "minutes": 16
+    },
+    {
+     "name": "Тимур Жумабаев",
+     "email": "",
+     "minutes": 54
+    },
+    {
+     "name": "Мадина Омарова",
+     "email": "",
+     "minutes": 50
+    },
+    {
+     "name": "Руслан Ибраев",
+     "email": "",
+     "minutes": 23
+    },
+    {
+     "name": "Зарина Беков",
+     "email": "",
+     "minutes": 52
+    }
+   ]
+  },
+  {
+   "id": "2026-09-21",
+   "date": "2026-09-21",
+   "title": "Датчики и Arduino",
+   "duration": 60,
+   "meetCode": "abc-defg-hij",
+   "notesUrl": "",
+   "summary": "Демо-описание урока. Реальные заметки подтянутся из Gemini.",
+   "attendees": [
+    {
+     "name": "Айдар Нурлан",
+     "email": "",
+     "minutes": 54
+    },
+    {
+     "name": "Алия Касымова",
+     "email": "",
+     "minutes": 15
+    },
+    {
+     "name": "Данияр Сериков",
+     "email": "",
+     "minutes": 54
+    },
+    {
+     "name": "Амина Ахметова",
+     "email": "",
+     "minutes": 53
+    },
+    {
+     "name": "Тимур Жумабаев",
+     "email": "",
+     "minutes": 19
+    },
+    {
+     "name": "Мадина Омарова",
+     "email": "",
+     "minutes": 55
+    },
+    {
+     "name": "Зарина Беков",
+     "email": "",
+     "minutes": 60
+    }
+   ]
+  },
+  {
+   "id": "2026-09-28",
+   "date": "2026-09-28",
+   "title": "Первый проект",
+   "duration": 60,
+   "meetCode": "abc-defg-hij",
+   "notesUrl": "",
+   "summary": "Демо-описание урока. Реальные заметки подтянутся из Gemini.",
+   "attendees": [
+    {
+     "name": "Айдар Нурлан",
+     "email": "",
+     "minutes": 53
+    },
+    {
+     "name": "Алия Касымова",
+     "email": "",
+     "minutes": 22
+    },
+    {
+     "name": "Данияр Сериков",
+     "email": "",
+     "minutes": 23
+    },
+    {
+     "name": "Амина Ахметова",
+     "email": "",
+     "minutes": 50
+    },
+    {
+     "name": "Тимур Жумабаев",
+     "email": "",
+     "minutes": 59
+    },
+    {
+     "name": "Мадина Омарова",
+     "email": "",
+     "minutes": 54
+    },
+    {
+     "name": "Руслан Ибраев",
+     "email": "",
+     "minutes": 58
+    },
+    {
+     "name": "Зарина Беков",
+     "email": "",
+     "minutes": 21
+    }
+   ]
+  },
+  {
+   "id": "2026-10-02",
+   "date": "2026-10-02",
+   "title": "Работа с моторами",
+   "duration": 60,
+   "meetCode": "abc-defg-hij",
+   "notesUrl": "",
+   "summary": "Демо-описание урока. Реальные заметки подтянутся из Gemini.",
+   "attendees": [
+    {
+     "name": "Айдар Нурлан",
+     "email": "",
+     "minutes": 56
+    },
+    {
+     "name": "Алия Касымова",
+     "email": "",
+     "minutes": 53
+    },
+    {
+     "name": "Данияр Сериков",
+     "email": "",
+     "minutes": 50
+    },
+    {
+     "name": "Тимур Жумабаев",
+     "email": "",
+     "minutes": 54
+    },
+    {
+     "name": "Мадина Омарова",
+     "email": "",
+     "minutes": 60
+    },
+    {
+     "name": "Руслан Ибраев",
+     "email": "",
+     "minutes": 55
+    }
+   ]
+  }
+ ]
+}

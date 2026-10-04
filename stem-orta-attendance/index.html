@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STEM Orta — Посещаемость</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-in">
+    <div class="brand"><span class="logo">S</span><div><b>STEM Orta</b><small>Отчёт посещаемости</small></div></div>
+    <div class="top-r"><span id="updated" class="muted"></span><button id="csv" class="btn">Скачать CSV</button></div>
+  </div>
+</header>
+<main class="wrap">
+  <div id="banner" class="banner" hidden></div>
+  <section class="stats" id="stats"></section>
+
+  <section class="card">
+    <div class="card-h">
+      <h2>Журнал</h2>
+      <div class="tools">
+        <input id="q" type="search" placeholder="Поиск ученика…">
+        <label class="muted">Порог присутствия
+          <select id="thr"><option value="0.25">25%</option><option value="0.5" selected>50%</option><option value="0.75">75%</option></select>
+        </label>
+      </div>
+    </div>
+    <div class="scroll"><table id="matrix"></table></div>
+    <div class="legend"><span><i class="d p"></i>присутствовал</span><span><i class="d l"></i>частично</span><span><i class="d a"></i>отсутствовал</span></div>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2>Уроки и заметки</h2></div>
+    <div id="sessions" class="sessions"></div>
+  </section>
+</main>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
