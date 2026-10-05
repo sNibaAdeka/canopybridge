@@ -1,0 +1,500 @@
+// IRON ECHO in the browser: menu -> loading -> bout. The rules (timing, hits, bot, knockdowns, judges) are the real
+// C++ core; this file wires input, the core, animation, effects, sound, HUD and the camera.
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { loadCore } from './core.js';
+import { RobotRig } from './rig.js';
+import { FighterAnimator } from './anim.js';
+import { createRenderer, applyVenue, buildRing, buildLights, HeavyBag } from './arena.js';
+import { Sparks, Shake } from './fx.js';
+import { Sound } from './audio.js';
+import { ManualInput } from './input.js';
+import { Hud } from './hud.js';
+
+const NAMES = ['FORGE 07', 'EMBER 13'];
+const PHASE_LABEL = { WaitingForPlayer: 'ПРИГОТОВЬСЯ', Paused: 'ПАУЗА' };
+const $ = (s) => document.querySelector(s);
+
+const settings = { level: 1, mode: 'bout', quality: 'high', control: 'keys' };
+try {
+  Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
+} catch { /* storage unavailable: defaults */ }
+const saveSettings = () => { try { localStorage.setItem('ironecho.settings', JSON.stringify(settings)); } catch { /* ignore */ } };
+
+const assetUrl = (name) => (globalThis.IRONECHO_ASSETS && globalThis.IRONECHO_ASSETS[name]) || `assets/${name}`;
+
+const app = {
+  core: null, renderer: null, scene: null, camera: null, rigs: null, anim: null, bag: null, ring: null,
+  sparks: null, shake: new Shake(), sound: new Sound(), hud: new Hud(), input: null, cameraInput: null,
+  state: 'menu', training: false, lastPhase: '', resultsShown: false, resultTimer: 0, hitStop: 0, intro: 0,
+  camPos: new THREE.Vector3(-4.5, 2.6, 2.6), camLook: new THREE.Vector3(0, 1.3, 0), loaded: false,
+};
+
+// ---------------------------------------------------------------- loading
+function progress(fraction, label) {
+  $('#load-fill').style.width = `${Math.round(fraction * 100)}%`;
+  if (label) $('#load-label').textContent = label;
+}
+
+async function loadAssets() {
+  const texLoader = new THREE.TextureLoader();
+  const gltfLoader = new GLTFLoader();
+  // Robots come meshopt-compressed (~5x smaller) when this browser runs WebAssembly; otherwise the plain GLBs.
+  let decoder = globalThis.IRONECHO_MESHOPT || null;
+  if (!decoder && app.core.kind === 'WebAssembly') {
+    try {
+      const mod = await import('three/addons/libs/meshopt_decoder.module.js');
+      await mod.MeshoptDecoder.ready;
+      decoder = mod.MeshoptDecoder;
+    } catch (err) {
+      console.warn('[assets] meshopt decoder unavailable, loading uncompressed robots', err);
+    }
+  }
+  if (decoder) gltfLoader.setMeshoptDecoder(decoder);
+  const glbName = (livery) => (decoder ? `IE1_${livery}.mo.glb` : `IE1_${livery}.glb`);
+  const jobs = [];
+  let done = 0;
+  const track = (p) => p.then((v) => { done++; progress(done / jobs.length); return v; });
+  const tex = (name, { srgb = true, flipY = true } = {}) => track(texLoader.loadAsync(assetUrl(name)).then((t) => {
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.flipY = flipY;
+    t.anisotropy = 8;
+    return t;
+  }));
+  const robot = (livery) => ({
+    gltf: track(gltfLoader.loadAsync(assetUrl(glbName(livery)))),
+    map: tex(`T_IE1_${livery}_BaseColor.jpg`, { flipY: false }),
+    normalMap: tex(`T_IE1_${livery}_Normal.jpg`, { srgb: false, flipY: false }),
+    orm: tex(`T_IE1_${livery}_ORM.jpg`, { srgb: false, flipY: false }),
+    emissiveMap: tex(`T_IE1_${livery}_Emissive.jpg`, { flipY: false }),
+  });
+  const forge = robot('Forge');
+  const ember = robot('Ember');
+  const pano = tex('T_Venue_Pano.jpg');
+  const canvas = tex('T_Ring_Canvas.jpg');
+  for (const r of [forge, ember]) jobs.push(...Object.values(r));
+  jobs.push(pano, canvas);
+  const resolve = async (r) => Object.fromEntries(await Promise.all(Object.entries(r).map(async ([k, v]) => [k, await v])));
+  return { forge: await resolve(forge), ember: await resolve(ember), pano: await pano, canvas: await canvas };
+}
+
+async function buildWorld() {
+  progress(0.02, 'Запуск ядра правил…');
+  app.core = await loadCore();
+  $('#core-kind').textContent = app.core.kind;
+  progress(0.05, 'Загрузка роботов и арены…');
+  const assets = await loadAssets();
+  progress(1, 'Сборка сцены…');
+
+  const canvasEl = $('#view');
+  app.renderer = createRenderer(canvasEl, settings.quality);
+  app.scene = new THREE.Scene();
+  app.camera = new THREE.PerspectiveCamera(46, 1, 0.05, 200);
+  applyVenue(app.renderer, app.scene, assets.pano);
+  app.ring = buildRing(assets.canvas);
+  app.scene.add(app.ring);
+  buildLights(app.scene, settings.quality);
+
+  const mk = (a, name) => new RobotRig(a.gltf, { map: a.map, normalMap: a.normalMap, orm: a.orm, emissiveMap: a.emissiveMap }, { name });
+  const player = mk(assets.forge, 'Forge');
+  const opponent = mk(assets.ember, 'Ember');
+  app.rigs = { player, opponent };
+  app.holders = {};
+  for (const [key, rig] of Object.entries(app.rigs)) {
+    const face = new THREE.Group();
+    const tilt = new THREE.Group();
+    tilt.position.x = -0.24; // fall pivot behind the heels
+    rig.root.position.x = 0.24;
+    tilt.add(rig.root);
+    face.add(tilt);
+    face.rotation.y = key === 'opponent' ? Math.PI : 0;
+    app.scene.add(face);
+    app.holders[key] = { face, tilt };
+  }
+  app.anim = {
+    player: new FighterAnimator(player, { isBot: false, seed: 1 }),
+    opponent: new FighterAnimator(opponent, { isBot: true, seed: 2 }),
+  };
+  app.bag = new HeavyBag();
+  app.scene.add(app.bag.group);
+  app.sparks = new Sparks(app.scene);
+  app.input = new ManualInput($('#stage'));
+  app.input.bindTouch($('#pad'));
+  app.input.onPause = togglePause;
+  window.addEventListener('resize', resize);
+  resize();
+  app.loaded = true;
+}
+
+function resize() {
+  if (!app.renderer) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  app.renderer.setSize(w, h, false);
+  app.camera.aspect = w / h;
+  app.camera.fov = w / h < 0.9 ? 62 : 46; // portrait phones need a wider view
+  app.camera.updateProjectionMatrix();
+}
+
+// ---------------------------------------------------------------- flow
+function startBout() {
+  const mode = settings.mode === 'training' ? 1 : 0;
+  app.training = mode === 1;
+  const roundSeconds = settings.mode === 'short' ? 45 : 0;
+  app.core.init({ mode, level: settings.level, seed: (Date.now() % 100000) + 1, rounds: 0, roundSeconds });
+  app.hud.setNames(NAMES[0], app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][settings.level]}`);
+  app.hud.resetTrail('p');
+  app.hud.resetTrail('o');
+  app.hud.hideResults();
+  app.anim.player.outcome = app.anim.opponent.outcome = '';
+  app.resultsShown = false;
+  app.resultTimer = 0;
+  app.lastPhase = '';
+  app.intro = 3.2;
+  app.rigs.opponent.root.visible = !app.training;
+  app.bag.group.visible = app.training;
+  app.state = 'playing';
+  app.input.enabled = true;
+  $('#menu').hidden = true;
+  $('#pause').hidden = true;
+  app.hud.show(true);
+  const useCamera = settings.control === 'camera' && typeof CameraInput !== 'undefined';
+  $('#help').hidden = useCamera;
+  $('#pad').hidden = useCamera || !('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  if (useCamera && !app.cameraInput) {
+    app.cameraInput = new CameraInput();
+    app.cameraInput.start().catch((err) => {
+      console.error(err);
+      app.cameraInput.stop();
+      app.cameraInput = null;
+      app.hud.banner('КАМЕРА НЕДОСТУПНА', String(err && err.message ? err.message : err).slice(0, 90) + ' — играю с клавиатуры', 4, 'warn');
+    });
+  } else if (!useCamera && app.cameraInput) {
+    app.cameraInput.stop();
+    app.cameraInput = null;
+  }
+}
+
+function togglePause() {
+  if (app.state === 'playing') {
+    const phase = app.core.snapshot().match.phaseName;
+    if (phase === 'MatchOver') return;
+    app.core.pause();
+    app.state = 'paused';
+    $('#pause').hidden = false;
+  } else if (app.state === 'paused') {
+    resumeBout();
+  }
+}
+
+function resumeBout() {
+  app.core.resume();
+  app.state = 'playing';
+  $('#pause').hidden = true;
+}
+
+function toMenu() {
+  app.state = 'menu';
+  $('#pause').hidden = true;
+  app.hud.hideResults();
+  app.hud.show(false);
+  $('#help').hidden = true;
+  $('#pad').hidden = true;
+  $('#menu').hidden = false;
+}
+
+// ---------------------------------------------------------------- events
+const slotKey = (slot) => (slot === 0 ? 'player' : 'opponent');
+
+function onCombat(e, snap) {
+  const actor = slotKey(e.actor);
+  const target = slotKey(e.target);
+  const playerActs = e.actor === 0;
+  const type = e.typeName;
+  if (type === 'AttackActive') {
+    app.sound.whoosh(e.hand === 1 ? 1.1 : 0.85);
+    return;
+  }
+  if (type === 'HitConfirmed') {
+    const power = Math.min(1.6, e.damage / 2.2 + (e.counter ? 0.3 : 0));
+    let at;
+    if (target === 'opponent' && app.training) at = new THREE.Vector3(snap.opponent.position - 0.18, 1.45, 0);
+    else at = app.rigs[target].headWorld();
+    const dir = new THREE.Vector3(e.actor === 0 ? 1 : -1, 0.15, 0).normalize();
+    app.sparks.burst(at, dir, e.counter ? 'counter' : 'hit', 0.7 + 0.4 * power);
+    app.sound.hit(0.7 + 0.3 * power, !!e.counter);
+    if (app.training && target === 'opponent') app.bag.hit(power, e.hand === 0 ? 1 : -1);
+    else app.anim[target].takeHit(e.hand, e.damage, !!e.counter);
+    app.hitStop = e.counter ? 0.06 : 0.035;
+    app.shake.add(target === 'player' ? 0.45 * power : 0.18 * power);
+    if (target === 'player') app.hud.flash('hit');
+    if (playerActs) {
+      if (e.counter) app.hud.feed('КОНТРУДАР!', 'good');
+      if (e.combo >= 2) app.hud.combo(e.combo);
+    } else if (e.counter) app.hud.feed('ПОЙМАЛ НА ВСТРЕЧНОМ', 'bad');
+    if (power > 1.1) app.sound.crowdSwell(0.6);
+    return;
+  }
+  if (type === 'Blocked') {
+    const rig = app.rigs[target];
+    const at = app.training && target === 'opponent' ? new THREE.Vector3(snap.opponent.position - 0.18, 1.45, 0)
+      : rig.fistWorld('l').add(rig.fistWorld('r')).multiplyScalar(0.5);
+    app.sparks.burst(at, new THREE.Vector3(e.actor === 0 ? 1 : -1, 0.2, 0).normalize(), 'block', 0.7);
+    app.sound.block(0.9);
+    if (!(app.training && target === 'opponent')) app.anim[target].takeBlocked(e.damage / 0.15);
+    app.shake.add(target === 'player' ? 0.12 : 0.05);
+    if (!playerActs) app.hud.feed('БЛОК', 'good');
+    return;
+  }
+  if (type === 'GuardBroken') {
+    app.hud.feed(playerActs ? 'ПРОБИЛ ЗАЩИТУ!' : 'ЗАЩИТА ПРОБИТА', playerActs ? 'good' : 'bad');
+    return;
+  }
+  if (type === 'Dodged') {
+    app.hud.feed(playerActs ? 'СОПЕРНИК УКЛОНИЛСЯ' : 'УКЛОН!', playerActs ? '' : 'good');
+    return;
+  }
+  if (type === 'StaminaExhausted' && actor === 'player') {
+    app.hud.feed('ВЫДОХСЯ — ПЕРЕВЕДИ ДУХ', 'warn');
+    return;
+  }
+  if (type === 'KnockedDown') {
+    app.sound.knockdown();
+    app.shake.add(0.7);
+    app.hud.banner('НОКДАУН', actor === 'player' ? 'держи блок, чтобы встать' : NAMES[1], 1.8, actor === 'player' ? 'bad' : 'good');
+    return;
+  }
+  if (type === 'GotUp') {
+    app.hud.resetTrail(actor === 'player' ? 'p' : 'o');
+    app.hud.feed(actor === 'player' ? 'ТЫ НА НОГАХ' : 'СОПЕРНИК ВСТАЛ', actor === 'player' ? 'good' : 'warn');
+    return;
+  }
+  if (type === 'KnockedOut') {
+    app.sound.crowdSwell(2);
+    app.hud.banner('НОКАУТ', '', 2.6, actor === 'player' ? 'bad' : 'good');
+  }
+}
+
+function onMatch(e, snap) {
+  const type = e.typeName;
+  if (type === 'CountdownTick') {
+    app.hud.banner(String(e.countdownSeconds), snap.match.round > 0 ? `РАУНД ${snap.match.round}` : '', 0.9);
+    app.sound.count();
+  } else if (type === 'RoundStarted') {
+    app.sound.bell(1);
+    app.hud.banner('БОКС!', '', 0.9, 'good');
+  } else if (type === 'RoundEnded') {
+    app.sound.bell(2);
+    const m = snap.match;
+    app.hud.banner('КОНЕЦ РАУНДА', `судьи: ${m.judge1Player}–${m.judge1Opponent} · ${m.judge2Player}–${m.judge2Opponent} · ${m.judge3Player}–${m.judge3Opponent}`, 3.0);
+  } else if (type === 'KnockdownCount') {
+    app.sound.count();
+  } else if (type === 'MatchEnded') {
+    app.sound.bell(3);
+    const m = snap.match;
+    app.anim.player.outcome = m.hasWinner ? (m.winner === 0 ? 'win' : 'lose') : '';
+    app.anim.opponent.outcome = m.hasWinner ? (m.winner === 1 ? 'win' : 'lose') : '';
+    app.resultTimer = 2.6;
+  } else if (type === 'Paused' && e.reason === 2) {
+    app.hud.banner('ТРЕКИНГ ПОТЕРЯН', 'встань в кадр', 2.0, 'warn');
+  }
+}
+
+// ---------------------------------------------------------------- camera
+function updateCamera(dt, snap) {
+  const m = snap.match;
+  const px = snap.player.position;
+  const ox = snap.opponent.position;
+  let pos;
+  let look;
+  if (app.intro > 0 && (m.phaseName === 'WaitingForPlayer' || m.phaseName === 'Countdown')) {
+    app.intro -= dt;
+    const a = 1 - Math.max(0, app.intro) / 3.2;
+    const ang = -2.2 + 1.6 * a;
+    pos = new THREE.Vector3(Math.cos(ang) * 4.2, 1.7 + 0.5 * (1 - a), -Math.sin(ang) * 4.2);
+    look = new THREE.Vector3(0, 1.25, 0);
+  } else if (m.phaseName === 'MatchOver') {
+    const t = performance.now() / 1000;
+    const wx = m.hasWinner ? (m.winner === 0 ? px : ox) : 0;
+    pos = new THREE.Vector3(wx + Math.cos(t * 0.25) * 3.4, 1.8, Math.sin(t * 0.25) * 3.4);
+    look = new THREE.Vector3(wx, 1.3, 0);
+  } else {
+    // over the right shoulder, offset so the opponent stays fully visible beside the player's robot
+    const downP = snap.player.stateName === 'KnockedDown' || snap.player.stateName === 'KnockedOut';
+    const sway = 0.18 * Math.max(-1, Math.min(1, -snap.player.dodge || 0));
+    pos = downP ? new THREE.Vector3(px - 0.4, 2.6, 2.4) : new THREE.Vector3(px - 2.05, 2.05, 1.25 - sway);
+    look = new THREE.Vector3(ox + 0.05, 1.32, -0.30 - sway * 0.5);
+  }
+  const k = 1 - Math.exp(-dt * (app.intro > 0 ? 6 : 4.5));
+  app.camPos.lerp(pos, k);
+  app.camLook.lerp(look, k);
+  const s = app.shake.offset();
+  app.camera.position.set(app.camPos.x + s.x, app.camPos.y + s.y, app.camPos.z + s.z);
+  app.camera.lookAt(app.camLook);
+  app.camera.rotateZ(s.roll);
+}
+
+// ---------------------------------------------------------------- loop
+function currentInput() {
+  if (app.state !== 'playing') return { status: 7, lean: 0, block: 0, punchMask: 0 };
+  return app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll();
+}
+
+// One simulation + animation step (no rendering).
+function step(dt, input, now) {
+  if (app.state !== 'menu') {
+    app.core.frame(dt, input);
+    const snap = app.core.snapshot();
+    const ev = app.core.drainEvents();
+    for (const e of ev.combat) onCombat(e, snap);
+    for (const e of ev.match) onMatch(e, snap);
+    const phase = snap.match.phaseName;
+    if (phase !== app.lastPhase) {
+      if (PHASE_LABEL[phase] && phase !== 'Paused') app.hud.banner(PHASE_LABEL[phase], app.training ? 'тренировка' : '', 1.2);
+      app.lastPhase = phase;
+    }
+    if (app.resultTimer > 0) {
+      app.resultTimer -= dt;
+      if (app.resultTimer <= 0 && !app.resultsShown) {
+        app.resultsShown = true;
+        app.hud.results(snap, NAMES);
+        app.state = 'results';
+      }
+    }
+    // hit-stop: a few frames of frozen animation sell the impact (visual only; the rules keep running)
+    let animDt = dt;
+    if (app.hitStop > 0) {
+      app.hitStop -= dt;
+      animDt = dt * 0.15;
+    }
+    const gap = snap.match.gap;
+    const ctx = { gap, phase };
+    app.holders.player.face.position.x = snap.player.position;
+    app.holders.opponent.face.position.x = snap.opponent.position;
+    app.anim.player.update(animDt, snap.player, ctx);
+    if (!app.training) app.anim.opponent.update(animDt, snap.opponent, ctx);
+    app.holders.player.tilt.rotation.z = app.anim.player.fall * 1.2;
+    app.holders.opponent.tilt.rotation.z = app.anim.opponent.fall * 1.2;
+    app.bag.group.position.x = snap.opponent.position + 0.1;
+    app.bag.update(dt);
+    app.sparks.update(dt);
+    app.shake.update(dt);
+    app.hud.update(snap, dt, app.training, settings.mode === 'short' ? 45 : 90);
+    updateCamera(dt, snap);
+  } else {
+    // menu: slow orbit around the ring
+    const t = now / 1000;
+    app.camera.position.set(Math.cos(t * 0.08) * 6.5, 2.4, Math.sin(t * 0.08) * 6.5);
+    app.camera.lookAt(0, 1.0, 0);
+    app.anim.player.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
+    app.anim.opponent.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
+    app.holders.player.face.position.x = -0.675;
+    app.holders.opponent.face.position.x = 0.675;
+  }
+}
+
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  if (!app.loaded || app.frozen) return;
+  step(dt, currentInput(), now);
+  app.renderer.render(app.scene, app.camera);
+}
+
+// Test hook: advance `seconds` in fixed 1/60 s steps with a given input (function of the step index), then render.
+app.debugAdvance = (seconds, inputFn = () => ({ status: 7, lean: 0, block: 0, punchMask: 0 })) => {
+  app.frozen = true;
+  const n = Math.max(1, Math.round(seconds * 60));
+  for (let i = 0; i < n; i++) step(1 / 60, inputFn(i), performance.now());
+  app.renderer.render(app.scene, app.camera);
+  const s = app.core.snapshot();
+  return { phase: s.match.phaseName, p: s.player.stateName + '/' + s.player.stageName, o: s.opponent.stateName + '/' + s.opponent.stageName,
+    ph: s.player.health, oh: s.opponent.health, round: s.match.round, gap: s.match.gap };
+};
+
+const IDLE = { stateName: 'Guard', stageName: 'None', blocking: 0, dodge: 0, lean: 0, gassedTicksLeft: 0, stamina: 100, maxStamina: 100, hand: 0, stageAlpha: 0 };
+
+// ---------------------------------------------------------------- menu wiring
+function wireMenu() {
+  const pick = (group, key, cast = (v) => v) => {
+    for (const b of document.querySelectorAll(`[data-group="${group}"] button`)) {
+      b.classList.toggle('sel', String(settings[key]) === b.dataset.value);
+      b.addEventListener('click', () => {
+        settings[key] = cast(b.dataset.value);
+        saveSettings();
+        for (const o of document.querySelectorAll(`[data-group="${group}"] button`)) o.classList.toggle('sel', o === b);
+        app.sound.ui();
+      });
+    }
+  };
+  pick('level', 'level', Number);
+  pick('mode', 'mode');
+  pick('quality', 'quality');
+  pick('control', 'control');
+  $('#start').addEventListener('click', async () => {
+    app.sound.start();
+    if (!app.loaded) {
+      $('#menu').hidden = true;
+      $('#loading').hidden = false;
+      try {
+        await buildWorld();
+      } catch (err) {
+        console.error(err);
+        $('#load-label').textContent = `Не удалось загрузить: ${err.message}`;
+        return;
+      }
+      $('#loading').hidden = true;
+    }
+    startBout();
+  });
+  $('#resume').addEventListener('click', resumeBout);
+  $('#restart').addEventListener('click', startBout);
+  $('#to-menu').addEventListener('click', toMenu);
+  $('#rematch').addEventListener('click', startBout);
+  $('#res-menu').addEventListener('click', toMenu);
+  $('#sound').addEventListener('click', () => {
+    app.sound.setEnabled(!app.sound.enabled);
+    $('#sound').textContent = app.sound.enabled ? 'Звук: вкл' : 'Звук: выкл';
+  });
+  $('#pause-btn').addEventListener('click', togglePause);
+}
+
+// claude.ai artifact: offer the self-contained webcam build (published next to the page) through `downloads`.
+async function offerCameraDownload() {
+  if (typeof CameraInput !== 'undefined') return; // this is already the camera build
+  const host = globalThis.claude;
+  if (!host || typeof host.use !== 'function') return;
+  let downloads = null;
+  try {
+    downloads = await host.use('downloads');
+  } catch {
+    downloads = null;
+  }
+  if (!downloads) return;
+  $('#cam-offer').hidden = false;
+  $('#cam-dl').addEventListener('click', async () => {
+    const note = $('#cam-dl-note');
+    try {
+      $('#cam-dl').disabled = true;
+      const res = await fetch('IronEcho-Camera.html');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      await downloads.save({ filename: 'IronEcho-Camera.html', data: blob });
+      note.textContent = 'Сохранено. Открой файл двойным щелчком (Chrome/Edge), разреши камеру, встань в 2–3 м от экрана.';
+    } catch (err) {
+      const code = err && err.code;
+      note.textContent = code === 'declined' ? 'Скачивание отменено.'
+        : code === 'extension_not_enabled' || code === 'rejected_extension' ? 'Здесь нельзя сохранить HTML-файл.'
+          : `Не получилось: ${(err && err.message) || err}`;
+    } finally {
+      $('#cam-dl').disabled = false;
+    }
+  });
+}
+
+wireMenu();
+offerCameraDownload();
+requestAnimationFrame(frame);
+globalThis.IRONECHO_APP = app; // for tests and the camera module

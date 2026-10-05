@@ -202,9 +202,10 @@ def build_ring(blue_corner_pad=BLUE, red_corner_pad=RED, with_arena=True):
     sub = cv.modifiers.new("Subsurf", "SUBSURF")
     sub.levels = sub.render_levels = 1
     # logos on the canvas
-    R.text_mesh("canvas_logo", "IRON ECHO", 0.78, blue_print, (0, 0, 0.0012), (0, 0, D(90)), extrude=0.0004)
+    # prints read upright from the blue corner side (-X), where the player's camera stands
+    R.text_mesh("canvas_logo", "IRON ECHO", 0.6, blue_print, (0, 0, 0.0012), (0, 0, D(-90)), extrude=0.0004)  # fits the circle
     ring_logo = R.tube("canvas_circle", 1.55, 0.06, 0.0008, (0, 0, 0.0006), mat=blue_print, verts=128)
-    R.text_mesh("canvas_sub", "ROBOT BOXING CHAMPIONSHIP", 0.16, red_print, (0.62, 0, 0.0012), (0, 0, D(90)),
+    R.text_mesh("canvas_sub", "ROBOT BOXING CHAMPIONSHIP", 0.16, red_print, (0.62, 0, 0.0012), (0, 0, D(-90)),
                 extrude=0.0004)
     R.text_mesh("canvas_sub2", "WORLD SERIES  ·  ROUND OF STEEL", 0.13, red_print, (-0.6, 0, 0.0012),
                 (0, 0, D(-90)), extrude=0.0004)
