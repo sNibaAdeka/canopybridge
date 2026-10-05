@@ -102,29 +102,33 @@ export function buildRing(canvasTex) {
   const pads = { blue: leather(lin(0.01, 0.07, 0.42)), red: leather(lin(0.48, 0.015, 0.01)), white: leather(lin(0.62, 0.62, 0.62)) };
   // Blender (x, y) -> three (x, -z): blue corner (-1,-1) -> (-x, +z); red (1, 1) -> (+x, -z)
   const corners = [[-1, 1, 'blue'], [1, -1, 'red'], [1, 1, 'white'], [-1, -1, 'white']];
+  const occluders = []; // rope sides and corner posts that fade out when they stand between the camera and the fight
   for (const [sx, sz, pad] of corners) {
     const px = sx * POST;
     const pz = sz * POST;
+    const corner = new THREE.Group();
+    ring.add(corner);
+    occluders.push({ group: corner, kind: 'post', x: px, z: pz, opacity: 1 });
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 1.62, 28), steel);
     post.position.set(px, 0.81 - 0.06, pz);
     post.castShadow = true;
-    ring.add(post);
+    corner.add(post);
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 28), steel);
     cap.position.set(px, 1.57, pz);
-    ring.add(cap);
+    corner.add(cap);
     const ang = Math.atan2(-sz, -sx);
     const padMesh = new THREE.Mesh(new RoundedBoxGeometry(0.2, 1.08, 0.26, 4, 0.07), pads[pad]);
     padMesh.position.set(px + 0.17 * Math.cos(ang), 0.92, pz + 0.17 * Math.sin(ang));
     padMesh.rotation.y = -ang;
     padMesh.castShadow = true;
     padMesh.receiveShadow = true;
-    ring.add(padMesh);
+    corner.add(padMesh);
     for (const y of ROPES) {
       const tb = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.16, 12), chrome);
       tb.position.set(px + 0.09 * Math.cos(ang), y, pz + 0.09 * Math.sin(ang));
       tb.rotation.z = Math.PI / 2;
       tb.rotation.y = -ang;
-      ring.add(tb);
+      corner.add(tb);
     }
   }
 
@@ -135,6 +139,9 @@ export function buildRing(canvasTex) {
     const rot = (side * Math.PI) / 2;
     const c = Math.cos(rot);
     const s = Math.sin(rot);
+    const ropes = new THREE.Group();
+    ring.add(ropes);
+    occluders.push({ group: ropes, kind: 'side', nx: c, nz: s, opacity: 1 }); // outward normal of this rope side
     const at = (x, z, y) => new THREE.Vector3(x * c - z * s, y, x * s + z * c);
     for (const y of ROPES) {
       const pts = [];
@@ -146,14 +153,14 @@ export function buildRing(canvasTex) {
       const rope = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.026, 10), ropeMat);
       rope.castShadow = true;
       rope.receiveShadow = true;
-      ring.add(rope);
+      ropes.add(rope);
     }
     for (const u of [-HALF / 3, HALF / 3]) {
       const tie = new THREE.Mesh(new RoundedBoxGeometry(0.03, ROPES[3] - ROPES[0] + 0.08, 0.05, 2, 0.008), tieMat);
       const p = at(HALF + 0.06, u, (ROPES[0] + ROPES[3]) / 2 - 0.02);
       tie.position.copy(p);
       tie.rotation.y = -rot;
-      ring.add(tie);
+      ropes.add(tie);
     }
   }
 
@@ -168,7 +175,55 @@ export function buildRing(canvasTex) {
       ring.add(step);
     }
   }
+  // each occluder gets its own copies of the materials so it can fade alone
+  for (const o of occluders) {
+    o.materials = new Map();
+    o.group.traverse((m) => {
+      if (!m.isMesh) return;
+      if (!o.materials.has(m.material)) o.materials.set(m.material, m.material.clone());
+      m.material = o.materials.get(m.material);
+    });
+    o.materials = [...o.materials.values()];
+  }
+  ring.userData.occluders = occluders;
   return ring;
+}
+
+// Fade the rope sides and corner posts that stand between the camera and what it looks at (fight games do the same:
+// the ropes stay readable at the far side, the near side stops slicing through the fighters).
+export function updateRingOcclusion(ring, cam, look, dt) {
+  const { HALF } = RING;
+  const k = 1 - Math.exp(-dt * 10);
+  const dx = look.x - cam.x;
+  const dz = look.z - cam.z;
+  const len2 = dx * dx + dz * dz || 1;
+  for (const o of ring.userData.occluders || []) {
+    let hide = false;
+    if (o.kind === 'side') {
+      // camera outside this side's plane while looking inwards: the ropes of this side are in the shot
+      hide = cam.x * o.nx + cam.z * o.nz > HALF - 0.05 && cam.y < 3.2;
+    } else {
+      // corner post close to the line of sight (and between camera and target)
+      const t = ((o.x - cam.x) * dx + (o.z - cam.z) * dz) / len2;
+      if (t > 0 && t < 1) {
+        const ex = cam.x + dx * t - o.x;
+        const ez = cam.z + dz * t - o.z;
+        hide = ex * ex + ez * ez < 0.7 * 0.7;
+      }
+    }
+    const target = hide ? 0.18 : 1;
+    o.opacity += (target - o.opacity) * k;
+    if (Math.abs(o.opacity - target) < 0.002) o.opacity = target;
+    const transparent = o.opacity < 0.999;
+    for (const m of o.materials) {
+      if (m.transparent !== transparent) {
+        m.transparent = transparent;
+        m.depthWrite = !transparent;
+        m.needsUpdate = true;
+      }
+      m.opacity = o.opacity;
+    }
+  }
 }
 
 // TV lighting: soft top key with the main contact shadows, hard truss spots, cool/warm rims.

@@ -104,13 +104,31 @@ export class Hud {
     this.comboTimer = 1.1;
   }
 
+  // Event callout. The same text while still on screen becomes "×2"; warnings repeat at most every 5 s; two at a time.
   feed(text, tone = '') {
+    const now = performance.now();
+    this.feedSeen = this.feedSeen || new Map();
+    const live = [...this.el.feed.children].find((c) => c.dataset.text === text);
+    if (live) {
+      const n = Number(live.dataset.n || 1) + 1;
+      live.dataset.n = String(n);
+      live.textContent = `${text} ×${n}`;
+      live.style.animation = 'none';
+      void live.offsetWidth;
+      live.style.animation = '';
+      clearTimeout(live.timer);
+      live.timer = setTimeout(() => live.remove(), 1300);
+      return;
+    }
+    if (tone === 'warn' && now - (this.feedSeen.get(text) || -1e9) < 5000) return;
+    this.feedSeen.set(text, now);
     const item = document.createElement('div');
     item.className = `callout ${tone}`;
+    item.dataset.text = text;
     item.textContent = text;
     this.el.feed.appendChild(item);
-    setTimeout(() => item.remove(), 1300);
-    while (this.el.feed.children.length > 4) this.el.feed.firstChild.remove();
+    item.timer = setTimeout(() => item.remove(), 1300);
+    while (this.el.feed.children.length > 2) this.el.feed.firstChild.remove();
   }
 
   flash(tone = 'hit') {

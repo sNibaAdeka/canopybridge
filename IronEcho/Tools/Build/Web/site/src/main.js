@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { loadCore } from './core.js';
 import { RobotRig } from './rig.js';
 import { FighterAnimator } from './anim.js';
-import { createRenderer, applyVenue, buildRing, buildLights, HeavyBag } from './arena.js';
+import { createRenderer, applyVenue, buildRing, buildLights, HeavyBag, updateRingOcclusion } from './arena.js';
 import { Sparks, Shake } from './fx.js';
 import { Sound } from './audio.js';
 import { ManualInput } from './input.js';
@@ -238,11 +238,20 @@ function startBout() {
   }
 }
 
+// Pause freezes the whole simulation in any phase. The rules core also gets its own pause (so it resumes through the
+// ready check and a countdown), applied at once with one tick; in phases where the core has no pause (waiting for the
+// player) the freeze alone holds the bout.
+const IDLE_INPUT = { status: 7, lean: 0, block: 0, punchMask: 0 };
 function togglePause() {
   if (app.state === 'playing') {
     const phase = app.core.snapshot().match.phaseName;
     if (phase === 'MatchOver') return;
     app.core.pause();
+    app.core.frame(1 / 100, IDLE_INPUT); // >= one 120 Hz tick: the core takes the request now
+    const snap = app.core.snapshot();
+    const ev = app.core.drainEvents();
+    for (const e of ev.combat) onCombat(e, snap);
+    for (const e of ev.match) onMatch(e, snap);
     app.state = 'paused';
     $('#pause').hidden = false;
   } else if (app.state === 'paused') {
@@ -251,7 +260,7 @@ function togglePause() {
 }
 
 function resumeBout() {
-  app.core.resume();
+  if (app.core.snapshot().match.phaseName === 'Paused') app.core.resume();
   app.state = 'playing';
   $('#pause').hidden = true;
 }
@@ -442,6 +451,7 @@ function updateCamera(dt, snap) {
   app.camera.position.set(app.camPos.x + s.x, app.camPos.y + s.y, app.camPos.z + s.z);
   app.camera.lookAt(app.camLook);
   app.camera.rotateZ(s.roll);
+  updateRingOcclusion(app.ring, app.camera.position, app.camLook, dt);
 }
 
 // ---------------------------------------------------------------- loop
@@ -452,6 +462,7 @@ function currentInput() {
 
 // One simulation + animation step (no rendering).
 function step(dt, input, now) {
+  if (app.state === 'paused') return; // frozen frame behind the pause panel
   if (app.state !== 'menu') {
     app.core.frame(dt, input);
     const snap = app.core.snapshot();
@@ -496,6 +507,7 @@ function step(dt, input, now) {
     const t = now / 1000;
     app.camera.position.set(Math.cos(t * 0.08) * 6.5, 2.4, Math.sin(t * 0.08) * 6.5);
     app.camera.lookAt(0, 1.0, 0);
+    updateRingOcclusion(app.ring, app.camera.position, { x: 0, y: 1, z: 0 }, dt);
     app.anim.player.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
     app.anim.opponent.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
     resetStage();
