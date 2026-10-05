@@ -1,8 +1,6 @@
 <title>IRON ECHO</title>
 <meta name="description" content="Robot boxing on the real IRON ECHO rules core: realistic IE-1 robots, pro ring, keyboard, touch or webcam.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600&display=swap">
+@@FONTS@@
 <style>
   :root {
     color-scheme: dark;
@@ -254,7 +252,7 @@
   </div>
 </div>
 
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+@@IMPORTMAP@@
 <script>globalThis.IRONECHO_CORE_WASM_B64 = "@@CORE_WASM_B64@@";</script>
 <script>@@CORE_JS@@</script>
 @@ASSETS_SCRIPT@@

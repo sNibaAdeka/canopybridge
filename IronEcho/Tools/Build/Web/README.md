@@ -13,6 +13,10 @@
 
 ## Как играть
 
+- **Публичный сайт** — проект Netlify `iron-echo-boxing` (https://iron-echo-boxing.netlify.app после деплоя): главная, игра на `/play/` (камера работает: обычный
+  HTTPS-сайт), скачивание `IronEcho-Windows.zip`. Собирается шагом `build_web.py public` в `Build/Web/public`
+  (см. `public_build.py`), деплой — Netlify (`netlify.toml` в папке: публикуется как есть, без сборки на их стороне).
+- **Приложение для Windows** — `Tools/Build/Desktop` (`IronEcho.exe`, офлайн).
 - **Ссылка (артефакт claude.ai)** — клавиатура, мышь или сенсорные кнопки. Камера в артефакте запрещена песочницей.
 - **С камерой** — кнопка «Версия с камерой — скачать» в меню артефакта или файл `Build/Web/IronEcho-Camera.html`
   после сборки. Один файл, открывается двойным щелчком в Chrome/Edge (разрешить камеру; нужен интернет для three.js
@@ -31,7 +35,8 @@ IRONECHO_BINARYEN=node_modules/binaryen/bin IRONECHO_GLTFPACK=node_modules/gltfp
 ```
 
 Выход: `Build/Web/site/index.html` (фрагмент для артефакта), `play.html` (то же для локального сервера),
-`assets/`, `Build/Web/IronEcho-Camera.html` (самодостаточный файл с камерой). `Build/` не коммитится.
+`assets/`, `Build/Web/IronEcho-Camera.html` (самодостаточный файл с камерой), `Build/Web/standalone` (вся игра без сторонних
+хостов: three.js, MediaPipe, модель, шрифты рядом; нужен `IRONECHO_WEBDEPS`), `Build/Web/public` (сайт). `Build/` не коммитится.
 
 Шаги `build_web.py`: `core` — zig → `ironecho_core.wasm` (~41 КБ) + wasm2js-резерв + сверка с нативным двойником;
 `check` — сверка порта трекера с Python; `site` — JPEG-текстуры, квантование GLB (`gltfpack -kv -vtf -vn 10`),

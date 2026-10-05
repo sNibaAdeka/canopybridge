@@ -54,6 +54,7 @@ async function loadAssets() {
   // The artifact host serves no .glb: the site ships each GLB base64-wrapped in JSON ({"glb": "..."}).
   const loadGlb = async (name) => {
     if (globalThis.IRONECHO_ASSETS && globalThis.IRONECHO_ASSETS[name]) return gltfLoader.loadAsync(globalThis.IRONECHO_ASSETS[name]);
+    if (globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.glb === 'plain') return gltfLoader.loadAsync(`assets/${name}`);
     const res = await fetch(`assets/${name}.json`);
     if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
     const b64 = (await res.json()).glb;
@@ -548,3 +549,5 @@ wireMenu();
 offerCameraDownload();
 requestAnimationFrame(frame);
 globalThis.IRONECHO_APP = app; // for tests and the camera module
+// Windows app (Tools/Build/Desktop): its local server keeps running while the page is open.
+if (location.hostname === '127.0.0.1') setInterval(() => { fetch('/__ironecho').catch(() => {}); }, 3000);

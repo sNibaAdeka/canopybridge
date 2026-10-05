@@ -113,7 +113,20 @@ def compress_for_camera(assets: Path, site_assets: Path, out: Path) -> None:
             shutil.copy2(p, out / p.name)
 
 
-def page(template: str, core_dir: Path, game_js: str, *, assets_script: str = "", camera_menu: str = "") -> str:
+FONTS_CSS_URL = ("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800"
+                 "&family=Inter:wght@400;500;600&display=swap")
+CDN_FONTS = ('<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+             '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+             f'<link rel="stylesheet" href="{FONTS_CSS_URL}">')
+THREE_VERSION = "0.170.0"
+CDN_IMPORTMAP = ('<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@%s/build/three.module.min.js",'
+                 '"three/addons/":"https://cdn.jsdelivr.net/npm/three@%s/examples/jsm/"}}</script>') % (THREE_VERSION, THREE_VERSION)
+LOCAL_IMPORTMAP = ('<script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js",'
+                   '"three/addons/":"./vendor/three/addons/"}}</script>')
+
+
+def page(template: str, core_dir: Path, game_js: str, *, assets_script: str = "", camera_menu: str = "",
+         fonts: str = CDN_FONTS, importmap: str = CDN_IMPORTMAP) -> str:
     wasm_b64 = base64.b64encode((core_dir / "ironecho_core.wasm").read_bytes()).decode("ascii")
     core_js = (core_dir / "ironecho_core.js").read_text(encoding="utf-8")
     for bad in ("</script", "<!--"):
@@ -121,6 +134,7 @@ def page(template: str, core_dir: Path, game_js: str, *, assets_script: str = ""
             raise SystemExit(f"inline script contains {bad!r}")
     return (template.replace("@@CORE_WASM_B64@@", wasm_b64).replace("@@CORE_JS@@", core_js)
             .replace("@@ASSETS_SCRIPT@@", assets_script).replace("@@CAMERA_MENU@@", camera_menu)
+            .replace("@@FONTS@@", fonts).replace("@@IMPORTMAP@@", importmap)
             .replace("@@GAME_JS@@", game_js))
 
 
@@ -179,3 +193,83 @@ def build_site(project: Path, here: Path, out_root: Path) -> None:
         (out_root / "IronEcho-Camera.html").write_text(single, encoding="utf-8")
         shutil.copy2(out_root / "IronEcho-Camera.html", site / "IronEcho-Camera.html")  # the page offers it as a download
         print(f"[site] IronEcho-Camera.html {len(single.encode()) // (1024 * 1024)} MB (self-contained, webcam)")
+    build_standalone(project, here, out_root)
+
+
+# ---------------------------------------------------------------------------------------------------------- standalone
+# Build/Web/standalone: the whole game with no third-party host at run time (three.js, MediaPipe, the pose model and
+# the fonts sit next to the page). Served as /play on the public site and embedded in the Windows app
+# (Tools/Build/Desktop). Needs the npm packages three@0.170.0 and @mediapipe/tasks-vision@0.10.18
+# (IRONECHO_WEBDEPS=<node_modules>) and Tracking/models/pose_landmarker_full.task (Tracking setup downloads it).
+THREE_ADDONS = ["loaders/GLTFLoader.js", "utils/BufferGeometryUtils.js", "libs/meshopt_decoder.module.js",
+                "geometries/RoundedBoxGeometry.js"]
+# SIMD build only (every Chrome/Edge/Firefox/Safari since 2021-2023); the no-SIMD twin would add 9 MB
+MEDIAPIPE_FILES = ["vision_bundle.mjs", "wasm/vision_wasm_internal.js", "wasm/vision_wasm_internal.wasm"]
+STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", '
+                   '"poseModel": "./vendor/pose_landmarker_full.task", "glb": "plain"};</script>')
+
+
+def local_fonts(cache: Path, dst: Path) -> str:
+    """Google Fonts CSS + woff2 files copied locally (cached in Build/Web/fonts); system fonts if offline."""
+    import urllib.request
+
+    css_path = cache / "fonts.css"
+    if not css_path.exists():
+        try:
+            cache.mkdir(parents=True, exist_ok=True)
+            ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/130.0 Safari/537.36"}
+            css = urllib.request.urlopen(urllib.request.Request(FONTS_CSS_URL, headers=ua), timeout=30).read().decode()
+            for i, url in enumerate(dict.fromkeys(re.findall(r"url\((https://[^)]+\.woff2)\)", css))):
+                name = f"f{i:02d}.woff2"
+                (cache / name).write_bytes(urllib.request.urlopen(url, timeout=30).read())
+                css = css.replace(url, name)
+            css_path.write_text(css, encoding="utf-8")
+        except OSError as err:
+            print(f"  [fonts] offline ({err}); the page falls back to system fonts")
+            return ""
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in cache.iterdir():
+        shutil.copy2(f, dst / f.name)
+    return '<link rel="stylesheet" href="vendor/fonts/fonts.css">'
+
+
+def build_standalone(project: Path, here: Path, out_root: Path) -> Path | None:
+    deps = os.environ.get("IRONECHO_WEBDEPS")
+    model = project / "Tracking" / "models" / "pose_landmarker_full.task"
+    if not deps or not (Path(deps) / "three" / "package.json").exists() or not model.exists():
+        print("[standalone] skipped: set IRONECHO_WEBDEPS=<node_modules with three, @mediapipe/tasks-vision> and "
+              "download the tracker model (Tracking setup)")
+        return None
+    deps_dir = Path(deps)
+    three_ver = json.loads((deps_dir / "three" / "package.json").read_text())["version"]
+    if three_ver != THREE_VERSION:
+        raise SystemExit(f"three {three_ver} in IRONECHO_WEBDEPS, need {THREE_VERSION}")
+    src = here / "site" / "src"
+    site_assets = out_root / "site" / "assets"
+    out = out_root / "standalone"
+    shutil.rmtree(out, ignore_errors=True)  # generated folder: rebuilt from scratch every time
+    vendor = out / "vendor"
+    (out / "assets").mkdir(parents=True)
+    for p in site_assets.iterdir():
+        if p.suffix in (".jpg", ".glb"):
+            shutil.copy2(p, out / "assets" / p.name)
+    (vendor / "three" / "addons").mkdir(parents=True)
+    shutil.copy2(deps_dir / "three" / "build" / "three.module.min.js", vendor / "three" / "three.module.min.js")
+    for a in THREE_ADDONS:
+        (vendor / "three" / "addons" / a).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(deps_dir / "three" / "examples" / "jsm" / a, vendor / "three" / "addons" / a)
+    mp = deps_dir / "@mediapipe" / "tasks-vision"
+    for f in MEDIAPIPE_FILES:
+        (vendor / "mediapipe" / f).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(mp / f, vendor / "mediapipe" / f)
+    shutil.copy2(model, vendor / "pose_landmarker_full.task")
+    fonts = local_fonts(out_root / "fonts", vendor / "fonts")
+    template = (here / "site" / "index.template.html").read_text(encoding="utf-8")
+    game = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "pose", "main"])
+    doc = full_document(page(template, out_root / "core", game, assets_script=STANDALONE_DEPS, camera_menu=CAMERA_MENU,
+                             fonts=fonts, importmap=LOCAL_IMPORTMAP))
+    (out / "index.html").write_text(doc, encoding="utf-8")
+    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
+    print(f"[standalone] {out} {size // (1024 * 1024)} MB (no third-party hosts at run time)")
+    return out

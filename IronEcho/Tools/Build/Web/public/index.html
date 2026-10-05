@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>IRON ECHO — бокс роботов</title>
+<meta name="description" content="Бокс роботов, которым управляешь своим телом через веб-камеру. Играть в браузере или скачать для Windows — бесплатно.">
+<meta property="og:title" content="IRON ECHO — бокс роботов">
+<meta property="og:description" content="Твои удары — его удары. Веб-камера читает джебы, блоки и уклоны, робот на ринге повторяет.">
+<meta property="og:image" content="media/hero.jpg">
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="media/icon.png">
+<link rel="stylesheet" href="play/vendor/fonts/fonts.css">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d12; --panel: #12161e; --line: #232a36; --fg: #eef1f6; --muted: #98a2b3;
+    --blue: #4a7dff; --red: #ff4b3e; --gold: #f2c14e;
+    --display: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+    --text: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 var(--text); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
+
+  header.top { position: absolute; inset: 0 0 auto 0; z-index: 3; padding-top: env(safe-area-inset-top, 0px); }
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 68px; }
+  .logo { font: 800 26px/1 var(--display); letter-spacing: .06em; text-decoration: none; }
+  .logo span { color: var(--red); }
+  nav { display: flex; gap: 22px; }
+  nav a { font: 600 15px/1 var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); text-decoration: none; }
+  nav a:hover { color: var(--fg); }
+
+  .hero { position: relative; min-height: min(92vh, 860px); display: flex; align-items: flex-end; overflow: hidden;
+    background: #000 url(media/hero.jpg) center 35% / cover no-repeat; }
+  .hero::after { content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(11,13,18,.55) 0%, rgba(11,13,18,0) 30%, rgba(11,13,18,.35) 55%, var(--bg) 100%); }
+  .hero .wrap { position: relative; z-index: 2; padding-block: 120px 64px; width: 100%; }
+  .kicker { font: 700 15px/1 var(--display); letter-spacing: .3em; text-transform: uppercase; color: var(--gold); }
+  h1 { font: 800 clamp(64px, 13vw, 156px)/.86 var(--display); letter-spacing: .01em; margin: 14px 0 18px; text-wrap: balance;
+    text-shadow: 0 6px 40px rgba(0,0,0,.6); }
+  h1 em { font-style: normal; color: var(--red); }
+  .lead { max-width: 34em; font-size: clamp(17px, 2.1vw, 21px); color: #dfe4ec; margin: 0 0 30px; text-shadow: 0 2px 16px rgba(0,0,0,.7); }
+  .cta { display: flex; flex-wrap: wrap; gap: 14px; }
+  .btn { display: inline-flex; align-items: center; gap: 12px; padding: 16px 26px; border-radius: 6px; text-decoration: none;
+    font: 700 20px/1 var(--display); letter-spacing: .1em; text-transform: uppercase; border: 2px solid transparent;
+    transition: transform .12s ease, background .12s ease; }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.primary { background: var(--red); color: #fff; box-shadow: 0 10px 30px rgba(255,75,62,.35); }
+  .btn.primary:hover { background: #ff6156; }
+  .btn.secondary { background: rgba(10,12,16,.55); border-color: rgba(255,255,255,.75); color: #fff; backdrop-filter: blur(6px); }
+  .btn.secondary:hover { background: rgba(255,255,255,.12); }
+  .btn small { white-space: nowrap; font: 500 13px/1 var(--text); letter-spacing: 0; text-transform: none; opacity: .8; }
+  .meta { margin-top: 18px; color: var(--muted); font-size: 14px; }
+  .meta b { color: var(--fg); font-weight: 600; }
+
+  section { padding-block: 72px; }
+  h2 { font: 800 clamp(36px, 5vw, 56px)/1 var(--display); letter-spacing: .02em; text-transform: uppercase; margin: 0 0 12px; text-wrap: balance; }
+  .sub { color: var(--muted); max-width: 40em; margin: 0 0 36px; }
+
+  .video { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #000;
+    aspect-ratio: 16 / 9; max-width: 100%; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+  .video video, .video img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+  .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .feature { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 26px 24px; min-width: 0; }
+  .feature .num { font: 800 15px/1 var(--display); letter-spacing: .2em; color: var(--blue); }
+  .feature h3 { font: 700 26px/1.1 var(--display); letter-spacing: .03em; text-transform: uppercase; margin: 12px 0 10px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px; min-width: 0; }
+  .panel h3 { font: 700 22px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 16px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; align-items: center; margin: 0; }
+  .keys dt { display: flex; gap: 6px; flex-wrap: wrap; }
+  .keys dd { margin: 0; color: #cdd3dd; }
+  kbd { display: inline-block; min-width: 30px; padding: 5px 9px; border-radius: 5px; background: #1c222d; border: 1px solid #333c4b;
+    border-bottom-width: 3px; font: 600 13px/1 var(--text); text-align: center; color: var(--fg); }
+  .pose { font: 700 14px/1.2 var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+  ol.steps { margin: 0; padding-left: 20px; color: #cdd3dd; }
+  ol.steps li { margin-bottom: 8px; }
+
+  .download { background: linear-gradient(135deg, #141a26 0%, #0f1219 60%); border: 1px solid var(--line); border-radius: 14px;
+    padding: 36px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 32px; align-items: center; }
+  .download img.icon { width: 96px; height: 96px; border-radius: 22px; display: block; margin-bottom: 18px; }
+  .req { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+  .req li { display: flex; gap: 12px; color: #cdd3dd; font-size: 15px; }
+  .req li::before { content: ''; flex: none; width: 8px; height: 8px; margin-top: 8px; border-radius: 2px; background: var(--blue); }
+  .note { margin-top: 22px; padding: 14px 16px; border-left: 3px solid var(--gold); background: rgba(242,193,78,.07); color: #d9dde5;
+    font-size: 14px; border-radius: 0 6px 6px 0; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 28px calc(28px + env(safe-area-inset-bottom, 0px)); color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+
+  @media (max-width: 860px) {
+    .features, .controls, .download { grid-template-columns: minmax(0, 1fr); }
+    .download { padding: 26px 22px; }
+    nav { display: none; }
+  }
+  @media (max-width: 480px) {
+    .btn { width: 100%; justify-content: center; }
+    section { padding-block: 54px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="#">IRON <span>ECHO</span></a>
+    <nav><a href="#gameplay">Геймплей</a><a href="#controls">Управление</a><a href="#download">Скачать</a></nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <div class="kicker">Бокс роботов · ранний доступ @@VERSION@@</div>
+      <h1>IRON<br><em>ECHO</em></h1>
+      <p class="lead">Твои удары — его удары. Веб-камера читает джебы, кроссы, блоки и уклоны твоего тела, а стальной боец на ринге
+        повторяет их против робота, который учится читать тебя.</p>
+      <div class="cta">
+        <a class="btn primary" href="play/">Играть в браузере</a>
+        <a class="btn secondary" href="download/IronEcho-Windows.zip" download>Скачать для Windows <small>@@ZIP_MB@@ МБ</small></a>
+      </div>
+      <p class="meta"><b>Бесплатно.</b> Клавиатура, мышь, сенсор или камера. Версия для Windows работает без интернета.</p>
+    </div>
+  </div>
+
+  <section id="gameplay">
+    <div class="wrap">
+      <h2>Три раунда. Один ринг.</h2>
+      <p class="sub">Настоящие правила бокса: три раунда по 90 секунд, нокдауны и счёт до десяти, технический нокаут, решение судей.
+        Выносливость кончается — руки опускаются. Бот держит блок, ловит на встречном и давит, когда ты выдохся.</p>
+      <div class="video">@@VIDEO@@</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="features">
+        <div class="feature"><div class="num">01</div><h3>Тело — контроллер</h3>
+          <p>Распознавание позы работает прямо на твоём компьютере: видео с камеры никуда не отправляется. Нужна обычная веб-камера и 2–3 метра перед экраном.</p></div>
+        <div class="feature"><div class="num">02</div><h3>Удар весом</h3>
+          <p>Шаг в джебе, разворот бедра в прямом, отшаг после пропущенного. Роботы двигаются по рингу, а не стоят на месте.</p></div>
+        <div class="feature"><div class="num">03</div><h3>Бот, который читает</h3>
+          <p>Три уровня. Сложный реагирует за 40 мс, замечает серии и ловит на встречном.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="controls">
+    <div class="wrap">
+      <h2>Управление</h2>
+      <p class="sub">Начни с клавиатуры, чтобы понять ритм, потом переключи в меню «Управление → Камера».</p>
+      <div class="controls">
+        <div class="panel"><h3>Клавиатура и мышь</h3>
+          <dl class="keys">
+            <dt><kbd>J</kbd><kbd>ЛКМ</kbd></dt><dd>Джеб — быстрый, дешёвый</dd>
+            <dt><kbd>K</kbd><kbd>ПКМ</kbd></dt><dd>Кросс — тяжёлый, дорогой</dd>
+            <dt><kbd>Пробел</kbd></dt><dd>Блок — держит урон, ест выносливость</dd>
+            <dt><kbd>A</kbd><kbd>D</kbd></dt><dd>Уклон влево / вправо</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Пауза</dd>
+          </dl>
+        </div>
+        <div class="panel"><h3>Камера</h3>
+          <ol class="steps">
+            <li>Встань в 2–3 м от камеры: в кадре голова, плечи и руки до пояса.</li>
+            <li>Пройди короткую калибровку по подсказкам на экране.</li>
+            <li><span class="pose">Удар</span> — резко выпрями руку к камере. <span class="pose">Блок</span> — перчатки к лицу. <span class="pose">Уклон</span> — наклон корпуса.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <div class="download">
+        <div>
+          <img class="icon" src="media/icon.png" alt="" width="96" height="96">
+          <h2>Скачать для Windows</h2>
+          <p class="sub" style="margin-bottom:24px">Один файл <b>IronEcho.exe</b> — распакуй архив и запусти. Игра откроется в своём окне.</p>
+          <div class="cta"><a class="btn primary" href="download/IronEcho-Windows.zip" download>Скачать · @@ZIP_MB@@ МБ</a></div>
+        </div>
+        <div>
+          <ul class="req">
+            <li>Windows 10 или 11, 64 бит</li>
+            <li>Microsoft Edge или Google Chrome (Edge уже есть в Windows)</li>
+            <li>Видеокарта с WebGL 2 (почти любая); веб-камера — по желанию</li>
+            <li>Без установки и без интернета; настройки — в %LOCALAPPDATA%\IronEcho</li>
+          </ul>
+          <div class="note">У ранней версии нет платной цифровой подписи, поэтому Windows может показать «Система Windows защитила ваш компьютер».
+            Нажми «Подробнее» → «Выполнить в любом случае».</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap"><span>IRON ECHO · ранний доступ @@VERSION@@</span><span>Полноценная версия на Unreal Engine — в разработке</span></div>
+</footer>
+</body>
+</html>

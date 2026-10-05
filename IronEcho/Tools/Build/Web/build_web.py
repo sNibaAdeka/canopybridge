@@ -145,7 +145,7 @@ def check_pose() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("step", choices=["core", "site", "check", "all"])
+    parser.add_argument("step", choices=["core", "site", "check", "all", "public"])
     args = parser.parse_args()
     if args.step in ("core", "all"):
         build_core()
@@ -154,6 +154,9 @@ def main() -> int:
     if args.step in ("site", "all"):
         from site_build import build_site  # noqa: E402 (sibling module)
         build_site(PROJECT, HERE, OUT)
+    if args.step == "public":
+        from public_build import build_public  # noqa: E402 (sibling module)
+        build_public(PROJECT, HERE, OUT)
     return 0
 
 
