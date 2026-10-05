@@ -93,8 +93,7 @@ async function flows(browser) {
   const paused = await page.evaluate(() => ({ s: globalThis.IRONECHO_APP.state, ph: globalThis.IRONECHO_APP.core.snapshot().match.phaseName }));
   check('Esc pauses: the rules stop ticking behind the pause panel', paused.s === 'paused' && t1 === t2, `${JSON.stringify(paused)} tick ${t1}->${t2}`);
   await page.click('#resume');
-  await page.waitForTimeout(2500);
-  const resumed = await page.evaluate(() => globalThis.IRONECHO_APP.core.snapshot().match.phaseName);
+  const resumed = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; a.debugAdvance(1.5); a.frozen = false; return a.core.snapshot().match.phaseName; });
   check('resume returns to the fight (via the ready check and countdown)', ['Countdown', 'Fighting'].includes(resumed), resumed);
   await page.click('#pause-btn');
   await page.click('#restart');
