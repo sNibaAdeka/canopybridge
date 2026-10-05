@@ -1,4 +1,5 @@
 <title>IRON ECHO</title>
+<link rel="icon" href="@@FAVICON@@">
 <meta name="description" content="Robot boxing on the real IRON ECHO rules core: realistic IE-1 robots, pro ring, keyboard, touch or webcam.">
 @@FONTS@@
 <style>
@@ -111,9 +112,18 @@
 
   /* ---------- panels ---------- */
   .panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px));
-    max-height: calc(100% - 32px); overflow: auto; background: rgba(10, 11, 14, 0.9); border: 1px solid var(--line); border-radius: 8px;
+    max-height: min(calc(100% - 32px), calc(100dvh - 32px)); overflow: auto; background: rgba(10, 11, 14, 0.9); border: 1px solid var(--line); border-radius: 8px;
     box-shadow: 0 30px 80px rgba(0,0,0,0.6); padding: 26px 26px 22px; backdrop-filter: blur(6px); }
   .brand { font: 800 clamp(54px, 13vw, 84px)/0.9 var(--display); letter-spacing: 0.05em; margin: 0; }
+  #menu { width: min(960px, calc(100vw - 32px)); display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 0 30px; }
+  .menu-side { border-left: 1px solid var(--line); padding-left: 26px; min-width: 0; }
+  .side-h { font: 700 14px/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); margin: 8px 0 12px; }
+  .tips { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 13px; color: var(--dim); }
+  .tips b { color: var(--ink); font-weight: 600; }
+  @media (max-width: 860px) {
+    #menu { grid-template-columns: minmax(0, 1fr); width: min(560px, calc(100vw - 32px)); }
+    .menu-side { border-left: 0; padding-left: 0; margin-top: 18px; border-top: 1px solid var(--line); padding-top: 6px; }
+  }
   .brand span { color: var(--red); }
   .lede { color: var(--dim); margin: 8px 0 18px; max-width: 46ch; }
   .opt { margin: 14px 0 0; }
@@ -162,7 +172,11 @@
     .topbar { gap: 8px; padding-left: 10px; padding-right: 10px; }
     #help { display: none; }
     .panel { padding: 20px 16px 16px; }
+    .seg button { font-size: 14px; letter-spacing: 0.01em; padding: 9px 4px; overflow-wrap: anywhere; }
+    .seg button small { font-size: 10px; }
   }
+  /* touch screens: the keyboard table is noise; the on-screen pad has its own labels */
+  @media (hover: none) and (pointer: coarse) { #menu .keys { display: none; } }
 </style>
 
 <div id="stage">
@@ -199,8 +213,9 @@
   </div>
 
   <div id="menu" class="panel">
+   <div class="menu-main">
     <h1 class="brand">IRON <span>ECHO</span></h1>
-    <p class="lede">Робобокс на настоящем ядре правил игры. Читай замах соперника, закрывайся, уклоняйся и бей в момент, когда он раскрылся.</p>
+    <p class="lede">Бокс роботов. Читай замах соперника, закрывайся, уклоняйся и бей в тот миг, когда он раскрылся.</p>
     <div class="opt" data-group="level"><span>Соперник</span><div class="seg">
       <button type="button" data-value="0">ЛЁГКИЙ<small>для первого боя</small></button>
       <button type="button" data-value="1">НОРМАЛЬНЫЙ<small>читает серии</small></button>
@@ -215,20 +230,31 @@
       <button type="button" data-value="high">ВЫСОКАЯ<small>тени от прожекторов</small></button>
       <button type="button" data-value="low">БЫСТРАЯ<small>слабые ПК и телефоны</small></button>
     </div></div>
-    <button class="go" id="start" type="button">В РИНГ</button>
     @@CAMERA_MENU@@
+    <button class="go" id="start" type="button">В РИНГ</button>
+    <p class="fine" id="menu-load" hidden></p>
     <div id="cam-offer" hidden>
       <button class="ghost" id="cam-dl" type="button">ВЕРСИЯ С КАМЕРОЙ — СКАЧАТЬ</button>
       <p class="fine" id="cam-dl-note">Бокс телом через веб-камеру. Один HTML-файл: сохрани и открой двойным щелчком в Chrome или Edge (нужен интернет для библиотек).</p>
     </div>
+   </div>
+   <div class="menu-side">
+    <h3 class="side-h">Как драться</h3>
+    <ul class="tips">
+      <li><b>Читай замах.</b> Перед ударом визор соперника вспыхивает, а плечо уходит вниз — закрывайся или уклоняйся.</li>
+      <li><b>Бей в раскрытие.</b> После промаха или блока соперник на миг открыт — там и проходит кросс.</li>
+      <li><b>Береги дыхание.</b> Зелёная полоса под здоровьем — выносливость. Молотить без остановки бесполезно: на нуле удары слабые, а робот задыхается.</li>
+    </ul>
     <div class="keys">
       <kbd>J</kbd><span>джеб — левая, быстрый</span>
       <kbd>K</kbd><span>кросс — правая, сильнее и медленнее</span>
       <kbd>Пробел / S</kbd><span>блок (держать); при нокдауне — держать, чтобы встать</span>
       <kbd>A / D</kbd><span>уклон влево / вправо (держать)</span>
       <kbd>Мышь</kbd><span>левая кнопка — джеб, правая — кросс</span>
+      <kbd>Esc</kbd><span>пауза · <b>Enter</b> — в ринг / реванш</span>
     </div>
-    <p class="fine">Без остановки молотить бесполезно: без выносливости удары слабые, а на нуле робот на 0.6 с задыхается. Ядро: <b id="core-kind">C++ → WebAssembly</b>. <button id="sound" type="button" class="linkish">Звук: вкл</button></p>
+    <p class="fine tools"><button id="sound" type="button" class="linkish">Звук: вкл</button> · <button type="button" class="linkish fs-toggle">Во весь экран</button> · <span class="ver">версия @@VERSION@@</span></p>
+   </div>
   </div>
 
   <div id="loading" class="panel" hidden>
@@ -241,6 +267,7 @@
     <h2 class="brand" style="font-size:52px">ПАУЗА</h2>
     <button class="go" id="resume" type="button">ПРОДОЛЖИТЬ</button>
     <div class="row2"><button class="ghost" id="restart" type="button">ЗАНОВО</button><button class="ghost" id="to-menu" type="button">МЕНЮ</button></div>
+    <p class="fine tools"><button type="button" class="linkish fs-toggle">Во весь экран</button> · Esc — продолжить</p>
   </div>
 
   <div id="results" class="panel" hidden>

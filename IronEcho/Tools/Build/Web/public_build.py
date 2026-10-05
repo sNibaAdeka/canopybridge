@@ -79,12 +79,9 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
     else:
         print("[public] no Build/Desktop/IronEcho-Windows.zip: run Tools/Build/Desktop/build_desktop.py first")
 
-    version = "0.2"
-    try:
-        src = (project / "Tools" / "Build" / "Desktop" / "build_desktop.py").read_text(encoding="utf-8")
-        version = re.search(r'VERSION = "([^"]+)"', src).group(1)
-    except (OSError, AttributeError):
-        pass
+    from site_build import GAME_VERSION  # noqa: E402 (sibling module)
+
+    version = GAME_VERSION
     page = (here / "public" / "index.html").read_text(encoding="utf-8")
     page = page.replace("@@VIDEO@@", video).replace("@@ZIP_MB@@", zip_mb).replace("@@VERSION@@", version)
     if "@@" in page:

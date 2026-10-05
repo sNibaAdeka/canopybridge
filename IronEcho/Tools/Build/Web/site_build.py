@@ -17,6 +17,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+GAME_VERSION = "1.0.0"  # shown in the menu, the Windows app and the website
+HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
 
@@ -125,6 +127,30 @@ LOCAL_IMPORTMAP = ('<script type="importmap">{"imports":{"three":"./vendor/three
                    '"three/addons/":"./vendor/three/addons/"}}</script>')
 
 
+def make_icon(size: int = 512):
+    """IRON ECHO icon: Forge's head from the committed render, rounded square with a blue rim (RGBA PIL image)."""
+    from PIL import Image, ImageDraw
+
+    s = 512
+    head = Image.open(HEAD_RENDER).convert("RGB").crop((250, 40, 770, 560)).resize((s, s), Image.LANCZOS)
+    tile = Image.new("RGBA", (s, s), (14, 17, 24, 255))
+    tile.paste(head, (0, 0))
+    ImageDraw.Draw(tile).rounded_rectangle((8, 8, s - 9, s - 9), radius=96, outline=(64, 118, 255, 255), width=14)
+    mask = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((8, 8, s - 9, s - 9), radius=96, fill=255)
+    icon = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    icon.paste(tile, (0, 0), mask)
+    return icon if size == s else icon.resize((size, size), Image.LANCZOS)
+
+
+def favicon_data_uri() -> str:
+    import io
+
+    buf = io.BytesIO()
+    make_icon(64).save(buf, "PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def page(template: str, core_dir: Path, game_js: str, *, assets_script: str = "", camera_menu: str = "",
          fonts: str = CDN_FONTS, importmap: str = CDN_IMPORTMAP) -> str:
     wasm_b64 = base64.b64encode((core_dir / "ironecho_core.wasm").read_bytes()).decode("ascii")
@@ -135,6 +161,7 @@ def page(template: str, core_dir: Path, game_js: str, *, assets_script: str = ""
     return (template.replace("@@CORE_WASM_B64@@", wasm_b64).replace("@@CORE_JS@@", core_js)
             .replace("@@ASSETS_SCRIPT@@", assets_script).replace("@@CAMERA_MENU@@", camera_menu)
             .replace("@@FONTS@@", fonts).replace("@@IMPORTMAP@@", importmap)
+            .replace("@@FAVICON@@", favicon_data_uri()).replace("@@VERSION@@", GAME_VERSION)
             .replace("@@GAME_JS@@", game_js))
 
 

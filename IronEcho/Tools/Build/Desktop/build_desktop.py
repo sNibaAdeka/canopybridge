@@ -20,7 +20,6 @@ HERE = Path(__file__).resolve().parent
 PROJECT = HERE.parents[2]
 OUT = PROJECT / "Build" / "Desktop"
 STANDALONE = PROJECT / "Build" / "Web" / "standalone"
-VERSION = "0.2.0"
 WINRES = "github.com/tc-hib/go-winres@v0.3.3"
 
 README = """IRON ECHO — бокс роботов
@@ -42,23 +41,8 @@ Windows может показать «Система Windows защитила в
 """
 
 
-HEAD_RENDER = PROJECT / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
-
-
-def make_icon(dst: Path) -> Path:
-    """App icon: Forge's head from the committed render, rounded square with a blue rim (512 px PNG)."""
-    from PIL import Image, ImageDraw
-
-    head = Image.open(HEAD_RENDER).convert("RGB").crop((250, 40, 770, 560)).resize((512, 512), Image.LANCZOS)
-    tile = Image.new("RGBA", (512, 512), (14, 17, 24, 255))
-    tile.paste(head, (0, 0))
-    ImageDraw.Draw(tile).rounded_rectangle((8, 8, 503, 503), radius=96, outline=(64, 118, 255, 255), width=14)
-    mask = Image.new("L", (512, 512), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((8, 8, 503, 503), radius=96, fill=255)
-    icon = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
-    icon.paste(tile, (0, 0), mask)
-    icon.save(dst)
-    return dst
+sys.path.insert(0, str(HERE.parent / "Web"))
+from site_build import GAME_VERSION, make_icon  # noqa: E402 (one version and one icon for game, app and site)
 
 
 def go() -> str:
@@ -88,13 +72,14 @@ def main() -> int:
             shutil.copy2(f, src / f.name)
     shutil.copytree(STANDALONE, src / "game")
 
-    version = f"{VERSION}+{git_rev()}"
+    version = f"{GAME_VERSION}+{git_rev()}"
     env = dict(os.environ, CGO_ENABLED="0")
     # icon + version info + manifest (DPI aware, common controls) as a .syso the Go linker picks up
-    icon = make_icon(OUT / "icon.png")
+    icon = OUT / "icon.png"
+    make_icon(512).save(icon)
     winres = [go(), "run", WINRES, "simply", "--icon", str(icon), "--manifest", "gui",
               "--product-name", "IRON ECHO", "--file-description", "IRON ECHO — robot boxing",
-              "--product-version", VERSION, "--file-version", VERSION, "--copyright", "IRON ECHO",
+              "--product-version", GAME_VERSION, "--file-version", GAME_VERSION, "--copyright", "IRON ECHO",
               "--original-filename", "IronEcho.exe", "--arch", "amd64", "--out", "rsrc"]
     try:
         subprocess.run(winres, cwd=src, env=env, check=True)

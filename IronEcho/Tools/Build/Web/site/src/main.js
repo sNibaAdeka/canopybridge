@@ -15,7 +15,7 @@ const NAMES = ['FORGE 07', 'EMBER 13'];
 const PHASE_LABEL = { WaitingForPlayer: 'ПРИГОТОВЬСЯ', Paused: 'ПАУЗА' };
 const $ = (s) => document.querySelector(s);
 
-const settings = { level: 1, mode: 'bout', quality: 'high', control: 'keys' };
+const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys' }; // Easy first: new players lose ~94% on Normal
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
 } catch { /* storage unavailable: defaults */ }
@@ -34,6 +34,20 @@ const app = {
 function progress(fraction, label) {
   $('#load-fill').style.width = `${Math.round(fraction * 100)}%`;
   if (label) $('#load-label').textContent = label;
+  const note = $('#menu-load');
+  if (note) {
+    note.hidden = fraction >= 1;
+    note.textContent = `Загрузка арены… ${Math.round(fraction * 100)}%`;
+  }
+}
+
+// The arena loads as soon as the page opens, behind the menu; "В ринг" waits for it only if it is not ready yet.
+let worldPromise = null;
+function ensureWorld() {
+  if (!worldPromise) {
+    worldPromise = buildWorld().catch((err) => { worldPromise = null; throw err; });
+  }
+  return worldPromise;
 }
 
 async function loadAssets() {
@@ -92,8 +106,10 @@ async function loadAssets() {
 
 async function buildWorld() {
   progress(0.02, 'Запуск ядра правил…');
+  if (!document.createElement('canvas').getContext('webgl2')) {
+    throw new Error('браузер или видеокарта без WebGL 2. Обнови Chrome/Edge и драйвер видеокарты, включи аппаратное ускорение в настройках браузера');
+  }
   app.core = await loadCore();
-  $('#core-kind').textContent = app.core.kind;
   progress(0.05, 'Загрузка роботов и арены…');
   const assets = await loadAssets();
   progress(1, 'Сборка сцены…');
@@ -105,7 +121,8 @@ async function buildWorld() {
   applyVenue(app.renderer, app.scene, assets.pano);
   app.ring = buildRing(assets.canvas);
   app.scene.add(app.ring);
-  buildLights(app.scene, settings.quality);
+  app.lights = buildLights(app.scene, settings.quality);
+  app.builtQuality = settings.quality;
 
   const mk = (a, name) => new RobotRig(a.gltf, { map: a.map, normalMap: a.normalMap, orm: a.orm, emissiveMap: a.emissiveMap }, { name });
   const player = mk(assets.forge, 'Forge');
@@ -138,6 +155,38 @@ async function buildWorld() {
   app.loaded = true;
 }
 
+// Graphics quality: pixel-ratio cap and shadowed spots; switchable live from the menu.
+const PIXEL_CAP = { high: 2, low: 1.25 };
+let resScale = 1; // adaptive resolution (0.6..1), lowered when the frame rate drops
+function applyPixelRatio() {
+  const ratio = Math.min(window.devicePixelRatio || 1, PIXEL_CAP[settings.quality] || 1.25) * resScale;
+  if (Math.abs(app.renderer.getPixelRatio() - ratio) > 0.01) app.renderer.setPixelRatio(ratio);
+}
+function applyQuality() {
+  if (!app.loaded) return;
+  app.scene.remove(app.lights);
+  app.lights.traverse((o) => { if (o.shadow && o.shadow.map) o.shadow.map.dispose(); });
+  app.lights = buildLights(app.scene, settings.quality);
+  app.builtQuality = settings.quality;
+  resScale = 1;
+  applyPixelRatio();
+  resize();
+}
+// Keep the fight above ~50 fps on weak GPUs: every 2 s compare the mean frame time and step the resolution.
+const perf = { sum: 0, n: 0 };
+function adaptResolution(dt) {
+  if (app.state !== 'playing' || document.hidden) { perf.sum = perf.n = 0; return; }
+  perf.sum += dt;
+  perf.n++;
+  if (perf.sum < 2 || perf.n < 8) return;
+  const fps = perf.n / perf.sum;
+  perf.sum = perf.n = 0;
+  const before = resScale;
+  if (fps < 48 && resScale > 0.6) resScale = Math.max(0.6, resScale - (fps < 30 ? 0.2 : 0.1));
+  else if (fps > 58 && resScale < 1) resScale = Math.min(1, resScale + 0.05);
+  if (resScale !== before) { applyPixelRatio(); resize(); }
+}
+
 function resize() {
   if (!app.renderer) return;
   const w = window.innerWidth;
@@ -150,6 +199,7 @@ function resize() {
 
 // ---------------------------------------------------------------- flow
 function startBout() {
+  if (app.builtQuality !== settings.quality) applyQuality(); // changed while the arena was still loading
   const mode = settings.mode === 'training' ? 1 : 0;
   app.training = mode === 1;
   const roundSeconds = settings.mode === 'short' ? 45 : 0;
@@ -204,6 +254,17 @@ function resumeBout() {
   app.core.resume();
   app.state = 'playing';
   $('#pause').hidden = true;
+}
+
+// Losing focus (Alt+Tab, another window, minimised) pauses the bout instead of letting the bot hit a ghost.
+function autoPause() {
+  if (app.state !== 'playing' || app.frozen) return;
+  togglePause();
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
 }
 
 function toMenu() {
@@ -445,9 +506,11 @@ function step(dt, input, now) {
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const raw = (now - last) / 1000;
+  const dt = Math.min(0.1, raw);
   last = now;
   if (!app.loaded || app.frozen) return;
+  if (raw < 0.5) adaptResolution(raw); // real frame time (not the clamped step); skip stalls such as a tab switch
   step(dt, currentInput(), now);
   app.renderer.render(app.scene, app.camera);
 }
@@ -483,19 +546,28 @@ function wireMenu() {
   pick('level', 'level', Number);
   pick('mode', 'mode');
   pick('quality', 'quality');
+  for (const b of document.querySelectorAll('[data-group="quality"] button')) b.addEventListener('click', applyQuality);
   pick('control', 'control');
   $('#start').addEventListener('click', async () => {
+    if ($('#start').disabled) return;
     app.sound.start();
     if (!app.loaded) {
+      $('#start').disabled = true;
       $('#menu').hidden = true;
       $('#loading').hidden = false;
       try {
-        await buildWorld();
+        await ensureWorld();
       } catch (err) {
         console.error(err);
-        $('#load-label').textContent = `Не удалось загрузить: ${err.message}`;
+        $('#start').disabled = false;
+        $('#loading').hidden = true;
+        $('#menu').hidden = false;
+        const note = $('#menu-load');
+        note.hidden = false;
+        note.textContent = `Не удалось запустить: ${err.message}`;
         return;
       }
+      $('#start').disabled = false;
       $('#loading').hidden = true;
     }
     startBout();
@@ -510,6 +582,21 @@ function wireMenu() {
     $('#sound').textContent = app.sound.enabled ? 'Звук: вкл' : 'Звук: выкл';
   });
   $('#pause-btn').addEventListener('click', togglePause);
+  for (const b of document.querySelectorAll('.fs-toggle')) b.addEventListener('click', toggleFullscreen);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
+  window.addEventListener('blur', autoPause);
+  // Enter: into the ring from the menu, rematch from the results; Esc on the results: back to the menu.
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    const visible = (id) => !$(id).hidden;
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+      if (visible('#menu') && !$('#start').disabled) { e.preventDefault(); $('#start').click(); }
+      else if (app.state === 'results' && visible('#results')) { e.preventDefault(); startBout(); }
+    } else if (e.code === 'Escape' && app.state === 'results' && visible('#results')) {
+      e.preventDefault();
+      toMenu();
+    }
+  });
 }
 
 // claude.ai artifact: offer the self-contained webcam build (published next to the page) through `downloads`.
@@ -547,6 +634,12 @@ async function offerCameraDownload() {
 
 wireMenu();
 offerCameraDownload();
+ensureWorld().catch((err) => {
+  console.error(err);
+  const note = $('#menu-load');
+  note.hidden = false;
+  note.textContent = `Не удалось загрузить арену: ${err.message}`;
+});
 requestAnimationFrame(frame);
 globalThis.IRONECHO_APP = app; // for tests and the camera module
 // Windows app (Tools/Build/Desktop): its local server keeps running while the page is open.
