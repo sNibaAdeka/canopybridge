@@ -72,7 +72,7 @@ export function buildRing(canvasTex) {
   // canvas surface (Cycles albedo bake of the canvas and its prints) on a padded body
   canvasTex.colorSpace = THREE.SRGBColorSpace;
   canvasTex.anisotropy = 16;
-  const canvasMat = new THREE.MeshStandardMaterial({ map: canvasTex, roughness: 0.86, metalness: 0.0 });
+  const canvasMat = new THREE.MeshStandardMaterial({ map: canvasTex, color: 0xb8b8b8, roughness: 0.86, metalness: 0.0 });
   const top = new THREE.Mesh(new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2), canvasMat);
   top.receiveShadow = true;
   ring.add(top);
@@ -174,7 +174,7 @@ export function buildRing(canvasTex) {
 // TV lighting: soft top key with the main contact shadows, hard truss spots, cool/warm rims.
 export function buildLights(scene, quality) {
   const lights = new THREE.Group();
-  const key = new THREE.DirectionalLight(0xfff4e8, 2.2);
+  const key = new THREE.DirectionalLight(0xfff4e8, 1.15);
   key.position.set(0.8, 6.0, 0.6);
   key.target.position.set(0, 0.9, 0);
   key.castShadow = true;
@@ -192,7 +192,7 @@ export function buildLights(scene, quality) {
 
   const spotSpots = [[-3.9, 1.75], [-3.9, -1.75], [3.9, 1.75], [3.9, -1.75], [1.75, 3.9], [-1.75, -3.9]];
   spotSpots.forEach(([x, z], i) => {
-    const spot = new THREE.SpotLight(0xfff1df, 95, 14, (30 * Math.PI) / 180 / 2 + 0.12, 0.45, 2);
+    const spot = new THREE.SpotLight(0xfff1df, 48, 14, (30 * Math.PI) / 180 / 2 + 0.12, 0.45, 2);
     spot.position.set(x, 5.75, z);
     spot.target.position.set(x * 0.08, 1.1, z * 0.08);
     const shadow = quality === 'high' ? i < 2 : false;

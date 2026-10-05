@@ -149,6 +149,10 @@ def build_site(project: Path, here: Path, out_root: Path) -> None:
     src = here / "site" / "src"
     template = (here / "site" / "index.template.html").read_text(encoding="utf-8")
 
+    # artifact hosts serve no .glb: wrap every GLB as {"glb": base64} JSON next to it
+    for glb in site_assets.glob("*.glb"):
+        (site_assets / (glb.name + ".json")).write_text(json.dumps({"glb": base64.b64encode(glb.read_bytes()).decode("ascii")}), encoding="utf-8")
+
     game = bundle(src, MODULES)
     fragment = page(template, core_dir, game)
     (site / "index.html").write_text(fragment, encoding="utf-8")

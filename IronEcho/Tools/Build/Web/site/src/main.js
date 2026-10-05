@@ -51,6 +51,17 @@ async function loadAssets() {
     }
   }
   if (decoder) gltfLoader.setMeshoptDecoder(decoder);
+  // The artifact host serves no .glb: the site ships each GLB base64-wrapped in JSON ({"glb": "..."}).
+  const loadGlb = async (name) => {
+    if (globalThis.IRONECHO_ASSETS && globalThis.IRONECHO_ASSETS[name]) return gltfLoader.loadAsync(globalThis.IRONECHO_ASSETS[name]);
+    const res = await fetch(`assets/${name}.json`);
+    if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+    const b64 = (await res.json()).glb;
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return gltfLoader.parseAsync(bytes.buffer, '');
+  };
   const glbName = (livery) => (decoder ? `IE1_${livery}.mo.glb` : `IE1_${livery}.glb`);
   const jobs = [];
   let done = 0;
@@ -62,7 +73,7 @@ async function loadAssets() {
     return t;
   }));
   const robot = (livery) => ({
-    gltf: track(gltfLoader.loadAsync(assetUrl(glbName(livery)))),
+    gltf: track(loadGlb(glbName(livery))),
     map: tex(`T_IE1_${livery}_BaseColor.jpg`, { flipY: false }),
     normalMap: tex(`T_IE1_${livery}_Normal.jpg`, { srgb: false, flipY: false }),
     orm: tex(`T_IE1_${livery}_ORM.jpg`, { srgb: false, flipY: false }),
