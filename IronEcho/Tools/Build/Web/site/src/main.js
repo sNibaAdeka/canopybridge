@@ -162,6 +162,7 @@ function startBout() {
   app.resultTimer = 0;
   app.lastPhase = '';
   app.intro = 3.2;
+  resetStage();
   app.rigs.opponent.root.visible = !app.training;
   app.bag.group.visible = app.training;
   app.state = 'playing';
@@ -229,9 +230,9 @@ function onCombat(e, snap) {
   if (type === 'HitConfirmed') {
     const power = Math.min(1.6, e.damage / 2.2 + (e.counter ? 0.3 : 0));
     let at;
-    if (target === 'opponent' && app.training) at = new THREE.Vector3(snap.opponent.position - 0.18, 1.45, 0);
+    if (target === 'opponent' && app.training) at = stagePoint(snap.opponent.position - 0.18, 1.45);
     else at = app.rigs[target].headWorld();
-    const dir = new THREE.Vector3(e.actor === 0 ? 1 : -1, 0.15, 0).normalize();
+    const dir = stageDir().multiplyScalar(e.actor === 0 ? 1 : -1).setY(0.15).normalize();
     app.sparks.burst(at, dir, e.counter ? 'counter' : 'hit', 0.7 + 0.4 * power);
     app.sound.hit(0.7 + 0.3 * power, !!e.counter);
     if (app.training && target === 'opponent') app.bag.hit(power, e.hand === 0 ? 1 : -1);
@@ -248,9 +249,9 @@ function onCombat(e, snap) {
   }
   if (type === 'Blocked') {
     const rig = app.rigs[target];
-    const at = app.training && target === 'opponent' ? new THREE.Vector3(snap.opponent.position - 0.18, 1.45, 0)
+    const at = app.training && target === 'opponent' ? stagePoint(snap.opponent.position - 0.18, 1.45)
       : rig.fistWorld('l').add(rig.fistWorld('r')).multiplyScalar(0.5);
-    app.sparks.burst(at, new THREE.Vector3(e.actor === 0 ? 1 : -1, 0.2, 0).normalize(), 'block', 0.7);
+    app.sparks.burst(at, stageDir().multiplyScalar(e.actor === 0 ? 1 : -1).setY(0.2).normalize(), 'block', 0.7);
     app.sound.block(0.9);
     if (!(app.training && target === 'opponent')) app.anim[target].takeBlocked(e.damage / 0.15);
     app.shake.add(target === 'player' ? 0.12 : 0.05);
@@ -311,6 +312,40 @@ function onMatch(e, snap) {
   }
 }
 
+// ---------------------------------------------------------------- stage
+// The rules core places both fighters on one line (metres, +X toward the opponent). On screen that line circles the
+// ring: it turns slowly around the fighters' midpoint and its centre wanders over the canvas, so the robots work
+// around each other with real footwork instead of sliding on a rail. Visual only: distance and reach stay the core's.
+const stage = { theta: 0, omega: 0, cx: 0, cz: 0, t: 0 };
+function resetStage() { Object.assign(stage, { theta: 0, omega: 0, cx: 0, cz: 0, t: 0 }); }
+function stageDir() { return new THREE.Vector3(Math.cos(stage.theta), 0, -Math.sin(stage.theta)); }
+function stageSide() { return new THREE.Vector3(Math.sin(stage.theta), 0, Math.cos(stage.theta)); }
+function stagePoint(s, y = 0) { return new THREE.Vector3(stage.cx + Math.cos(stage.theta) * s, y, stage.cz - Math.sin(stage.theta) * s); }
+function updateStage(dt, snap) {
+  if (app.training) { resetStage(); return; }
+  const fighting = snap.match.phaseName === 'Fighting';
+  if (fighting) stage.t += dt;
+  const t = stage.t;
+  const busy = (f) => f.stateName === 'Attack' || f.stateName === 'HitStun' || f.blocking > 0.5;
+  let w = fighting ? 0.42 * (0.65 * Math.sin(t * 0.23 + 0.4) + 0.35 * Math.sin(t * 0.61 + 2.1)) : 0;
+  if (busy(snap.player) || busy(snap.opponent)) w *= 0.3; // plant to exchange, circle between exchanges
+  stage.omega += (w - stage.omega) * Math.min(1, dt * 1.8);
+  stage.theta += stage.omega * dt;
+  // the centre drifts over the middle of the canvas (well inside the ropes: the ring is 6.1 m)
+  const tx = fighting ? 0.75 * Math.sin(t * 0.093 + 1.0) : stage.cx;
+  const tz = fighting ? 0.65 * Math.sin(t * 0.071 + 2.6) : stage.cz;
+  const k = Math.min(1, dt * 0.8);
+  stage.cx += (tx - stage.cx) * k;
+  stage.cz += (tz - stage.cz) * k;
+}
+function placeFighters(snap) {
+  const { player, opponent } = app.holders;
+  player.face.position.copy(stagePoint(snap.player.position));
+  opponent.face.position.copy(stagePoint(snap.opponent.position));
+  player.face.rotation.y = stage.theta;
+  opponent.face.rotation.y = stage.theta + Math.PI;
+}
+
 // ---------------------------------------------------------------- camera
 function updateCamera(dt, snap) {
   const m = snap.match;
@@ -326,15 +361,17 @@ function updateCamera(dt, snap) {
     look = new THREE.Vector3(0, 1.25, 0);
   } else if (m.phaseName === 'MatchOver') {
     const t = performance.now() / 1000;
-    const wx = m.hasWinner ? (m.winner === 0 ? px : ox) : 0;
-    pos = new THREE.Vector3(wx + Math.cos(t * 0.25) * 3.4, 1.8, Math.sin(t * 0.25) * 3.4);
-    look = new THREE.Vector3(wx, 1.3, 0);
+    const w = stagePoint(m.hasWinner ? (m.winner === 0 ? px : ox) : (px + ox) / 2);
+    pos = new THREE.Vector3(w.x + Math.cos(t * 0.25) * 3.4, 1.8, w.z + Math.sin(t * 0.25) * 3.4);
+    look = new THREE.Vector3(w.x, 1.3, w.z);
   } else {
-    // over the right shoulder, offset so the opponent stays fully visible beside the player's robot
+    // three-quarter broadcast view from behind the player's right side: both robots in full, feet included
     const downP = snap.player.stateName === 'KnockedDown' || snap.player.stateName === 'KnockedOut';
     const sway = 0.18 * Math.max(-1, Math.min(1, -snap.player.dodge || 0));
-    pos = downP ? new THREE.Vector3(px - 0.4, 2.6, 2.4) : new THREE.Vector3(px - 2.05, 2.05, 1.25 - sway);
-    look = new THREE.Vector3(ox + 0.05, 1.32, -0.30 - sway * 0.5);
+    const n = stageSide();
+    const mid = (px + ox) / 2;
+    pos = downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.9, 1.8).addScaledVector(n, 3.25 - sway);
+    look = stagePoint(mid + 0.1, 0.96).addScaledVector(n, -0.1 - sway * 0.3);
   }
   const k = 1 - Math.exp(-dt * (app.intro > 0 ? 6 : 4.5));
   app.camPos.lerp(pos, k);
@@ -380,13 +417,13 @@ function step(dt, input, now) {
     }
     const gap = snap.match.gap;
     const ctx = { gap, phase };
-    app.holders.player.face.position.x = snap.player.position;
-    app.holders.opponent.face.position.x = snap.opponent.position;
+    updateStage(dt, snap);
+    placeFighters(snap);
     app.anim.player.update(animDt, snap.player, ctx);
     if (!app.training) app.anim.opponent.update(animDt, snap.opponent, ctx);
     app.holders.player.tilt.rotation.z = app.anim.player.fall * 1.2;
     app.holders.opponent.tilt.rotation.z = app.anim.opponent.fall * 1.2;
-    app.bag.group.position.x = snap.opponent.position + 0.1;
+    app.bag.group.position.copy(stagePoint(snap.opponent.position + 0.1));
     app.bag.update(dt);
     app.sparks.update(dt);
     app.shake.update(dt);
@@ -399,8 +436,8 @@ function step(dt, input, now) {
     app.camera.lookAt(0, 1.0, 0);
     app.anim.player.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
     app.anim.opponent.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
-    app.holders.player.face.position.x = -0.675;
-    app.holders.opponent.face.position.x = 0.675;
+    resetStage();
+    placeFighters({ player: { position: -0.675 }, opponent: { position: 0.675 } });
   }
 }
 
@@ -419,10 +456,12 @@ app.debugAdvance = (seconds, inputFn = () => ({ status: 7, lean: 0, block: 0, pu
   app.frozen = true;
   const n = Math.max(1, Math.round(seconds * 60));
   for (let i = 0; i < n; i++) step(1 / 60, inputFn(i), performance.now());
+  if (app.debugCamera) app.debugCamera(app.camera, stagePoint, stageSide());
   app.renderer.render(app.scene, app.camera);
   const s = app.core.snapshot();
   return { phase: s.match.phaseName, p: s.player.stateName + '/' + s.player.stageName, o: s.opponent.stateName + '/' + s.opponent.stageName,
-    ph: s.player.health, oh: s.opponent.health, round: s.match.round, gap: s.match.gap };
+    ph: s.player.health, oh: s.opponent.health, round: s.match.round, gap: s.match.gap, theta: +stage.theta.toFixed(3),
+    steps: [app.anim.player.steps, app.anim.opponent.steps] };
 };
 
 const IDLE = { stateName: 'Guard', stageName: 'None', blocking: 0, dodge: 0, lean: 0, gassedTicksLeft: 0, stamina: 100, maxStamina: 100, hand: 0, stageAlpha: 0 };

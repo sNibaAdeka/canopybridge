@@ -5,6 +5,7 @@ Output:
   Build/Web/site/play.html           the same page as a full document, for a local web server
   Build/Web/site/assets/*            robots (GLB + JPEG textures), ring canvas, venue panorama
   Build/Web/IronEcho-Camera.html     single self-contained file (assets inlined) with the webcam mode; opens from disk
+                                     (a copy goes to site/, where the page offers it as a download)
 """
 from __future__ import annotations
 
@@ -176,4 +177,5 @@ def build_site(project: Path, here: Path, out_root: Path) -> None:
         game_cam = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "pose", "main"])
         single = full_document(page(template, core_dir, game_cam, assets_script=assets_script, camera_menu=CAMERA_MENU))
         (out_root / "IronEcho-Camera.html").write_text(single, encoding="utf-8")
+        shutil.copy2(out_root / "IronEcho-Camera.html", site / "IronEcho-Camera.html")  # the page offers it as a download
         print(f"[site] IronEcho-Camera.html {len(single.encode()) // (1024 * 1024)} MB (self-contained, webcam)")

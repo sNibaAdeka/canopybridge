@@ -137,11 +137,14 @@ export function computePose(p) {
     const a = boneLen(`thigh_${side}`);
     const b = boneLen(`calf_${side}`);
     const fdir = V(1, 0, 0).applyMatrix4(RZ(-s * fyaw));
-    const [knee, ankle] = twoBone(hp, V(foot[0], foot[1], 0.10), a, b, fdir.clone());
+    // foot = [x, y, ankle z (0.10 on the canvas, more while swinging), heel lift (toe stays down)]
+    const heel = foot.length > 3 ? foot[3] : 0;
+    const az = foot.length > 2 ? foot[2] : 0.10;
+    const [knee, ankle] = twoBone(hp, V(foot[0], foot[1], az + heel), a, b, fdir.clone());
     const [fTh, fCa] = chainFrames(hp, knee, ankle, restY(`thigh_${side}`));
     D[`thigh_${side}`] = mul(fTh, REST_INV[`thigh_${side}`]);
     D[`calf_${side}`] = mul(fCa, REST_INV[`calf_${side}`]);
-    const toe = ankle.clone().add(fdir.clone().multiplyScalar(0.17)).add(V(0, 0, -0.07));
+    const toe = ankle.clone().add(fdir.clone().multiplyScalar(0.17)).add(V(0, 0, -0.07 - heel + Math.max(0, az - 0.10) * 0.6));
     D[`foot_${side}`] = mul(frameMatrix(ankle, toe, fdir), REST_INV[`foot_${side}`]);
   }
   return D;
@@ -229,6 +232,13 @@ export class RobotRig {
   worldPoint(b, blenderPoint) {
     const p = blenderPoint.clone().applyMatrix4(this.deform[b] || new THREE.Matrix4());
     return blenderToThree(p).applyMatrix4(this.scene.matrixWorld);
+  }
+
+  // Blender armature space <-> world (foot planting).
+  armatureToWorld(p) { return blenderToThree(p).applyMatrix4(this.scene.matrixWorld); }
+  worldToArmature(w) {
+    const t = w.clone().applyMatrix4(this.scene.matrixWorld.clone().invert());
+    return new THREE.Vector3(t.x, -t.z, t.y);
   }
 
   fistWorld(side) { return this.worldPoint(`fist_tip_${side}`, vHead(`fist_tip_${side}`)); }
