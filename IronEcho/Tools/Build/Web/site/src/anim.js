@@ -44,7 +44,7 @@ const HAND_OMEGA = 30;
 const PUNCH_OMEGA = 70;
 
 const GUARD = { lead: [0.30, 0.10, 1.48], rear: [0.22, -0.09, 1.47] };
-const BLOCK = { lead: [0.20, 0.085, 1.64], rear: [0.19, -0.085, 1.64] };
+const BLOCK = { lead: [0.22, 0.075, 1.67], rear: [0.21, -0.075, 1.67] }; // gloves together in front of the face
 // Boxing stance on the canvas (armature space): lead (left) foot forward, rear foot back and out.
 const STANCE = { lead: [0.25, 0.17], rear: [-0.23, -0.16] };
 const ANKLE_Z = 0.10;
@@ -65,6 +65,8 @@ export class FighterAnimator {
     this.fallV = 0;
     this.outcome = '';    // 'win' | 'lose' | ''
     this.stagger = 0;     // 1 right after a heavy hit, decays: pushes the feet back
+    this.legHit = 0;      // 1 right after a low kick, decays slowly: the limp
+    this.kickPose = null; // current kick: { side, zone, lift, ext }
     this.pivot = 0;       // rear-foot pivot of the cross (smoothed)
     this.heel = [0, 0];   // heel lift lead/rear (smoothed)
     this.feet = { lead: { w: null, swing: null, rest: 0 }, rear: { w: null, swing: null, rest: 0 } };
@@ -76,6 +78,15 @@ export class FighterAnimator {
   takeHit(hand, damage, counter, zone = 0) {
     const power = clamp(damage / 2.8, 0.4, 1.6) * (counter ? 1.25 : 1);
     const side = hand === 0 ? 1 : -1; // jab from the opponent's lead hand turns this head one way, cross the other
+    if (zone === 2) {
+      // low kick: the leg is swept, the body dips and sags to that side
+      this.kickV.x -= 1.4 * power;
+      this.kickV.lean += 160 * power;
+      this.kickV.tilt += side * 120 * power;
+      this.stagger = Math.max(this.stagger, clamp(power - 0.2, 0, 1));
+      this.legHit = 1;
+      return;
+    }
     if (zone === 1) {
       // to the body: folds forward around the glove, the head stays
       this.kickV.nod += 260 * power;
@@ -158,10 +169,10 @@ export class FighterAnimator {
     if (blocking) {
       lead = [...BLOCK.lead];
       rear = [...BLOCK.rear];
-      T.crouch = 0.13 + 0.008 * bounce;
-      T.lean = 14;
-      T.nod = 20;
-      T.elbow_out = 0.05;
+      T.crouch = 0.12 + 0.008 * bounce;
+      T.lean = 11;
+      T.nod = 15;
+      T.elbow_out = 0.02;
       T.body_x *= 0.3;
       T.lateral *= 0.3;
     }
@@ -189,8 +200,37 @@ export class FighterAnimator {
       T.body_x -= 0.03;
     }
 
+    // kick: the leg chambers (knee up), then extends; the other foot stays planted
+    let kickPose = null;
+    if (f.stateName === 'Attack' && f.kind === 1) {
+      const a = f.stageAlpha;
+      const rear = f.hand === 1;
+      const low = f.zone === 2;
+      let lift = 0;
+      let ext = 0;
+      if (f.stageName === 'Windup') { lift = smooth(Math.min(1, a / 0.68)); ext = smooth(clamp((a - 0.72) / 0.28, 0, 1)); }
+      else if (f.stageName === 'Active') { lift = 1; ext = 1; }
+      else { lift = 1 - smooth(a); ext = 1 - smooth(Math.min(1, a * 2.4)); }
+      kickPose = { side: rear ? 'rear' : 'lead', zone: f.zone, lift, ext };
+      this.telegraph = this.isBot && f.stageName === 'Windup' ? lift : 0;
+      T.crouch += (low ? 0.09 : 0.04) * lift;
+      T.body_x = lerp(T.body_x, -0.05, lift) + 0.14 * ext;       // weight back onto the standing leg, then drive in
+      if (rear) {
+        T.yaw = lerp(T.yaw, 40, ext) - 10 * lift * (1 - ext);      // hips come round through the kick
+        T.twist = lerp(T.twist, 30, ext);
+        T.lean = lerp(T.lean, low ? 8 : -14, ext);
+        T.side_bend += (low ? 4 : -9) * ext;
+      } else {
+        T.yaw = lerp(T.yaw, -12, ext);
+        T.lean = lerp(T.lean, low ? 6 : -16, ext);                 // push kick: the body leans back from the leg
+        T.twist = lerp(T.twist, -4, ext);
+      }
+      leadBias = lerp(leadBias, 0, lift);
+      rearBias = lerp(rearBias, 0, lift);
+    }
+
     // punch: shaped extension e (< 0 loading, 1 full) from the attack stage and its progress
-    if (f.stateName === 'Attack') {
+    if (f.stateName === 'Attack' && f.kind !== 1) {
       const hand = f.hand; // 0 = left/lead (jab), 1 = right/rear (cross)
       const a = f.stageAlpha;
       const L = this.isBot ? 0.62 : 0.2; // share of the windup spent loading: the bot's telegraph is readable
@@ -289,7 +329,13 @@ export class FighterAnimator {
       rear = lerp3(rear, [0.00, -0.42, 0.95], k);
       T.elbow_out = lerp(T.elbow_out, 0.8, k);
     }
-    return { T, lead, rear, leadBias, rearBias, heel: [heelL, heelR], pivot };
+    if ((f.legSlow || 0) > 0.05 || this.legHit > 0.05) {
+      const limp = Math.max(this.legHit, clamp((f.legSlow || 0) / 1.0, 0, 1) * 0.7);
+      T.crouch += 0.035 * limp;
+      T.side_bend += 3 * limp * Math.sin(t * 2 * Math.PI * 1.4);
+      T.lean += 3 * limp;
+    }
+    return { T, lead, rear, leadBias, rearBias, heel: [heelL, heelR], pivot, kick: kickPose };
   }
 
   // Feet: planted in world space, stepping with a lifted arc when the body has moved away from them.
@@ -366,6 +412,21 @@ export class FighterAnimator {
     return local;
   }
 
+  // The kicking foot leaves its planted spot: chamber (knee up), then the strike path. Armature space.
+  _applyKick(P, feet, k) {
+    const key = `${k.side}_foot`;
+    const sgn = k.side === 'lead' ? 1 : -1; // armature +y = the robot's left
+    const planted = feet[k.side];
+    const low = k.zone === 2;
+    const round = k.side === 'rear' && !low;
+    const chamber = low ? [0.22, sgn * 0.17, 0.26] : round ? [0.18, sgn * 0.42, 0.70] : [0.30, sgn * 0.17, 0.66];
+    const strike = low ? [0.92, sgn * 0.05, 0.20] : round ? [0.66, -sgn * 0.06, 0.94] : [0.88, sgn * 0.06, 0.84];
+    const at = [0, 1, 2].map((i) => lerp(lerp([planted.x, planted.y, planted.z][i], chamber[i], k.lift), strike[i], k.ext));
+    P[key] = [at[0], at[1], at[2], 0];
+    const yawI = k.side === 'lead' ? 0 : 1;
+    P.foot_yaw[yawI] = round ? lerp(P.foot_yaw[yawI], 70, k.lift) : lerp(P.foot_yaw[yawI], 5, k.ext);
+  }
+
   update(dt, f, ctx) {
     this.t += dt;
     this.speedF = f.speedForward || 0;
@@ -377,6 +438,7 @@ export class FighterAnimator {
       [this.kick[k], this.kickV[k]] = spring(this.kick[k], this.kickV[k], 0, 14, dt);
     }
     this.stagger *= Math.exp(-dt * 3.2);
+    this.legHit *= Math.exp(-dt * 0.9);
     const tg = this._targets(f, ctx);
     const { T, lead, rear } = tg;
     const attacking = f.stateName === 'Attack';
@@ -415,6 +477,7 @@ export class FighterAnimator {
     P.lead_foot = [feet.lead.x, feet.lead.y, feet.lead.z, this.heel[0] * swingL];
     P.rear_foot = [feet.rear.x, feet.rear.y, feet.rear.z, this.heel[1] * swingR];
     P.foot_yaw = [10, lerp(35, 4, this.pivot)];
+    if (tg.kick && live) this._applyKick(P, feet, tg.kick);
     this.rig.applyPose(computePose(P));
     // visor LEDs flare while the bot loads a punch: a readable "now!" for a human 2 m from the screen
     this.glow = (this.glow || 0) + ((this.telegraph > 0 ? 1 : 0) - (this.glow || 0)) * Math.min(1, dt * 18);

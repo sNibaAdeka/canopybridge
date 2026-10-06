@@ -26,6 +26,27 @@ namespace IronEchoCore
 		Cross.KnockbackMeters = 0.15f;
 		Cross.HitStunTicks = SecondsToTicks(0.32);
 
+		// Lead leg: a quick front kick (teep) that keeps the opponent off; rear leg: the round kick, the big one.
+		AttackSpec& Teep = Config.Kicks[HandIndex(Hand::Left)];
+		Teep.WindupTicks = SecondsToTicks(0.17);
+		Teep.ActiveTicks = SecondsToTicks(0.08);
+		Teep.RecoveryTicks = SecondsToTicks(0.42);
+		Teep.Damage = 2.2f;
+		Teep.StaminaCost = 12.0f;
+		Teep.ReachMeters = 1.72f;
+		Teep.KnockbackMeters = 0.22f;
+		Teep.HitStunTicks = SecondsToTicks(0.26);
+
+		AttackSpec& Round = Config.Kicks[HandIndex(Hand::Right)];
+		Round.WindupTicks = SecondsToTicks(0.24);
+		Round.ActiveTicks = SecondsToTicks(0.09);
+		Round.RecoveryTicks = SecondsToTicks(0.55);
+		Round.Damage = 4.0f;
+		Round.StaminaCost = 16.0f;
+		Round.ReachMeters = 1.68f;
+		Round.KnockbackMeters = 0.28f;
+		Round.HitStunTicks = SecondsToTicks(0.38);
+
 		return Config;
 	}
 
@@ -49,6 +70,11 @@ namespace IronEchoCore
 		}
 		Config.Attacks[HandIndex(Hand::Left)].WindupTicks = SecondsToTicks(JabWindup);
 		Config.Attacks[HandIndex(Hand::Right)].WindupTicks = SecondsToTicks(CrossWindup);
+		// Kicks are telegraphed even longer: the leg has to come up first, so the tell is easy to read.
+		Config.Kicks[HandIndex(Hand::Left)].WindupTicks = SecondsToTicks(JabWindup + 0.20);
+		Config.Kicks[HandIndex(Hand::Right)].WindupTicks = SecondsToTicks(CrossWindup + 0.22);
+		Config.Kicks[0].StaminaCost *= 0.75f;
+		Config.Kicks[1].StaminaCost *= 0.75f;
 		// The telegraphed windup is there for the human, not a choice of the bot: it would keep the bot out of
 		// regeneration (no regen while attacking) and starve it. Cheaper punches and faster regen compensate.
 		Config.Attacks[HandIndex(Hand::Left)].StaminaCost *= 0.75f;
@@ -98,6 +124,8 @@ namespace IronEchoCore
 			Config.bCutOffRing = false;
 			Config.BodyShotChance = 0.10f;
 			Config.BodyVsGuardBonus = 0.10f;
+			Config.KickChance = 0.06f;
+			Config.LegKickShare = 0.20f;
 			break;
 		case BotLevel::Normal:
 			break;
@@ -120,6 +148,8 @@ namespace IronEchoCore
 			Config.StepBackChance = 0.12f;
 			Config.BodyShotChance = 0.20f;
 			Config.BodyVsGuardBonus = 0.40f;
+			Config.KickChance = 0.22f;
+			Config.LegKickShare = 0.45f;
 			break;
 		}
 		return Config;

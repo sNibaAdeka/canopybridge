@@ -2,8 +2,8 @@
 
     python Tools/Build/Web/check/synthetic_session.py out.json
 
-A scripted person from Tracking/iron_echo_tracker/synth.py: full calibration (neutral, slip left, slip right) and then
-40 punches and a 2.5 s lean toward the screen (the camera step-in), sampled at 60 fps as MediaPipe world
+A scripted person from Tracking/iron_echo_tracker/synth.py: the web calibration (neutral, block, slip left, slip right) and then
+40 punches, four kicks, a block and a 2.5 s lean toward the screen (the camera step-in), sampled at 60 fps as MediaPipe world
 landmarks [x, y, z, visibility] - exactly what the browser pose
 module receives from PoseLandmarker.
 """
@@ -17,8 +17,24 @@ from iron_echo_tracker import synth  # noqa: E402
 
 
 def main() -> None:
-    script = synth.training_session(40, gap=0.9)
-    script.lean_forward(script.duration + 0.6, 2.5, 0.30)  # 30 cm toward the camera: leanForward ~1.2
+    # the web calibration: neutral -> block -> slip left -> slip right (the tracker process has no block step)
+    script = synth.Script()
+    script.idle(0.0, 2.2)
+    script.block(2.2, 1.6)
+    script.idle(3.8, 0.4)
+    script.slip(4.2, 1.1, -0.20)
+    script.idle(5.3, 0.4)
+    script.slip(5.7, 1.1, 0.20)
+    script.idle(6.8, 1.0)
+    for index in range(40):
+        script.punch(8.0 + index * 0.9, index % 2)
+    t = 8.0 + 40 * 0.9 + 0.8
+    for index, (side, peak) in enumerate([(0, 0.55), (1, 0.55), (0, 0.30), (1, 0.30)]):  # mid, mid, low, low kicks
+        script.kick(t + index * 1.1, side, peak=peak)
+    t += 4 * 1.1 + 0.5
+    script.block(t, 1.4)  # a block after calibration: the personal block pose must read it
+    t += 1.8
+    script.lean_forward(t, 2.5, 0.30)  # 30 cm toward the camera: leanForward ~1.2
     script.idle(script.duration, 1.0)
     frames = []
     for t, sample in synth.stream(script, fps=60.0, seed=7):

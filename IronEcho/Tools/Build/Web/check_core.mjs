@@ -24,13 +24,42 @@ function run(exports, input) {
   };
   const lines = [];
   for (let f = 0; f < frames; f++) {
-    const o = 6 + f * 7;
-    exports.ie_frame(h[o], h[o + 1] | 0, 1.0, h[o + 2], 0.0, h[o + 3], h[o + 4] | 0, 1.0, h[o + 5], h[o + 6]);
+    const o = 6 + f * 8;
+    exports.ie_frame(h[o], h[o + 1] | 0, 1.0, h[o + 2], 0.0, h[o + 3], h[o + 4] | 0, 1.0, h[o + 5], h[o + 6], h[o + 7] | 0);
     mix(exports.ie_state(), exports.ie_state_size());
     mix(exports.ie_combat_events(), exports.ie_combat_event_count() * exports.ie_combat_event_size());
     exports.ie_clear_events();
     if ((f + 1) % 60 === 0) lines.push(`${f + 1} ${hash.toString(16).padStart(16, '0')}`);
   }
+  // Versus (lockstep): the same scripted pair of players as bridge_check.cpp (LCG-driven), through ie_versus_step.
+  exports.ie_init(2, 1, h[2], 2, 20.0);
+  const vin = new Float64Array(mem(), exports.ie_versus_input(), 20);
+  let vh = 0xcbf29ce484222325n;
+  const vmix = (ptr, count) => {
+    const bytes = new Uint8Array(mem(), ptr, count * 8);
+    for (let i = 0; i < bytes.length; i++) { vh ^= BigInt(bytes[i]); vh = (vh * prime) & mask; }
+  };
+  let rng = 12345;
+  const next = () => { rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0; return (rng >>> 8) / 16777216; };
+  for (let f = 0; f < 4000; f++) {
+    for (let slot = 0; slot < 2; slot++) {
+      const o = slot * 10;
+      vin[o] = 7; vin[o + 1] = 1;
+      vin[o + 2] = next() < 0.05 ? (next() < 0.5 ? -1 : 1) : 0;
+      vin[o + 3] = 0;
+      vin[o + 4] = next() < 0.1 ? 1 : 0;
+      vin[o + 5] = next() < 0.03 ? (1 << Math.trunc(next() * 4)) : 0;
+      vin[o + 6] = next() < 0.01 ? (1 << Math.trunc(next() * 4)) : 0;
+      vin[o + 7] = next() < 0.4 ? (next() < 0.5 ? 1 : -1) : 0;
+      vin[o + 8] = next() < 0.2 ? (next() < 0.5 ? 1 : -1) : 0;
+      vin[o + 9] = 0;
+    }
+    exports.ie_versus_step(2);
+    vmix(exports.ie_state(), exports.ie_state_size());
+    vmix(exports.ie_combat_events(), exports.ie_combat_event_count() * exports.ie_combat_event_size());
+    exports.ie_clear_events();
+  }
+  lines.push(`versus ${vh.toString(16).padStart(16, '0')}`);
   lines.push(`final ${hash.toString(16).padStart(16, '0')}`);
   return lines;
 }

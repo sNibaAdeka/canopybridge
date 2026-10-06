@@ -25,6 +25,7 @@ namespace IronEchoCore
 		float MaxHealth = 100.0f;
 		float MaxStamina = 100.0f;
 		AttackSpec Attacks[2]; // indexed by HandIndex(): [0] left straight (jab), [1] right straight (cross)
+		AttackSpec Kicks[2];   // [0] lead leg (front kick / teep), [1] rear leg (round kick) (1.4)
 
 		float StaminaRegenPerSecond = 14.0f;
 		int32_t StaminaRegenDelayTicks = SecondsToTicks(0.5);
@@ -85,6 +86,20 @@ namespace IronEchoCore
 		float BodyStaminaDamage = 9.0f;      // defender's stamina lost to a full clean body shot
 		float BodyBlockDrainFactor = 1.8f;
 		float BodyStaminaCostFactor = 1.10f;
+
+		// ---- kicks (1.4) ----
+		// Kicks reach further than punches and hit harder, but wind up slowly, cost a lot of breath, leave the fighter
+		// standing on one leg (no cancel out of the recovery, hardly any movement) and a missed one hurts more.
+		float KickMoveFactor = 0.12f;
+		float KickMidDamageFactor = 1.0f;    // kick to the body
+		float KickBodyStaminaDamage = 11.0f; // defender's stamina lost to a full clean mid kick
+		float LegKickDamageFactor = 0.50f;   // low kick: little health damage...
+		float LegKickReachDelta = -0.05f;
+		float LegKickStaminaDamage = 7.0f;
+		int32_t LegSlowTicks = SecondsToTicks(1.6); // ...but the legs go: slowed, and every further low kick adds time
+		int32_t LegSlowMaxTicks = SecondsToTicks(4.0);
+		float LegSlowFactor = 0.55f;         // movement speed multiplier while slowed
+		int32_t KickWhiffPenaltyTicks = SecondsToTicks(0.22);
 
 		// ---- footwork (1.2) ----
 		float StepForwardSpeed = 1.50f;      // m/s
@@ -200,6 +215,11 @@ namespace IronEchoCore
 		float CircleSpeed = 0.60f;          // fraction of the full circling speed
 		float StepBackChance = 0.10f;       // after its own punch: step straight back out (hit and move)
 		bool bCutOffRing = true;            // walks a player on the ropes down instead of circling
+		// Kicks (1.4): share of planned attacks that are kicks, of those the share of round kicks (rear leg) and of low
+		// kicks (legs, against a player who walks, instead of the body).
+		float KickChance = 0.12f;
+		float RoundKickShare = 0.55f;
+		float LegKickShare = 0.35f;
 		// Offence: body shots, more of them against a guard.
 		float BodyShotChance = 0.12f;
 		float BodyVsGuardBonus = 0.30f;

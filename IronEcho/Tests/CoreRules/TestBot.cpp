@@ -301,3 +301,23 @@ IE_TEST(Bot_GoesToTheBodyMoreAgainstAGuard)
 	IE_EXPECT(Open > 0.05f);
 	IE_EXPECT(Guarded > Open + 0.15f);
 }
+
+IE_TEST(Bot_KicksWhenThePlayerStandsJustOutOfPunchReach)
+{
+	BotConfig Brain = MakeBotConfig(BotLevel::Hard);
+	Brain.ReactionTicks = 1000000;
+	Brain.CircleChance = 0.0f;
+	MovementConfig Far;
+	Far.PlayerAutoCloseGap = 0.0f;
+	const FighterConfig Bot = MakeBotFighterConfig(BotLevel::Hard);
+	Far.EngageDistance = Bot.Attacks[0].ReachMeters + 0.08f;
+	BotHarness H(MakeDefaultFighterConfig(), Bot, Brain, 21, Far);
+	H.Run(SecondsToTicks(40.0));
+	int Kicks = 0;
+	for (const CombatEvent& E : H.Log)
+	{
+		Kicks += (E.Type == CombatEventType::AttackStarted && E.Actor == FighterSlot::Opponent && E.Kind == AttackKind::Kick) ? 1 : 0;
+	}
+	std::printf("  info: bot kicks in 40 s at kick range: %d\n", Kicks);
+	IE_EXPECT(Kicks >= 3);
+}

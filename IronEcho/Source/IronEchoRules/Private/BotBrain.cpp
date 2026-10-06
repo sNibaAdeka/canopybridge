@@ -35,6 +35,7 @@ namespace IronEchoCore
 		LastPlayerAttackTick = -1000000;
 		LastDefenses = -1;
 		PlannedZone = PunchZone::Head;
+		PlannedKind = AttackKind::Punch;
 		bGuardRolled = false;
 		CircleDir = 1;
 		CircleUntilTick = -1;
@@ -70,8 +71,7 @@ namespace IronEchoCore
 		{
 			bInitialized = true;
 			NextAttackTick = Tick + Rng.RangeInclusive(Config.AttackIntervalMinTicks, Config.AttackIntervalMaxTicks);
-			PlannedHand = Rng.Chance(Config.CrossChance) ? Hand::Right : Hand::Left;
-			PlannedZone = Rng.Chance(Config.BodyShotChance) ? PunchZone::Body : PunchZone::Head;
+			PlanNext();
 			NextGuardRollTick = Tick + Config.GuardUpPeriodTicks;
 			NextRetreatRollTick = Tick;
 		}
@@ -132,6 +132,7 @@ namespace IronEchoCore
 			NextAttackTick = Tick + Config.CounterDelayTicks;
 			PlannedHand = Rng.Chance(Config.CounterCrossChance) ? Hand::Right : Hand::Left;
 			PlannedZone = PunchZone::Head; // a counter goes straight back at the head
+			PlannedKind = AttackKind::Punch;
 		}
 		LastDefenses = Defenses;
 
@@ -176,6 +177,7 @@ namespace IronEchoCore
 		bool bAttackNow = false;
 		Hand AttackHand = Hand::Left;
 		PunchZone AttackZone = PunchZone::Head;
+		AttackKind AttackType = AttackKind::Punch;
 		if (bComboQueued)
 		{
 			if (Tick >= ComboTick)
@@ -198,8 +200,16 @@ namespace IronEchoCore
 					PlannedZone = PunchZone::Body;
 				}
 			}
-			const PunchZone Zone = PlannedZone;
-			const AttackSpec Spec = Me.SpecFor(Choice, Zone);
+			PunchZone Zone = PlannedZone;
+			AttackKind Kind = PlannedKind;
+			// The foe stands just out of punching reach but inside a kick's: a kick is the answer.
+			if (Kind == AttackKind::Punch && Sim.Gap() > Me.SpecFor(Choice, Zone).ReachMeters
+				&& Sim.Gap() <= Me.SpecFor(Hand::Right, PunchZone::Body, AttackKind::Kick).ReachMeters && MySnap.Stamina >= 16.0f && Rng.Chance(0.6f))
+			{
+				Kind = AttackKind::Kick;
+				Zone = FoeSnap.bMoving ? PunchZone::Leg : PunchZone::Body;
+			}
+			const AttackSpec Spec = Me.SpecFor(Choice, Zone, Kind);
 			const bool bFoeCommitted = FoeSnap.State == ActionState::Attack && FoeSnap.Stage != AttackStage::Recovery;
 			const bool bWaitOut = bFoeCommitted && Rng.Chance(Config.AvoidTradeChance);
 			if (bFree && !bWaitOut && MySnap.State != ActionState::Attack && Sim.Gap() <= Spec.ReachMeters && MySnap.Stamina >= Spec.StaminaCost)
@@ -207,7 +217,8 @@ namespace IronEchoCore
 				bAttackNow = true;
 				AttackHand = Choice;
 				AttackZone = Zone;
-				if (Rng.Chance(Config.ComboChance))
+				AttackType = Kind;
+				if (Kind == AttackKind::Punch && Rng.Chance(Config.ComboChance))
 				{
 					bComboQueued = true;
 					ComboHand = OtherHand(Choice);
@@ -223,8 +234,7 @@ namespace IronEchoCore
 					Interval = static_cast<int32_t>(static_cast<float>(Interval) * Config.HurtIntervalScale);
 				}
 				NextAttackTick = Tick + Interval;
-				PlannedHand = Rng.Chance(Config.CrossChance) ? Hand::Right : Hand::Left;
-				PlannedZone = Rng.Chance(Config.BodyShotChance) ? PunchZone::Body : PunchZone::Head;
+				PlanNext();
 				bGuardRolled = false;
 				ActiveDefense = Defense::None;
 			}
@@ -236,7 +246,7 @@ namespace IronEchoCore
 
 		if (bAttackNow)
 		{
-			Intent.AddPunch(AttackHand, 1.0f, AttackZone);
+			Intent.AddPunch(AttackHand, 1.0f, AttackZone, AttackType);
 			GuardUpUntilTick = -1;
 		}
 		else if (ActiveDefense == Defense::Block || Tick < GuardUpUntilTick)
@@ -258,6 +268,20 @@ namespace IronEchoCore
 		const bool bWantsToAttack = bComboQueued || (!bRetreating && Tick >= NextAttackTick - SecondsToTicks(0.25));
 		Footwork(Sim, Tick, bRetreating, bWantsToAttack, Intent);
 		return Intent;
+	}
+
+	void BotBrain::PlanNext()
+	{
+		if (Rng.Chance(Config.KickChance))
+		{
+			PlannedKind = AttackKind::Kick;
+			PlannedHand = Rng.Chance(Config.RoundKickShare) ? Hand::Right : Hand::Left;
+			PlannedZone = Rng.Chance(Config.LegKickShare) ? PunchZone::Leg : PunchZone::Body;
+			return;
+		}
+		PlannedKind = AttackKind::Punch;
+		PlannedHand = Rng.Chance(Config.CrossChance) ? Hand::Right : Hand::Left;
+		PlannedZone = Rng.Chance(Config.BodyShotChance) ? PunchZone::Body : PunchZone::Head;
 	}
 
 	void BotBrain::Footwork(const CombatSim& Sim, int32_t Tick, bool bRetreating, bool bWantsToAttack, FighterIntent& Intent)
@@ -319,7 +343,8 @@ namespace IronEchoCore
 			if (bWantsToAttack)
 			{
 				// Step in until the planned punch reaches, with a margin for a target that moves.
-				const float Reach = Me.SpecFor(PlannedHand, bComboQueued ? PunchZone::Head : PlannedZone).ReachMeters;
+				const float Reach = bComboQueued ? Me.SpecFor(ComboHand, PunchZone::Head).ReachMeters
+					: Me.SpecFor(PlannedHand, PlannedZone, PlannedKind).ReachMeters;
 				if (Gap > Reach - 0.10f)
 				{
 					Forward = 1.0f;

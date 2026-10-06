@@ -8,7 +8,7 @@
 #include "IronEchoTypes.generated.h"
 
 #define IRONECHO_VISUAL_CONTRACT_VERSION 2
-#define IRONECHO_VISUAL_CONTRACT_MINOR 0
+#define IRONECHO_VISUAL_CONTRACT_MINOR 1
 
 IRONECHO_API DECLARE_LOG_CATEGORY_EXTERN(LogIronEcho, Log, All);
 
@@ -260,6 +260,12 @@ struct IRONECHO_API FIronEchoFighterVisualState
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Defense") float HeadSlip = 0.0f;
 	/** The current punch goes to the body (contract 2): lower the punch path, bend the knees. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bBodyShot = false;
+	/** The current attack is a leg kick (contract 2.1): AttackHand = Left lead leg (front kick), Right rear leg (round kick). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bKick = false;
+	/** The current kick goes low (to the legs). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bLowKick = false;
+	/** Seconds the legs stay slowed after low kicks (limp). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Space") float LegSlowSeconds = 0.0f;
 
 	/** World time (seconds) of the last clean hit taken; < 0 if none. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Reaction") float LastHitTakenTime = -1.0f;
@@ -368,6 +374,9 @@ struct IRONECHO_API FIronEchoCombatEvent
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bTired = false;
 	/** Contract 2: the punch went to the body. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bBodyShot = false;
+	/** Contract 2.1: the attack was a kick (bBodyShot = mid kick; with bLowKick = low kick). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bKick = false;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bLowKick = false;
 	/** Contract 2: a graze (HitConfirmed): reduced damage, show a lighter reaction. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bGlancing = false;
 	/** Contract 2: too close, the arm was not extended (HitConfirmed / Blocked): a short, jammed punch. */

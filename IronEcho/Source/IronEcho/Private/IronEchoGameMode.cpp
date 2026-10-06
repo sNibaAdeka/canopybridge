@@ -480,6 +480,9 @@ FIronEchoFighterVisualState AIronEchoGameMode::MakeVisualState(IronEchoCore::Fig
 	V.HeadSlip = S.HeadOffset * IronEchoConvert::MetersToCm;
 	V.bOnRopes = S.bOnRopes;
 	V.bBodyShot = S.AttackZone == IronEchoCore::PunchZone::Body;
+	V.bKick = S.AttackType == IronEchoCore::AttackKind::Kick;
+	V.bLowKick = V.bKick && S.AttackZone == IronEchoCore::PunchZone::Leg;
+	V.LegSlowSeconds = static_cast<float>(S.LegSlowTicksLeft) * TickSeconds;
 	V.LastHitTakenTime = Memory.LastHitTakenTime;
 	V.LastHitTakenFromHand = Memory.LastHitFromHand;
 	V.HitsTaken = Memory.HitsTaken;
@@ -566,6 +569,8 @@ void AIronEchoGameMode::DispatchEvents()
 		Event.Dodge = IronEchoConvert::ToUnreal(Core.Dodge);
 		Event.bCounterHit = Core.bCounterHit;
 		Event.bBodyShot = Core.Zone == IronEchoCore::PunchZone::Body;
+		Event.bKick = Core.Kind == IronEchoCore::AttackKind::Kick;
+		Event.bLowKick = Event.bKick && Core.Zone == IronEchoCore::PunchZone::Leg;
 		Event.bGlancing = Core.bGlancing;
 		Event.bSmothered = Core.bSmothered;
 		Event.Power = Core.Power;

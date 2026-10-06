@@ -1,6 +1,7 @@
 #include "TestFramework.h"
 
 #include "IronEchoRules/Match.h"
+#include "IronEchoRules/Random.h"
 
 #include <algorithm>
 #include <cmath>
@@ -527,4 +528,193 @@ IE_TEST(Judges_DecisionKinds)
 	IE_EXPECT(Match::DecideCards(UnanimousDraw, bWinner, Winner) == DecisionKind::Unanimous && !bWinner);
 	const int32_t MajorityDraw[3][2] = {{29, 28}, {28, 28}, {28, 28}};
 	IE_EXPECT(Match::DecideCards(MajorityDraw, bWinner, Winner) == DecisionKind::Majority && !bWinner);
+}
+
+// ---- versus (1.5): two humans ----
+
+namespace
+{
+	struct VersusRun
+	{
+		Match M;
+		CombatEventBuffer Combat;
+		MatchEventBuffer Events;
+		int32_t Tick = 0;
+
+		explicit VersusRun(const MatchSetup& Setup) : M(Setup) {}
+
+		void Step(const FighterIntent& A, const FighterIntent& B, bool bReadyA = true, bool bReadyB = true)
+		{
+			Combat.Clear();
+			Events.Clear();
+			MatchInput Input;
+			Input.bInputReady = bReadyA;
+			Input.bOpponentReady = bReadyB;
+			Input.PlayerIntent = A;
+			Input.OpponentIntent = B;
+			M.Tick(Input, Combat, Events);
+			++Tick;
+		}
+	};
+
+	uint64_t Fnv(uint64_t H, const void* Data, size_t Bytes)
+	{
+		const unsigned char* P = static_cast<const unsigned char*>(Data);
+		for (size_t I = 0; I < Bytes; ++I)
+		{
+			H ^= P[I];
+			H *= 1099511628211ULL;
+		}
+		return H;
+	}
+
+	// Two scripted humans with their own random punches, kicks and footwork, deterministic per seed.
+	uint64_t PlayVersus(uint64_t Seed, int32_t Ticks)
+	{
+		MatchSetup Setup = ShortSetup(MatchMode::Versus, Seed);
+		VersusRun R(Setup);
+		Pcg32 RngA(Seed * 3 + 1);
+		Pcg32 RngB(Seed * 5 + 2);
+		uint64_t Hash = 14695981039346656037ULL;
+		auto Move = [](Pcg32& Rng) {
+			FighterIntent I;
+			if (Rng.Chance(0.012f)) { I.AddPunch(Rng.Chance(0.5f) ? Hand::Left : Hand::Right); }
+			if (Rng.Chance(0.004f)) { I.AddPunch(Rng.Chance(0.5f) ? Hand::Left : Hand::Right, 1.0f, PunchZone::Body); }
+			if (Rng.Chance(0.003f)) { I.AddPunch(Rng.Chance(0.5f) ? Hand::Left : Hand::Right, 1.0f, Rng.Chance(0.5f) ? PunchZone::Leg : PunchZone::Body, AttackKind::Kick); }
+			I.bBlock = Rng.Chance(0.05f);
+			I.MoveForward = Rng.Chance(0.5f) ? (Rng.Chance(0.5f) ? 1.0f : -1.0f) : 0.0f;
+			I.MoveSide = Rng.Chance(0.3f) ? (Rng.Chance(0.5f) ? 1.0f : -1.0f) : 0.0f;
+			return I;
+		};
+		for (int32_t T = 0; T < Ticks && R.M.Snapshot().Phase != MatchPhase::MatchOver; ++T)
+		{
+			R.Step(Move(RngA), Move(RngB));
+			const MatchSnapshot& S = R.M.Snapshot();
+			Hash = Fnv(Hash, &S.Phase, sizeof(S.Phase));
+			for (FighterSlot Slot : {FighterSlot::Player, FighterSlot::Opponent})
+			{
+				const FighterSnapshot& F = R.M.Sim().Get(Slot).Snapshot();
+				Hash = Fnv(Hash, &F.Health, sizeof(F.Health));
+				Hash = Fnv(Hash, &F.Location, sizeof(F.Location));
+				Hash = Fnv(Hash, &F.Stamina, sizeof(F.Stamina));
+			}
+		}
+		return Hash;
+	}
+}
+
+IE_TEST(Versus_NeedsBothHumansReady)
+{
+	VersusRun R(ShortSetup(MatchMode::Versus));
+	for (int Index = 0; Index < SecondsToTicks(3.0); ++Index)
+	{
+		R.Step(FighterIntent{}, FighterIntent{}, true, false);
+	}
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::WaitingForPlayer);
+	for (int Index = 0; Index < SecondsToTicks(1.5); ++Index)
+	{
+		R.Step(FighterIntent{}, FighterIntent{}, true, true);
+	}
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Countdown);
+	// one of them drops out in the middle of the countdown: the bout pauses for tracking loss
+	for (int Index = 0; Index < SecondsToTicks(1.0); ++Index)
+	{
+		R.Step(FighterIntent{}, FighterIntent{}, false, true);
+	}
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Paused && R.M.Snapshot().Pause == PauseReason::TrackingLost);
+}
+
+IE_TEST(Versus_BothFightersUseTheSameRulesAndTheSecondIsHuman)
+{
+	MatchSetup Setup = ShortSetup(MatchMode::Versus);
+	VersusRun R(Setup);
+	for (int Index = 0; Index < SecondsToTicks(6.0) && R.M.Snapshot().Phase != MatchPhase::Fighting; ++Index)
+	{
+		R.Step(FighterIntent{}, FighterIntent{});
+	}
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Fighting);
+	const FighterConfig Same = MakeDefaultFighterConfig();
+	IE_EXPECT_EQ(R.M.Sim().Get(FighterSlot::Opponent).GetConfig().Attacks[0].WindupTicks, Same.Attacks[0].WindupTicks); // not the bot's long telegraph
+	// the second human punches: it is the opponent who attacks, and nobody else acts for it
+	FighterIntent Jab;
+	Jab.AddPunch(Hand::Left);
+	R.Step(FighterIntent{}, Jab);
+	IE_EXPECT(R.M.Sim().Get(FighterSlot::Opponent).Snapshot().State == ActionState::Attack);
+	for (int Index = 0; Index < 60; ++Index)
+	{
+		R.Step(FighterIntent{}, FighterIntent{});
+	}
+	IE_EXPECT(R.M.Sim().Get(FighterSlot::Player).Snapshot().Health < 100.0f);
+	IE_EXPECT_EQ(R.M.Sim().Get(FighterSlot::Opponent).Snapshot().PunchesThrown, 1);
+}
+
+IE_TEST(Versus_SecondHumanBeatsTheCountByHoldingTheGuard)
+{
+	MatchSetup Setup = ShortSetup(MatchMode::Versus);
+	Setup.PlayerFighter.MaxHealth = 1.0f; // one punch knocks either of them down
+	VersusRun R(Setup);
+	for (int Index = 0; Index < SecondsToTicks(6.0) && R.M.Snapshot().Phase != MatchPhase::Fighting; ++Index)
+	{
+		R.Step(FighterIntent{}, FighterIntent{});
+	}
+	FighterIntent Cross;
+	Cross.AddPunch(Hand::Right);
+	R.Step(Cross, FighterIntent{});
+	for (int Index = 0; Index < 80 && R.M.Snapshot().Phase != MatchPhase::Knockdown; ++Index)
+	{
+		R.Step(FighterIntent{}, FighterIntent{});
+	}
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Knockdown);
+	IE_EXPECT(R.M.Sim().Get(FighterSlot::Opponent).IsKnockedDown());
+	FighterIntent Guard;
+	Guard.bBlock = true;
+	int Sees = 0;
+	for (int Index = 0; Index < SecondsToTicks(8.0) && R.M.Snapshot().Phase == MatchPhase::Knockdown; ++Index)
+	{
+		R.Step(FighterIntent{}, Guard);
+		Sees = R.M.Snapshot().GetUpProgressOpponent > 0 ? 1 : Sees;
+	}
+	IE_EXPECT(Sees == 1);
+	IE_EXPECT(!R.M.Sim().Get(FighterSlot::Opponent).IsKnockedDown());
+	IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::Knockdown || R.M.Snapshot().Phase == MatchPhase::Fighting);
+}
+
+IE_TEST(Versus_TwoRunsOfTheSameInputsAreBitIdentical)
+{
+	const uint64_t A = PlayVersus(11, SecondsToTicks(40.0));
+	const uint64_t B = PlayVersus(11, SecondsToTicks(40.0));
+	const uint64_t C = PlayVersus(12, SecondsToTicks(40.0));
+	IE_EXPECT(A == B);
+	IE_EXPECT(A != C);
+}
+
+IE_TEST(Versus_FullBoutEndsWithAResultAndInvariantsHold)
+{
+	for (uint64_t Seed = 1; Seed <= 6; ++Seed)
+	{
+		MatchSetup Setup = ShortSetup(MatchMode::Versus, Seed);
+		VersusRun R(Setup);
+		Pcg32 RngA(Seed * 3 + 1);
+		Pcg32 RngB(Seed * 5 + 2);
+		for (int32_t T = 0; T < SecondsToTicks(120.0) && R.M.Snapshot().Phase != MatchPhase::MatchOver; ++T)
+		{
+			FighterIntent A;
+			FighterIntent B;
+			if (RngA.Chance(0.02f)) { A.AddPunch(RngA.Chance(0.5f) ? Hand::Left : Hand::Right); }
+			if (RngB.Chance(0.02f)) { B.AddPunch(RngB.Chance(0.5f) ? Hand::Left : Hand::Right); }
+			A.MoveForward = RngA.Chance(0.4f) ? 1.0f : 0.0f;
+			B.bBlock = R.M.Sim().Get(FighterSlot::Opponent).IsKnockedDown();
+			A.bBlock = R.M.Sim().Get(FighterSlot::Player).IsKnockedDown();
+			R.Step(A, B);
+			for (FighterSlot Slot : {FighterSlot::Player, FighterSlot::Opponent})
+			{
+				const FighterSnapshot& F = R.M.Sim().Get(Slot).Snapshot();
+				IE_EXPECT(F.Health >= 0.0f && F.Health <= F.MaxHealth);
+				IE_EXPECT(std::isfinite(F.Location.X) && std::isfinite(F.Location.Y));
+			}
+			IE_EXPECT(R.M.Sim().Gap() >= Setup.Movement.MinDistance - 1e-4f);
+		}
+		IE_EXPECT(R.M.Snapshot().Phase == MatchPhase::MatchOver);
+		IE_EXPECT(R.M.Snapshot().Result != ResultMethod::None);
+	}
 }

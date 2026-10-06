@@ -64,12 +64,24 @@ export class Core {
 
   // input: { status, lean, leanForward, block, punchMask, confidence, moveForward, moveSide }
   // punchMask bits: 1 jab, 2 cross, 4 jab to the body, 8 cross to the body.
+  // kickMask bits: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick.
   frame(dt, input) {
     return this.ex.ie_frame(dt, input.status, input.confidence ?? 1, input.lean ?? 0, input.leanForward ?? 0,
-      input.block ?? 0, input.punchMask ?? 0, 1.0, input.moveForward ?? 0, input.moveSide ?? 0);
+      input.block ?? 0, input.punchMask ?? 0, 1.0, input.moveForward ?? 0, input.moveSide ?? 0, input.kickMask ?? 0);
   }
 
   ringHalfSize() { return this.ex.ie_ring_half_size ? this.ex.ie_ring_half_size() : 2.95; }
+
+  // Versus (online duel): one lockstep frame = two exact 120 Hz ticks with both players' inputs
+  // [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl].
+  versusStep(a, b) {
+    const v = new Float64Array(this.ex.memory.buffer, this.ex.ie_versus_input(), 20);
+    for (let i = 0; i < 10; i++) { v[i] = a[i] ?? 0; v[10 + i] = b[i] ?? 0; }
+    return this.ex.ie_versus_step(2);
+  }
+
+  // The state block as 32-bit words (for the desync hash).
+  stateWords() { return new Uint32Array(this.ex.memory.buffer, this.ex.ie_state(), this.ex.ie_state_size() * 2); }
 
   pause() { this.ex.ie_pause(); }
   resume() { this.ex.ie_resume(); }

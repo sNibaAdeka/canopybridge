@@ -6,9 +6,22 @@ const MP_VERSION = '0.10.18';
 // The offline builds (Netlify /play, Windows app) ship MediaPipe and the model next to the page: IRONECHO_DEPS.
 const DEPS = globalThis.IRONECHO_DEPS || {};
 const MP_BASE = DEPS.mediapipe || `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
-const MODEL_URL = DEPS.poseModel || 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+const MODEL_BASE = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker';
+// full = the default; heavy = a bigger network (3x slower, clearly steadier hands and legs); lite = for weak machines.
+const MODELS = {
+  full: DEPS.poseModel || `${MODEL_BASE}/pose_landmarker_full/float16/1/pose_landmarker_full.task`,
+  heavy: DEPS.poseModelHeavy || `${MODEL_BASE}/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task`,
+  lite: DEPS.poseModelLite || `${MODEL_BASE}/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`,
+};
 
-const P = { NOSE: 0, LEAR: 7, REAR: 8, LS: 11, RS: 12, LE: 13, RE: 14, LW: 15, RW: 16, LH: 23, RH: 24 };
+const P = { NOSE: 0, LEAR: 7, REAR: 8, LS: 11, RS: 12, LE: 13, RE: 14, LW: 15, RW: 16, LH: 23, RH: 24, LK: 25, RK: 26, LA: 27, RA: 28 };
+const KNEE_I = [P.LK, P.RK];
+const ANKLE_I = [P.LA, P.RA];
+const HIP_I = [P.LH, P.RH];
+// Leg kicks (web only, the v1 tracker protocol has no kicks): the ankle rises above its standing height fast.
+const KICK_CFG = { minLift: 0.22, minSpeed: 1.4, midLift: 0.40, settle: 0.08, rearm: 0.08, minInterval: 0.5, minVisibility: 0.5 };
+// Personal block: the calibrated block pose (wrists relative to the head) against the neutral guard.
+const BLOCK_CAL = { minRise: 0.07, holdSeconds: 0.7, waitSeconds: 10, minDelta: 0.07 };
 const KEY_POINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24];
 const SHOULDER_I = [P.LS, P.RS];
 const ELBOW_I = [P.LE, P.RE];
@@ -95,8 +108,45 @@ class PunchDetector {
   }
 }
 
+class KickDetector {
+  constructor(side) { this.side = side; this.reset(); this.firedAt = -1e9; }
+  reset() { this.history = []; this.armed = true; this.pending = null; }
+  // lift: ankle height above the calibrated standing height, metres. Returns 'mid' | 'low' | null.
+  update(t, lift, visibility) {
+    const c = KICK_CFG;
+    if (visibility < c.minVisibility || !Number.isFinite(lift)) { this.reset(); return null; }
+    this.history.push([t, lift]);
+    while (this.history.length && t - this.history[0][0] > 0.4) this.history.shift();
+    if (this.pending) {
+      this.pending.peak = Math.max(this.pending.peak, lift);
+      if (t - this.pending.t0 >= c.settle) {
+        const kind = this.pending.peak >= c.midLift ? 'mid' : 'low';
+        this.pending = null;
+        return kind;
+      }
+      return null;
+    }
+    if (!this.armed) {
+      if (lift < c.rearm) this.armed = true;
+      return null;
+    }
+    if (this.history.length < 3 || t - this.firedAt < c.minInterval) return null;
+    const ref = this.history.find((s) => t - s[0] <= 0.12 && s[0] < t) || this.history[this.history.length - 2];
+    const dt = t - ref[0];
+    if (dt <= 1e-4) return null;
+    const speed = (lift - ref[1]) / dt;
+    if (lift >= c.minLift && speed >= c.minSpeed) {
+      this.armed = false;
+      this.firedAt = t;
+      this.pending = { t0: t, peak: lift };
+    }
+    return null;
+  }
+}
+
 const STEPS = {
   neutral: 'Встань в боксёрскую стойку, руки у подбородка — и замри',
+  block: 'БЛОК — подними перчатки к лицу, как от удара, и задержи',
   slipLeft: 'Уклон ВЛЕВО — наклони голову влево и задержи',
   slipRight: 'Уклон ВПРАВО — наклони голову вправо и задержи',
 };
@@ -106,8 +156,14 @@ const BODY_PUNCH_DROP = 0.25; // wrist below the shoulder line by this many arm 
 // Pure tracker logic (no DOM, no MediaPipe): feed world landmarks, read InputFrame fields. Tested against the Python
 // tracker by Tools/Build/Web/check_pose.mjs.
 export class PoseProcessor {
-  constructor(say = () => {}) {
+  constructor(say = () => {}, opts = {}) {
     this._say = say;
+    this.opts = { personalBlock: true, kicks: true, ...opts };
+    this.kickMask = 0;
+    this.legsVisible = false;
+    this.blockPersonal = 0;
+    this.kickDetectors = [new KickDetector(0), new KickDetector(1)];
+    this.kicks = []; // [t, side, kind] log (tests)
     this.status = 6; // Calibrating
     this.mask = 0;
     this.lean = 0;
@@ -156,6 +212,8 @@ export class PoseProcessor {
     this.lean = Math.max(-2, Math.min(2, sl));
     this.leanForward = Math.max(-2, Math.min(2, sf));
     this.block = this._block(pose);
+    if (c.blockPose) this.blockPersonal = this._blockPersonal(pose);
+    if (this.opts.kicks && c.legBase) this._kicks(pose, t);
     for (const side of [0, 1]) {
       const delta = sub(pose.p[WRIST_I[side]], pose.p[SHOULDER_I[side]]);
       const ext = norm(delta) / c.arm[side];
@@ -173,7 +231,40 @@ export class PoseProcessor {
 
   _resetMotion() {
     this.detectors.forEach((d) => d.reset());
+    this.kickDetectors.forEach((d) => d.reset());
     this.smooth.reset();
+  }
+
+  _kicks(pose, t) {
+    const hip = pose.hipMid();
+    let seen = 0;
+    for (const side of [0, 1]) {
+      const vis = Math.min(pose.vis[ANKLE_I[side]], pose.vis[KNEE_I[side]], pose.vis[HIP_I[side]]);
+      seen += vis;
+      const lift = (pose.p[ANKLE_I[side]][2] - hip[2]) - this.cal.legBase[side];
+      const kind = this.kickDetectors[side].update(t, lift, vis);
+      if (kind) {
+        this.kickMask |= (kind === 'mid' ? 1 : 4) << side; // 1 / 2 mid kick, 4 / 8 low kick: lead (left) / rear (right)
+        this.kicks.push([t, side, kind]);
+      }
+    }
+    this.legsVisible = seen / 2 >= KICK_CFG.minVisibility;
+  }
+
+  // 0 = the neutral guard, 1 = the calibrated block, per wrist along the guard -> block direction; the worse hand counts.
+  _blockPersonal(pose) {
+    const c = this.cal;
+    const head = pose.head();
+    let score = 1;
+    for (const side of [0, 1]) {
+      const cur = sub(sub(pose.p[WRIST_I[side]], head), c.guardRel[side]);
+      const d = c.blockDelta[side];
+      const dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+      const along = (cur[0] * d[0] + cur[1] * d[1] + cur[2] * d[2]) / dd;
+      const off = Math.sqrt(Math.max(0, norm(cur) ** 2 - along * along * dd)) / Math.sqrt(dd);
+      score = Math.min(score, Math.max(0, Math.min(1.1, along)) * (1 - Math.max(0, Math.min(1, off - 0.6))));
+    }
+    return Math.max(0, Math.min(1, score));
   }
 
   _block(pose) {
@@ -209,6 +300,41 @@ export class PoseProcessor {
       if (span >= CAL_CFG.neutralSeconds * 0.98 && this.window.length >= 5) {
         this.neutral = [...this.window];
         this.neutralLat = median(this.neutral.map((q) => q.head()[1] - q.hipMid()[1]));
+        this.guardRel = [0, 1].map((s) => [0, 1, 2].map((k) => median(this.neutral.map((q) => q.p[WRIST_I[s]][k] - q.head()[k]))));
+        this.legBase = [0, 1].map((s) => median(this.neutral.map((q) => q.p[ANKLE_I[s]][2] - q.hipMid()[2])));
+        this.holdStart = null;
+        this.stepStart = pose.t;
+        this.step = this.opts.personalBlock ? 'block' : 'slipLeft';
+        this._say(STEPS[this.step], 0, this.opts.personalBlock ? 'Это запомнится как твой блок.' : '');
+      }
+      return;
+    }
+    if (this.step === 'block') {
+      if (!visible) { this.holdStart = null; return; }
+      const head = pose.head();
+      const rel = [0, 1].map((s) => sub(pose.p[WRIST_I[s]], head));
+      const rise = rel.map((v, s) => v[2] - this.guardRel[s][2]);
+      if (pose.t - this.stepStart > BLOCK_CAL.waitSeconds) {
+        // not done in time: the built-in block rule stays in charge
+        this.step = 'slipLeft';
+        this.holdStart = null;
+        this._say(STEPS.slipLeft, 0, 'Блок пропущен: сработает обычное правило.');
+        return;
+      }
+      if (!rise.every((r) => r >= BLOCK_CAL.minRise)) {
+        this.holdStart = null;
+        this.blockSamples = [];
+        this._say(STEPS.block, 0, 'Обе перчатки выше — к лицу.');
+        return;
+      }
+      if (this.holdStart === null) { this.holdStart = pose.t; this.blockSamples = []; }
+      this.blockSamples.push(rel);
+      const held = pose.t - this.holdStart;
+      this._say(STEPS.block, (100 * held) / BLOCK_CAL.holdSeconds, 'Держи…');
+      if (held >= BLOCK_CAL.holdSeconds) {
+        const blockRel = [0, 1].map((s) => [0, 1, 2].map((k) => median(this.blockSamples.map((r) => r[s][k]))));
+        const delta = blockRel.map((b, s) => sub(b, this.guardRel[s]));
+        if (delta.every((d) => norm(d) >= BLOCK_CAL.minDelta)) this.blockDelta = delta;
         this.step = 'slipLeft';
         this.holdStart = null;
         this._say(STEPS.slipLeft, 0, '');
@@ -250,6 +376,10 @@ export class PoseProcessor {
       guardH: [0, 1].map((s) => median(ps.map((q) => q.p[WRIST_I[s]][2] - q.shoulderMid()[2]))),
       neutralLat: this.neutralLat,
       neutralFwd: median(ps.map((q) => q.head()[0] - q.hipMid()[0])),
+      guardRel: this.guardRel,
+      blockDelta: this.blockDelta || null,
+      blockPose: !!this.blockDelta,
+      legBase: this.legBase,
       slipLeft: this.slip[0],
       slipRight: this.slip[1],
     };
@@ -261,15 +391,22 @@ export class PoseProcessor {
   poll() {
     const mask = this.mask;
     this.mask = 0;
-    return { status: this.status, lean: this.lean, leanForward: this.leanForward, block: this.block, punchMask: mask, confidence: this.confidence };
+    const kickMask = this.kickMask;
+    this.kickMask = 0;
+    const block = this.cal && this.cal.blockPose ? this.blockPersonal : this.block;
+    return { status: this.status, lean: this.lean, leanForward: this.leanForward, block, punchMask: mask, kickMask, confidence: this.confidence };
   }
 }
 
 // source: 'webcam' (getUserMedia on this computer) or 'phone' (a phone on the same Wi-Fi streams its camera to the
 // Windows app's local server; the app shows a QR code to pair it).
 export class CameraInput {
-  constructor(source = 'webcam') {
+  constructor(source = 'webcam', opts = {}) {
     this.source = source;
+    this.model = MODELS[opts.model] ? opts.model : 'full';
+    this.inferMs = 0;      // moving average of one detection, ms
+    this.quality = { level: 'wait', tip: '' };
+    this.lastQualityAt = 0;
     this.active = false;
     this.lastVideoTime = -1;
     this.phoneSeq = 0;
@@ -280,7 +417,7 @@ export class CameraInput {
   _ui() {
     const box = document.createElement('div');
     box.id = 'cam';
-    box.innerHTML = `<video playsinline muted></video><canvas></canvas><div class="cam-msg"><b></b><div class="cam-bar"><i></i></div><small></small></div>`;
+    box.innerHTML = `<video playsinline muted></video><canvas></canvas><div class="cam-q"><i></i><span></span></div><div class="cam-msg"><b></b><div class="cam-bar"><i></i></div><small></small></div>`;
     const style = document.createElement('style');
     style.textContent = `#cam{position:absolute;right:16px;top:calc(env(safe-area-inset-top,0px) + 92px);width:min(30vw,300px);aspect-ratio:4/3;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#000;z-index:5;pointer-events:none}
       #cam video,#cam canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
@@ -288,6 +425,9 @@ export class CameraInput {
       #cam .cam-msg b{font:800 26px/1.15 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.05em;color:#fff}
       #cam .cam-msg small{display:block;margin-top:8px;color:#9aa3ae;font:500 13px/1.35 Inter,system-ui,sans-serif}
       #cam .cam-bar{height:8px;margin-top:10px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
+      #cam .cam-q{position:absolute;left:0;right:0;bottom:0;padding:3px 6px;background:rgba(10,11,14,.78);font:600 11px/1.3 Inter,system-ui,sans-serif;color:#e8ecf2}
+      #cam .cam-q i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#888}
+      #cam .cam-q.good i{background:#3ddc84}#cam .cam-q.warn i{background:#ffb020}#cam .cam-q.bad i{background:#ff4b3e}
       #cam .cam-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#3f7dff,#8fb3ff)}`;
     document.head.appendChild(style);
     document.querySelector('#stage').appendChild(box);
@@ -295,6 +435,7 @@ export class CameraInput {
     this.video = box.querySelector('video');
     this.overlay = box.querySelector('canvas');
     this.msg = box.querySelector('.cam-msg');
+    this.qbox = box.querySelector('.cam-q');
     box.hidden = true;
   }
 
@@ -311,21 +452,35 @@ export class CameraInput {
       await this._pairPhone();
     } else {
       this._say('Включаю камеру…', 5, 'Разреши доступ к камере. Встань в 2–3 м, чтобы в кадре были голова, руки и бёдра.');
+      // 640x480 is enough (the network sees ~256 px); what matters is the frame rate: ask for 60, take what the camera gives
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });
       this.video.srcObject = stream;
       await this.video.play();
       this.overlay.width = this.video.videoWidth || 640;
       this.overlay.height = this.video.videoHeight || 480;
     }
-    this._say('Загружаю модель позы…', 30, 'MediaPipe PoseLandmarker (full), один раз ~10 МБ.');
+    const names = { full: 'обычная', heavy: 'высокая точность, ~30 МБ', lite: 'лёгкая' };
+    this._say('Загружаю модель позы…', 30, `MediaPipe PoseLandmarker: ${names[this.model]}, один раз.`);
     const vision = await import(/* @vite-ignore */ `${MP_BASE}/vision_bundle.mjs`);
     const fileset = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
-    const options = (delegate) => ({ baseOptions: { modelAssetPath: MODEL_URL, delegate }, runningMode: 'VIDEO', numPoses: 1,
-      minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
+    // a lower presence / tracking bar keeps the skeleton through fast punches and motion blur (the processor
+    // still drops frames whose key points are not visible)
+    const options = (model, delegate) => ({ baseOptions: { modelAssetPath: MODELS[model], delegate }, runningMode: 'VIDEO', numPoses: 1,
+      minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.4 });
+    const create = async (model) => {
+      try {
+        return await vision.PoseLandmarker.createFromOptions(fileset, options(model, 'GPU'));
+      } catch {
+        return vision.PoseLandmarker.createFromOptions(fileset, options(model, 'CPU'));
+      }
+    };
     try {
-      this.landmarker = await vision.PoseLandmarker.createFromOptions(fileset, options('GPU'));
-    } catch {
-      this.landmarker = await vision.PoseLandmarker.createFromOptions(fileset, options('CPU'));
+      this.landmarker = await create(this.model);
+    } catch (err) {
+      if (this.model === 'full') throw err;
+      this._say('Модель не загрузилась', 30, 'Беру обычную модель.');
+      this.model = 'full';
+      this.landmarker = await create('full');
     }
     this.drawing = new vision.DrawingUtils(this.overlay.getContext('2d'));
     this.connections = vision.PoseLandmarker.POSE_CONNECTIONS;
@@ -335,9 +490,10 @@ export class CameraInput {
       this._phoneLoop();
       return;
     }
-    const loop = () => {
+    const loop = (now, meta) => {
       if (!this.active) return;
-      this._process();
+      // the moment the camera captured the frame (not the moment we got to it): steadier speeds for the punch detector
+      this._process(meta && Number.isFinite(meta.captureTime) ? meta.captureTime : undefined);
       if (this.video.requestVideoFrameCallback) this.video.requestVideoFrameCallback(loop);
       else requestAnimationFrame(loop);
     };
@@ -428,6 +584,7 @@ export class CameraInput {
         this.overlay.height = bmp.height;
       }
       const res = this.landmarker.detectForVideo(bmp, now);
+      this._assess(res, performance.now() - now);
       const ctx = this.overlay.getContext('2d');
       ctx.drawImage(bmp, 0, 0);
       if (res.landmarks && res.landmarks[0]) {
@@ -439,18 +596,54 @@ export class CameraInput {
     }
   }
 
-  _process() {
+  // Tracking quality badge: what the camera sees and what to change (distance, light, load).
+  _assess(res, inferMs) {
+    this.inferMs = this.inferMs ? this.inferMs * 0.9 + inferMs * 0.1 : inferMs;
+    const now = performance.now();
+    if (now - this.lastQualityAt < 400) return;
+    this.lastQualityAt = now;
+    let level = 'good';
+    let tip = 'Отслеживание в норме';
+    const lm = res.landmarks && res.landmarks[0];
+    if (!lm) {
+      level = 'bad';
+      tip = 'Тебя не видно: встань в кадр целиком, включи свет';
+    } else {
+      const vis = (i) => lm[i].visibility ?? 1;
+      const keys = [0, 11, 12, 13, 14, 15, 16, 23, 24];
+      const mean = keys.reduce((a, i) => a + vis(i), 0) / keys.length;
+      const ys = lm.filter((l) => (l.visibility ?? 1) > 0.5).map((l) => l.y);
+      const xs = lm.filter((l) => (l.visibility ?? 1) > 0.5).map((l) => l.x);
+      const height = ys.length ? Math.max(...ys) - Math.min(...ys) : 0;
+      const hipsSeen = vis(23) > 0.5 && vis(24) > 0.5;
+      const wristsSeen = vis(15) > 0.5 && vis(16) > 0.5;
+      if (mean < 0.5) { level = 'bad'; tip = 'Плохо видно: больше света, без окна за спиной'; }
+      else if (!hipsSeen) { level = 'warn'; tip = 'Отойди дальше: в кадре нужны бёдра'; }
+      else if (!wristsSeen) { level = 'warn'; tip = 'Кисти выпали из кадра: отойди или встань по центру'; }
+      else if (height < 0.42) { level = 'warn'; tip = 'Подойди ближе: ты слишком мелкий в кадре'; }
+      else if (xs.length && (Math.min(...xs) < 0.04 || Math.max(...xs) > 0.96)) { level = 'warn'; tip = 'Встань по центру кадра'; }
+      else if (mean < 0.7) { level = 'warn'; tip = 'Видимость средняя: добавь света'; }
+      else if (this.inferMs > 45) { level = 'warn'; tip = `Трекер тормозит (${Math.round(this.inferMs)} мс): выбери «Обычная» точность`; }
+      else if (!this.proc.legsVisible && this.proc.cal) { tip = 'Ноги не видны: удары ногами выключены (отойди на 3 м)'; }
+    }
+    this.quality = { level, tip };
+    this.qbox.className = `cam-q ${level}`;
+    this.qbox.querySelector('span').textContent = tip;
+  }
+
+  _process(captureTime) {
     if (this.video.currentTime === this.lastVideoTime) return;
     this.lastVideoTime = this.video.currentTime;
     const now = performance.now();
     const res = this.landmarker.detectForVideo(this.video, now);
+    this._assess(res, performance.now() - now);
     const ctx = this.overlay.getContext('2d');
     ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
     if (res.landmarks && res.landmarks[0]) {
       this.drawing.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
       this.drawing.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
     }
-    this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, now / 1000);
+    this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, (captureTime ?? now) / 1000);
   }
 
   poll() { return this.proc.poll(); }

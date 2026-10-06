@@ -36,6 +36,8 @@ namespace IronEchoCore
 		};
 
 		// Footwork for this tick: distance, circling, ropes, cutting the ring off.
+		// Picks the next move: hand or leg, head / body / legs.
+		void PlanNext();
 		void Footwork(const CombatSim& Sim, int32_t Tick, bool bRetreating, bool bWantsToAttack, FighterIntent& Intent);
 
 		BotConfig Config;
@@ -53,6 +55,7 @@ namespace IronEchoCore
 		int32_t NextAttackTick = 0;
 		Hand PlannedHand = Hand::Left;
 		PunchZone PlannedZone = PunchZone::Head;
+		AttackKind PlannedKind = AttackKind::Punch;
 		bool bGuardRolled = false; // the guard-invites-body roll was made for the current plan
 		bool bComboQueued = false;
 		Hand ComboHand = Hand::Left;

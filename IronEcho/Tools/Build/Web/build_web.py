@@ -90,6 +90,7 @@ def make_input_script(path: Path, seed: int = 20261004, frames: int = 7200) -> N
             mask |= 2
         if rng.random() < 0.01:
             mask |= rng.choice([4, 8])  # body jab / body cross
+        kicks = rng.choice([1, 2, 4, 8]) if rng.random() < 0.006 else 0  # mid / low kicks of either leg
         if f >= block_until and rng.random() < 0.01:
             block_until = f + rng.randint(10, 50)
         if f >= slip_until and rng.random() < 0.006:
@@ -101,7 +102,7 @@ def make_input_script(path: Path, seed: int = 20261004, frames: int = 7200) -> N
         block = 1.0 if f < block_until else 0.0
         lean = slip if f < slip_until else 0.0
         fwd, side = move if f < move_until else (0.0, 0.0)
-        values += [dt, status, lean, block, float(mask), fwd, side]
+        values += [dt, status, lean, block, float(mask), fwd, side, float(kicks)]
     path.write_bytes(struct.pack(f"<{len(values)}d", *values))
 
 

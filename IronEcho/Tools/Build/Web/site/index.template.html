@@ -109,6 +109,8 @@
   #pad button { width: 64px; height: 64px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.18); background: rgba(14,16,20,0.6);
     font: 800 14px/1 var(--display); letter-spacing: 0.08em; touch-action: none; }
   #pad button.big { width: 78px; height: 78px; font-size: 16px; }
+  #pad .cluster.right { flex-wrap: wrap-reverse; justify-content: flex-end; max-width: 176px; }
+  #pad button.small { width: 52px; height: 52px; font-size: 11px; }
   #pad button.on { background: rgba(63,125,255,0.55); border-color: var(--blue); }
 
   /* ---------- panels ---------- */
@@ -145,6 +147,16 @@
   .keys kbd { font: 700 12px/1 var(--display); letter-spacing: 0.06em; color: var(--ink); background: rgba(255,255,255,0.07); border: 1px solid var(--line);
     border-bottom-width: 2px; border-radius: 3px; padding: 4px 7px; justify-self: start; white-space: nowrap; }
   .fine { margin-top: 16px; font-size: 12px; color: var(--faint); }
+  #online .on-code { margin: 16px 0 4px; text-align: center; }
+  #online .on-code span { display: block; font: 700 12px/1 var(--display); letter-spacing: 0.16em; color: var(--faint); text-transform: uppercase; }
+  #online .on-code b { display: block; margin: 8px 0; font: 800 54px/1 var(--display); letter-spacing: 0.22em; color: var(--ink); user-select: all; }
+  #online .on-code small { display: block; margin-top: 8px; color: var(--dim); word-break: break-all; user-select: all; }
+  #online .on-row { display: flex; gap: 8px; margin-top: 16px; }
+  #online input { flex: 1 1 0; min-width: 0; padding: 12px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255,255,255,0.04);
+    color: var(--ink); font: 800 24px/1 var(--display); letter-spacing: 0.3em; text-align: center; text-transform: uppercase; }
+  #online .on-row .ghost { flex: 0 0 38%; margin-top: 0; }
+  #online .on-status { margin: 14px 0 0; min-height: 2.6em; color: var(--dim); font-size: 13px; }
+  #online .on-status.bad { color: #ff7a6b; }
   .linkish { background: none; border: 0; padding: 0; color: var(--dim); text-decoration: underline; cursor: pointer; font-size: 12px; }
   .fine b { color: var(--dim); font-weight: 600; }
   #loading .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; margin-top: 16px; }
@@ -206,13 +218,13 @@
     <div id="count" hidden></div>
     <div id="getup" hidden><b>ДЕРЖИ БЛОК, ЧТОБЫ ВСТАТЬ</b><div class="gbar"><div id="getup-fill"></div></div></div>
     <div id="flash"></div>
-    <div id="help" hidden><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>ноги</span><span><kbd>J</kbd><kbd>K</kbd>удары</span><span><kbd>Shift</kbd>в корпус</span><span><kbd>Q</kbd><kbd>E</kbd>уклон</span><span><kbd>Пробел</kbd>блок</span><span><kbd>Esc</kbd>пауза</span></div>
+    <div id="help" hidden><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>ноги</span><span><kbd>J</kbd><kbd>K</kbd>удары</span><span><kbd>Shift</kbd>в корпус</span><span><kbd>U</kbd><kbd>I</kbd>ногой</span><span><kbd>Q</kbd><kbd>E</kbd>уклон</span><span><kbd>Пробел</kbd>блок</span><span><kbd>Esc</kbd>пауза</span></div>
     <button id="pause-btn" type="button">ПАУЗА</button>
   </div>
 
   <div id="pad" hidden>
     <div class="cluster"><button data-act="left" type="button">◀</button><button data-act="block" class="big" type="button">БЛОК</button><button data-act="right" type="button">▶</button></div>
-    <div class="cluster"><button data-act="jab" class="big" type="button">ДЖЕБ</button><button data-act="cross" class="big" type="button">КРОСС</button></div>
+    <div class="cluster right"><button data-act="low" class="small" type="button">НОГИ</button><button data-act="kick" class="small" type="button">НОГА</button><button data-act="jab" class="big" type="button">ДЖЕБ</button><button data-act="cross" class="big" type="button">КРОСС</button></div>
   </div>
 
   <div id="menu" class="panel">
@@ -235,6 +247,7 @@
     </div></div>
     @@CAMERA_MENU@@
     <button class="go" id="start" type="button">В РИНГ</button>
+    <button class="ghost" id="to-online" type="button">ОНЛАЙН-ДУЭЛЬ · ДВА ИГРОКА</button>
     <p class="fine" id="menu-load" hidden></p>
     <div id="cam-offer" hidden>
       <button class="ghost" id="cam-dl" type="button">ВЕРСИЯ С КАМЕРОЙ — СКАЧАТЬ</button>
@@ -248,11 +261,13 @@
       <li><b>Уклон — в последний миг.</b> Визор вспыхнул, плечо ушло вниз — удар летит. Убери голову с линии прямо перед ударом: ранний уклон удар догонит.</li>
       <li><b>Держи дистанцию.</b> Полная сила — на вытянутой руке; вплотную удар вязнет, издалека не достаёт. Прижали к канатам — уходи вбок.</li>
       <li><b>Работай по корпусу.</b> От удара в корпус не уклониться, он отнимает дыхание. Против закрытого блока — самое то.</li>
+      <li><b>Ноги длиннее рук.</b> Удар ногой достаёт дальше джеба и бьёт сильнее, но замах долгий, а после удара не отменить. Низкий удар по ногам нельзя закрыть блоком руками — он замедляет соперника.</li>
     </ul>
     <div class="keys">
       <kbd>W / S</kbd><span>шаг вперёд / назад · <b>A / D</b> — кружить по рингу</span>
       <kbd>J / K</kbd><span>джеб (быстрый) / кросс (сильный) в голову</span>
       <kbd>Shift + J / K</kbd><span>те же удары в корпус (или <b>N / M</b>)</span>
+      <kbd>U / I</kbd><span>удар ногой — передней / задней (с <b>Shift</b> — по ногам: замедляет, блоком руками не закрыть)</span>
       <kbd>Q / E</kbd><span>уклон влево / вправо (держать)</span>
       <kbd>Пробел</kbd><span>блок; при нокдауне — держать, чтобы встать</span>
       <kbd>Мышь</kbd><span>ЛКМ — джеб, ПКМ — кросс · <b>Esc</b> — пауза · <b>Enter</b> — в ринг</span>
@@ -265,6 +280,17 @@
     <h2 class="brand" style="font-size:44px">ЗАГРУЗКА</h2>
     <div class="bar"><div id="load-fill"></div></div>
     <div id="load-label">Запуск…</div>
+  </div>
+
+  <div id="online" class="panel" hidden>
+    <h2 class="brand" style="font-size:44px">ОНЛАЙН-ДУЭЛЬ</h2>
+    <p class="lede" style="margin-bottom:6px">Два человека, два экрана. Каждый играет с клавиатуры или камеры; по сети идут только вводы, бой считается одинаково у обоих.</p>
+    <button class="go" id="on-create" type="button" style="margin-top:10px">СОЗДАТЬ КОМНАТУ</button>
+    <div class="on-code" id="on-code" hidden><span>Код комнаты</span><b id="on-code-text">······</b>
+      <button class="ghost" id="on-copy" type="button">СКОПИРОВАТЬ ССЫЛКУ</button><small id="on-link"></small></div>
+    <div class="on-row"><input id="on-input" maxlength="6" placeholder="КОД" autocomplete="off" spellcheck="false"><button class="ghost" id="on-join" type="button">ВОЙТИ</button></div>
+    <p class="on-status" id="on-status">Один создаёт комнату и присылает ссылку или код, второй открывает ссылку или вводит код.</p>
+    <button class="ghost" id="on-back" type="button">НАЗАД В МЕНЮ</button>
   </div>
 
   <div id="pause" class="panel" hidden>

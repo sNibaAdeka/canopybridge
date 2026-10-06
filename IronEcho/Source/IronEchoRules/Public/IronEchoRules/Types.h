@@ -71,11 +71,20 @@ namespace IronEchoCore
 	inline constexpr int32_t HandIndex(Hand InHand) { return InHand == Hand::Left ? 0 : 1; }
 	inline constexpr Hand OtherHand(Hand InHand) { return InHand == Hand::Left ? Hand::Right : Hand::Left; }
 
-	// Where a punch is aimed. Head shots can be slipped; body shots cannot, they drain the stamina instead.
+	// Where an attack is aimed. Head shots can be slipped; body shots cannot, they drain the stamina instead;
+	// leg kicks (Leg, kicks only) cannot be slipped or blocked with the hands: they slow the fighter down.
 	enum class PunchZone : uint8_t
 	{
 		Head = 0,
 		Body = 1,
+		Leg = 2,
+	};
+
+	// A hand strike or a leg strike (1.4). Left/Right of Hand is the lead / rear limb in both cases.
+	enum class AttackKind : uint8_t
+	{
+		Punch = 0,
+		Kick = 1,
 	};
 
 	// Lateral dodge (slip) direction, anatomical: Left = player's own left.

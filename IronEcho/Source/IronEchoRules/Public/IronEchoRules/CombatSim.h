@@ -47,6 +47,8 @@ namespace IronEchoCore
 		// Geometry of Attacker's punch (hand, zone) aimed at Aim, against the defender as it stands now.
 		PunchGeometry Measure(FighterSlot Attacker, const AttackSpec& Spec, PunchZone Zone, Vec2 Aim) const;
 		const MovementConfig& Movement() const { return MovementCfg; }
+		// Versus (1.5): the opponent is a human too, so the camera player's auto-close assist applies to both.
+		void SetAssistBoth(bool bBoth) { bAssistBoth = bBoth; }
 
 	private:
 		struct PendingOutcome
@@ -69,6 +71,7 @@ namespace IronEchoCore
 
 		Fighter Fighters[2];
 		MovementConfig MovementCfg;
+		bool bAssistBoth = false;
 		uint32_t AimedAttackId[2] = {0, 0};
 		float AimSlip[2] = {0.0f, 0.0f}; // how much of the target's head slip the aim has followed so far
 	};

@@ -16,6 +16,7 @@ namespace IronEchoCore
 	{
 		Bout = 0,     // player vs bot, rounds
 		Training = 1, // player vs passive punching bag, no timer
+		Versus = 2,   // two humans (1.5): both fighters use the player rules, the opponent's intent comes in with the input
 	};
 
 	struct MatchSetup
@@ -34,6 +35,9 @@ namespace IronEchoCore
 	{
 		FighterIntent PlayerIntent;
 		bool bInputReady = false; // tracker Live (or a debug input source is active)
+		// Versus only (1.5): the second human.
+		FighterIntent OpponentIntent;
+		bool bOpponentReady = false;
 	};
 
 	struct MatchSnapshot
@@ -59,6 +63,7 @@ namespace IronEchoCore
 		// Referee count (phase Knockdown).
 		int32_t KnockdownCount = 0;        // 0..CountTo
 		int32_t GetUpProgress = 0;         // player's "hold the guard" progress, 0..100
+		int32_t GetUpProgressOpponent = 0; // Versus: the second human's progress, 0..100
 		int32_t PostGetUpTicksLeft = 0;    // > 0: everyone is up, fight resumes when it reaches 0
 		int32_t Tick = 0;              // match clock, advances every Tick() call
 		int32_t SimTick = 0;           // advances only when the fight simulation steps
@@ -123,6 +128,7 @@ namespace IronEchoCore
 		int32_t CountTicks = 0;
 		int32_t BotGetUpCount = -1;
 		int32_t PlayerGuardHeldTicks = 0;
+		int32_t OpponentGuardHeldTicks = 0;
 
 		bool bPauseRequested = false;
 		bool bResumeRequested = false;

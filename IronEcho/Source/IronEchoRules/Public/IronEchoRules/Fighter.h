@@ -5,6 +5,7 @@
 #include "IronEchoRules/CombatEvents.h"
 #include "IronEchoRules/InputFrame.h"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace IronEchoCore
@@ -63,8 +64,12 @@ namespace IronEchoCore
 		bool bOnRopes = false;        // within MovementConfig.RopeMargin of a rope: no room to back off
 		float HeadOffset = 0.0f;      // m, head off the centre line to the fighter's right (the real slip)
 		PunchZone AttackZone = PunchZone::Head;
+		AttackKind AttackType = AttackKind::Punch; // hand or leg strike (1.4)
+		int32_t LegSlowTicksLeft = 0;              // > 0: legs hurt, movement slowed (1.4)
 		Vec2 AimPoint;                // where the current punch goes (tracks the target in the windup, then frozen)
 		int32_t BodyPunchesLanded = 0;
+		int32_t KicksThrown = 0;
+		int32_t KicksLanded = 0;
 		int32_t GlancingHits = 0;     // this fighter's punches that only grazed
 		// Statistics for the current round / match.
 		float RoundDamageDealt = 0.0f;
@@ -122,7 +127,7 @@ namespace IronEchoCore
 		bool IsLastActiveTick() const;
 		// The current punch's spec with its zone applied (body shots: shorter, weaker, dearer).
 		AttackSpec CurrentAttackSpec() const;
-		AttackSpec SpecFor(Hand InHand, PunchZone Zone) const;
+		AttackSpec SpecFor(Hand InHand, PunchZone Zone, AttackKind Kind = AttackKind::Punch) const;
 		bool IsDodgeEffective() const { return Snap.bDodgeEffective; }
 		bool IsBlocking() const { return Snap.bBlocking; }
 		bool IsWindingUp() const { return Snap.State == ActionState::Attack && Snap.Stage == AttackStage::Windup; }
@@ -134,6 +139,7 @@ namespace IronEchoCore
 		{
 			const float Power = FullDamage > 0.0f ? Clamp(Damage / FullDamage, 0.0f, 2.0f) : 1.0f;
 			return Config.BlockStaminaCost * Power * (Zone == PunchZone::Body ? Config.BodyBlockDrainFactor : 1.0f);
+			// (a leg kick never reaches the guard: CombatSim skips the block for PunchZone::Leg)
 		}
 		// The guard holds while it can pay for the punch; an empty tank breaks it.
 		bool CanAffordBlock(float Drain) const { return Snap.Stamina >= Drain; }
@@ -163,6 +169,11 @@ namespace IronEchoCore
 		}
 		void SetAimPoint(Vec2 Point) { Snap.AimPoint = Point; }
 		void NoteGlancing() { ++Snap.GlancingHits; }
+		// A low kick: the legs go (slow, cumulative up to LegSlowMaxTicks).
+		void ApplyLegSlow(int32_t Ticks)
+		{
+			Snap.LegSlowTicksLeft = (std::min)(Snap.LegSlowTicksLeft + Ticks, Config.LegSlowMaxTicks);
+		}
 		void ClearRoundStats();
 		void NoteDodge();
 
@@ -174,8 +185,8 @@ namespace IronEchoCore
 		const FighterConfig& GetConfig() const { return Config; }
 
 	private:
-		bool CanStartAttack(Hand InHand) const;
-		void StartAttack(Hand InHand, PunchZone Zone, int32_t Tick, CombatEventBuffer& Events);
+		bool CanStartAttack(Hand InHand, AttackKind Kind) const;
+		void StartAttack(Hand InHand, PunchZone Zone, AttackKind Kind, int32_t Tick, CombatEventBuffer& Events);
 		void EnterGuardOrBlock(bool bWantBlock, int32_t Tick, CombatEventBuffer& Events);
 		void SpendStamina(float Amount, int32_t Tick, CombatEventBuffer& Events);
 		CombatEvent MakeEvent(CombatEventType Type, int32_t Tick) const;

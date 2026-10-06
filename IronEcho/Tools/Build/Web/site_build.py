@@ -17,7 +17,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.1.0"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.2.0"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
@@ -175,6 +175,10 @@ CAMERA_MENU = """<div class="opt" data-group="control"><span>Управлени�
       <button type="button" data-value="keys">КЛАВИАТУРА<small>и мышь</small></button>
       <button type="button" data-value="camera">КАМЕРА<small>бокс телом</small></button>
       <button type="button" data-value="phone" hidden>ТЕЛЕФОН<small>как камера</small></button>
+    </div></div>
+    <div class="opt" data-group="tracking"><span>Точность камеры</span><div class="seg">
+      <button type="button" data-value="full">ОБЫЧНАЯ<small>быстрее</small></button>
+      <button type="button" data-value="heavy">ВЫСОКАЯ<small>точнее, ~30 МБ</small></button>
     </div></div>"""
 
 
@@ -217,7 +221,7 @@ def build_site(project: Path, here: Path, out_root: Path) -> None:
         data = {p.name: f"data:{mime[p.suffix]};base64," + base64.b64encode(p.read_bytes()).decode("ascii")
                 for p in sorted(cam_assets.iterdir()) if p.suffix in mime}
         assets_script = "<script>globalThis.IRONECHO_ASSETS = " + json.dumps(data) + ";</script>"
-        game_cam = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "pose", "main"])
+        game_cam = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "pose", "main"])
         single = full_document(page(template, core_dir, game_cam, assets_script=assets_script, camera_menu=CAMERA_MENU))
         (out_root / "IronEcho-Camera.html").write_text(single, encoding="utf-8")
         # public single page (one HTML that a host can import from a URL): the same game plus a link to the Windows app
@@ -225,7 +229,7 @@ def build_site(project: Path, here: Path, out_root: Path) -> None:
         if download_url:
             menu = (f'<a class="ghost dl-win" href="{download_url}" download>СКАЧАТЬ ДЛЯ WINDOWS<small>IronEcho.exe, '
                     'без интернета</small></a>')
-            public = full_document(page(template, core_dir, game_cam, assets_script=assets_script, camera_menu=CAMERA_MENU,
+            public = full_document(page(template, core_dir, game_cam, assets_script=PUBLIC_DEPS + assets_script, camera_menu=CAMERA_MENU,
                                         download_menu=menu))
             (out_root / "IronEcho-Public.html").write_text(public, encoding="utf-8")
             print(f"[site] IronEcho-Public.html {len(public.encode()) // (1024 * 1024)} MB (camera + Windows download link)")
@@ -244,7 +248,10 @@ THREE_ADDONS = ["loaders/GLTFLoader.js", "utils/BufferGeometryUtils.js", "libs/m
 # SIMD build only (every Chrome/Edge/Firefox/Safari since 2021-2023); the no-SIMD twin would add 9 MB
 MEDIAPIPE_FILES = ["vision_bundle.mjs", "wasm/vision_wasm_internal.js", "wasm/vision_wasm_internal.wasm"]
 STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", '
-                   '"poseModel": "./vendor/pose_landmarker_full.task", "glb": "plain"};</script>')
+                   '"poseModel": "./vendor/pose_landmarker_full.task", "poseModelHeavy": "./vendor/pose_landmarker_heavy.task", '
+                   '"peerjs": "./vendor/peerjs/peerjs.min.js", "glb": "plain"};</script>')
+# the single public page (the website's /play) keeps three.js / MediaPipe on their CDNs but serves PeerJS itself
+PUBLIC_DEPS = '<script>globalThis.IRONECHO_DEPS = {"peerjs": "./peerjs.min.js"};</script>'
 
 
 def local_fonts(cache: Path, dst: Path) -> str:
@@ -302,6 +309,17 @@ def build_standalone(project: Path, here: Path, out_root: Path) -> Path | None:
         (vendor / "mediapipe" / f).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(mp / f, vendor / "mediapipe" / f)
     shutil.copy2(model, vendor / "pose_landmarker_full.task")
+    peerjs = deps_dir / "peerjs" / "dist" / "peerjs.min.js"  # online duel: WebRTC rooms (MIT)
+    if peerjs.exists():
+        (vendor / "peerjs").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(peerjs, vendor / "peerjs" / "peerjs.min.js")
+    else:
+        print("  [standalone] peerjs missing in IRONECHO_WEBDEPS: the online duel loads it from the CDN")
+    heavy = model.with_name("pose_landmarker_heavy.task")
+    if heavy.exists():
+        shutil.copy2(heavy, vendor / "pose_landmarker_heavy.task")
+    else:
+        print("  [standalone] pose_landmarker_heavy.task missing: the 'Высокая' accuracy needs the network (Google storage)")
     qr = deps_dir / "qrcode-generator" / "dist" / "qrcode.mjs"  # QR code for pairing the phone camera (MIT)
     if qr.exists():
         (vendor / "qrcode").mkdir(parents=True, exist_ok=True)
@@ -310,7 +328,7 @@ def build_standalone(project: Path, here: Path, out_root: Path) -> Path | None:
         print("  [standalone] qrcode-generator missing in IRONECHO_WEBDEPS: the phone pairing shows the link only")
     fonts = local_fonts(out_root / "fonts", vendor / "fonts")
     template = (here / "site" / "index.template.html").read_text(encoding="utf-8")
-    game = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "pose", "main"])
+    game = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "pose", "main"])
     doc = full_document(page(template, out_root / "core", game, assets_script=STANDALONE_DEPS, camera_menu=CAMERA_MENU,
                              fonts=fonts, importmap=LOCAL_IMPORTMAP))
     (out / "index.html").write_text(doc, encoding="utf-8")

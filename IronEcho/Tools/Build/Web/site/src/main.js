@@ -15,7 +15,7 @@ const NAMES = ['FORGE 07', 'EMBER 13'];
 const PHASE_LABEL = { WaitingForPlayer: 'ПРИГОТОВЬСЯ', Paused: 'ПАУЗА' };
 const $ = (s) => document.querySelector(s);
 
-const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys' }; // Easy first: new players lose ~94% on Normal
+const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full' }; // Easy first: new players lose ~94% on Normal
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
 } catch { /* storage unavailable: defaults */ }
@@ -29,6 +29,10 @@ const app = {
   state: 'menu', training: false, lastPhase: '', resultsShown: false, resultTimer: 0, hitStop: 0, intro: 0,
   camPos: new THREE.Vector3(-4.5, 2.6, 2.6), camLook: new THREE.Vector3(0, 1.3, 0), loaded: false,
 };
+
+app.viewSlot = 0;   // whose back the camera is behind: 0 = the first fighter (always, except as the guest of an online duel)
+app.versus = null;  // online duel: { room, slot, lock, ctl }
+const meKey = () => (app.viewSlot === 1 ? 'opponent' : 'player');
 
 // ---------------------------------------------------------------- loading
 function progress(fraction, label) {
@@ -198,13 +202,18 @@ function resize() {
 }
 
 // ---------------------------------------------------------------- flow
-function startBout() {
+function startBout(versus) {
+  const online = versus && versus.seed !== undefined ? versus : null; // (click handlers pass an Event: not a match)
+  if (app.versus && !online) { app.versus.ctl |= 4; return; } // a rematch in an online duel goes through the lockstep
   if (app.builtQuality !== settings.quality) applyQuality(); // changed while the arena was still loading
   const mode = settings.mode === 'training' ? 1 : 0;
-  app.training = mode === 1;
-  const roundSeconds = settings.mode === 'short' ? 45 : 0;
-  app.core.init({ mode, level: settings.level, seed: (Date.now() % 100000) + 1, rounds: 0, roundSeconds });
-  app.hud.setNames(NAMES[0], app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][settings.level]}`);
+  app.training = !online && mode === 1;
+  const roundSeconds = online ? online.roundSeconds : settings.mode === 'short' ? 45 : 0;
+  if (online) app.core.init({ mode: 2, level: 1, seed: online.seed, rounds: 0, roundSeconds });
+  else app.core.init({ mode, level: settings.level, seed: (Date.now() % 100000) + 1, rounds: 0, roundSeconds });
+  app.anim.opponent.isBot = !online; // a human opponent winds up like a human
+  app.hud.setNames(online ? (app.viewSlot === 0 ? `${NAMES[0]} · ТЫ` : NAMES[0]) : NAMES[0],
+    online ? (app.viewSlot === 1 ? `${NAMES[1]} · ТЫ` : NAMES[1]) : (app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][settings.level]}`));
   app.hud.resetTrail('p');
   app.hud.resetTrail('o');
   app.hud.hideResults();
@@ -223,14 +232,14 @@ function startBout() {
   app.hud.show(true);
   const camSource = settings.control === 'phone' ? 'phone' : 'webcam';
   const useCamera = (settings.control === 'camera' || settings.control === 'phone') && typeof CameraInput !== 'undefined';
-  if (app.cameraInput && (!useCamera || app.cameraInput.source !== camSource)) {
+  if (app.cameraInput && (!useCamera || app.cameraInput.source !== camSource || app.cameraInput.model !== settings.tracking)) {
     app.cameraInput.stop();
     app.cameraInput = null;
   }
   $('#help').hidden = useCamera;
   $('#pad').hidden = useCamera || !('ontouchstart' in window || navigator.maxTouchPoints > 0);
   if (useCamera && !app.cameraInput) {
-    app.cameraInput = new CameraInput(camSource);
+    app.cameraInput = new CameraInput(camSource, { model: settings.tracking });
     app.cameraInput.start().catch((err) => {
       console.error(err);
       app.cameraInput.stop();
@@ -245,6 +254,12 @@ function startBout() {
 // player) the freeze alone holds the bout.
 const IDLE_INPUT = { status: 7, lean: 0, block: 0, punchMask: 0 };
 function togglePause() {
+  if (app.versus) { // the pause is the core's, requested through the lockstep so both machines take it on the same frame
+    const phase = app.core.snapshot().match.phaseName;
+    if (phase === 'MatchOver') return;
+    app.versus.ctl |= phase === 'Paused' ? 2 : 1;
+    return;
+  }
   if (app.state === 'playing') {
     const phase = app.core.snapshot().match.phaseName;
     if (phase === 'MatchOver') return;
@@ -262,6 +277,7 @@ function togglePause() {
 }
 
 function resumeBout() {
+  if (app.versus) { app.versus.ctl |= 2; return; }
   if (app.core.snapshot().match.phaseName === 'Paused') app.core.resume();
   app.state = 'playing';
   $('#pause').hidden = true;
@@ -269,6 +285,12 @@ function resumeBout() {
 
 // Losing focus (Alt+Tab, another window, minimised) pauses the bout instead of letting the bot hit a ghost.
 function autoPause() {
+  if (app.versus) {
+    const phase = app.core.snapshot().match.phaseName;
+    if (!document.hidden && !app.versus.blurPause) return;
+    if (phase !== 'Paused' && phase !== 'MatchOver') app.versus.ctl |= 1;
+    return;
+  }
   if (app.state !== 'playing' || app.frozen) return;
   togglePause();
 }
@@ -279,6 +301,7 @@ function toggleFullscreen() {
 }
 
 function toMenu() {
+  if (app.versus) leaveOnline();
   app.state = 'menu';
   $('#pause').hidden = true;
   app.hud.hideResults();
@@ -294,7 +317,8 @@ const slotKey = (slot) => (slot === 0 ? 'player' : 'opponent');
 function onCombat(e, snap) {
   const actor = slotKey(e.actor);
   const target = slotKey(e.target);
-  const playerActs = e.actor === 0;
+  const me = meKey();
+  const playerActs = e.actor === app.viewSlot;
   const type = e.typeName;
   if (type === 'AttackActive') {
     app.sound.whoosh(e.hand === 1 ? 1.1 : 0.85);
@@ -303,26 +327,32 @@ function onCombat(e, snap) {
   if (type === 'HitConfirmed') {
     const power = Math.min(1.6, e.damage / 2.2 + (e.counter ? 0.3 : 0));
     let at;
-    if (target === 'opponent' && app.training) at = stagePoint(snap.opponent.position - 0.18, 1.45);
+    if (target === 'opponent' && app.training) at = stagePoint(snap.opponent.position - 0.18, e.zone === 2 ? 0.55 : e.zone === 1 ? 1.1 : 1.45);
     else {
       at = app.rigs[target].headWorld();
       if (e.zone === 1) at.y -= 0.45; // body shot: the spark is on the ribs
+      if (e.zone === 2) at.y -= 1.2;  // low kick: on the thigh
     }
-    const dir = stageDir().multiplyScalar(e.actor === 0 ? 1 : -1).setY(0.15).normalize();
+    const dir = stageDir().multiplyScalar(playerActs ? 1 : -1).setY(0.15).normalize();
     app.sparks.burst(at, dir, e.counter ? 'counter' : 'hit', 0.7 + 0.4 * power);
     app.sound.hit(0.7 + 0.3 * power, !!e.counter);
     if (app.training && target === 'opponent') app.bag.hit(power, e.hand === 0 ? 1 : -1);
     else app.anim[target].takeHit(e.hand, e.damage, !!e.counter, e.zone);
+    if (e.kind === 1) app.shake.add(target === me ? 0.25 : 0.12);
     app.hitStop = e.counter ? 0.06 : 0.035;
-    app.shake.add(target === 'player' ? 0.45 * power : 0.18 * power);
-    if (target === 'player') app.hud.flash('hit');
+    app.shake.add(target === me ? 0.45 * power : 0.18 * power);
+    if (target === me) app.hud.flash('hit');
     if (playerActs) {
       if (e.counter) app.hud.feed('КОНТРУДАР!', 'good');
       else if (e.glancing) app.hud.feed('ВСКОЛЬЗЬ', '');
       else if (e.smothered) app.hud.feed('СЛИШКОМ БЛИЗКО — ОТОЙДИ', 'warn');
+      else if (e.kind === 1 && e.zone === 2) app.hud.feed('ПО НОГАМ — ОН ХРОМАЕТ', 'good');
+      else if (e.kind === 1) app.hud.feed('УДАР НОГОЙ!', 'good');
       else if (e.zone === 1) app.hud.feed('В КОРПУС!', 'good');
       if (e.combo >= 2) app.hud.combo(e.combo);
     } else if (e.counter) app.hud.feed('ПОЙМАЛ НА ВСТРЕЧНОМ', 'bad');
+    else if (e.kind === 1 && e.zone === 2) app.hud.feed('ПО НОГАМ: ТЫ ЗАМЕДЛЕН', 'bad');
+    else if (e.kind === 1) app.hud.feed('ПРОПУСТИЛ УДАР НОГОЙ', 'bad');
     else if (e.zone === 1 && !e.glancing) app.hud.feed('ПРОПУСТИЛ В КОРПУС', 'bad');
     if (power > 1.1) app.sound.crowdSwell(0.6);
     return;
@@ -331,10 +361,10 @@ function onCombat(e, snap) {
     const rig = app.rigs[target];
     const at = app.training && target === 'opponent' ? stagePoint(snap.opponent.position - 0.18, 1.45)
       : rig.fistWorld('l').add(rig.fistWorld('r')).multiplyScalar(0.5);
-    app.sparks.burst(at, stageDir().multiplyScalar(e.actor === 0 ? 1 : -1).setY(0.2).normalize(), 'block', 0.7);
+    app.sparks.burst(at, stageDir().multiplyScalar(playerActs ? 1 : -1).setY(0.2).normalize(), 'block', 0.7);
     app.sound.block(0.9);
     if (!(app.training && target === 'opponent')) app.anim[target].takeBlocked(e.damage / 0.15);
-    app.shake.add(target === 'player' ? 0.12 : 0.05);
+    app.shake.add(target === me ? 0.12 : 0.05);
     if (!playerActs) app.hud.feed('БЛОК', 'good');
     return;
   }
@@ -350,24 +380,24 @@ function onCombat(e, snap) {
     app.hud.feed('НЕ ДОСТАЛ — ШАГНИ ВПЕРЁД', 'warn');
     return;
   }
-  if (type === 'StaminaExhausted' && actor === 'player') {
+  if (type === 'StaminaExhausted' && actor === me) {
     app.hud.feed('ВЫДОХСЯ — ПЕРЕВЕДИ ДУХ', 'warn');
     return;
   }
   if (type === 'KnockedDown') {
     app.sound.knockdown();
     app.shake.add(0.7);
-    app.hud.banner('НОКДАУН', actor === 'player' ? 'держи блок, чтобы встать' : NAMES[1], 1.8, actor === 'player' ? 'bad' : 'good');
+    app.hud.banner('НОКДАУН', actor === me ? 'держи блок, чтобы встать' : (app.versus ? 'СОПЕРНИК' : NAMES[1]), 1.8, actor === me ? 'bad' : 'good');
     return;
   }
   if (type === 'GotUp') {
     app.hud.resetTrail(actor === 'player' ? 'p' : 'o');
-    app.hud.feed(actor === 'player' ? 'ТЫ НА НОГАХ' : 'СОПЕРНИК ВСТАЛ', actor === 'player' ? 'good' : 'warn');
+    app.hud.feed(actor === me ? 'ТЫ НА НОГАХ' : 'СОПЕРНИК ВСТАЛ', actor === me ? 'good' : 'warn');
     return;
   }
   if (type === 'KnockedOut') {
     app.sound.crowdSwell(2);
-    app.hud.banner('НОКАУТ', '', 2.6, actor === 'player' ? 'bad' : 'good');
+    app.hud.banner('НОКАУТ', '', 2.6, actor === me ? 'bad' : 'good');
   }
 }
 
@@ -392,8 +422,191 @@ function onMatch(e, snap) {
     app.anim.opponent.outcome = m.hasWinner ? (m.winner === 1 ? 'win' : 'lose') : '';
     app.resultTimer = 2.6;
   } else if (type === 'Paused' && e.reason === 2) {
-    app.hud.banner('ТРЕКИНГ ПОТЕРЯН', 'встань в кадр', 2.0, 'warn');
+    app.hud.banner('ТРЕКИНГ ПОТЕРЯН', app.versus ? 'один из вас выпал из кадра' : 'встань в кадр', 2.0, 'warn');
+  } else if (type === 'PhaseChanged' && app.versus && e.phaseName === 'WaitingForPlayer' && app.core.enums.phase[e.previousPhase] !== 'WaitingForPlayer') {
+    versusRematchVisuals(); // the lockstep took a rematch on both machines
   }
+}
+
+// ---------------------------------------------------------------- online duel
+const netUi = { room: null };
+function lobbyStatus(text, bad = false) {
+  const el = $('#on-status');
+  el.textContent = text;
+  el.classList.toggle('bad', !!bad);
+}
+
+function openLobby() {
+  $('#menu').hidden = true;
+  $('#online').hidden = false;
+  $('#on-code').hidden = true;
+  lobbyStatus('Один создаёт комнату и присылает ссылку или код, второй открывает ссылку или вводит код.');
+  $('#on-create').disabled = false;
+  $('#on-join').disabled = false;
+}
+
+function closeLobby() {
+  leaveOnline();
+  $('#online').hidden = true;
+  $('#menu').hidden = false;
+}
+
+function leaveOnline() {
+  if (netUi.room) { netUi.room.close(); netUi.room = null; }
+  if (app.versus) app.versus = null;
+  app.viewSlot = 0;
+  if (app.anim) app.anim.opponent.isBot = true;
+  const badge = document.getElementById('net-state');
+  if (badge) badge.hidden = true;
+}
+
+function onPeerLeft() {
+  if (!app.versus) { lobbyStatus('Соперник отключился.', true); return; }
+  const over = app.core.snapshot().match.phaseName === 'MatchOver';
+  app.hud.banner(over ? 'СОПЕРНИК УШЁЛ' : 'СОПЕРНИК ОТКЛЮЧИЛСЯ', 'возвращаю в меню', 3, 'warn');
+  setTimeout(() => { if (app.versus || netUi.room) { leaveOnline(); toMenu(); $('#menu-load').hidden = false; $('#menu-load').textContent = 'Соперник отключился.'; } }, 3000);
+}
+
+async function createRoom() {
+  leaveOnline();
+  $('#on-create').disabled = true;
+  const room = new NetRoom();
+  netUi.room = room;
+  room.on('error', (msg) => lobbyStatus(msg, true)).on('close', onPeerLeft);
+  room.on('open', async () => {
+    lobbyStatus('Соперник подключился. Проверяю связь…');
+    const rtt = await room.measure();
+    const delay = netChooseDelay(rtt);
+    const start = { t: 'start', seed: (Date.now() % 100000) + 1, delay, roundSeconds: settings.mode === 'short' ? 45 : 0 };
+    room.send(start);
+    lobbyStatus(`Связь: ${Math.round(rtt)} мс. Начинаем!`);
+    beginVersus(room, 0, start);
+  });
+  lobbyStatus('Создаю комнату…');
+  try {
+    const code = await room.host();
+    $('#on-code').hidden = false;
+    $('#on-code-text').textContent = code;
+    const link = `${location.origin}${location.pathname}?room=${code}`;
+    $('#on-link').textContent = link;
+    $('#on-copy').onclick = async () => {
+      try { await navigator.clipboard.writeText(link); $('#on-copy').textContent = 'ССЫЛКА СКОПИРОВАНА'; } catch { $('#on-copy').textContent = 'ВЫДЕЛИ И СКОПИРУЙ ССЫЛКУ ВЫШЕ'; }
+    };
+    lobbyStatus('Жду соперника. Отправь ему ссылку или код.');
+  } catch (err) {
+    lobbyStatus(err.message || String(err), true);
+    $('#on-create').disabled = false;
+    room.close();
+    netUi.room = null;
+  }
+}
+
+async function joinRoom(rawCode) {
+  leaveOnline();
+  const code = NET_NORMALIZE_CODE(rawCode);
+  $('#on-input').value = code;
+  if (code.length !== 6) { lobbyStatus('Код комнаты — 6 символов.', true); return; }
+  $('#on-join').disabled = true;
+  const room = new NetRoom();
+  netUi.room = room;
+  room.on('error', (msg) => { lobbyStatus(msg, true); $('#on-join').disabled = false; }).on('close', onPeerLeft);
+  room.on('open', () => lobbyStatus('Соединился. Жду старта от хозяина комнаты…'));
+  room.on('message', (msg) => { if (msg.t === 'start') beginVersus(room, 1, msg); });
+  lobbyStatus('Ищу комнату…');
+  try {
+    await room.join(code);
+  } catch (err) {
+    lobbyStatus(err.message || String(err), true);
+    $('#on-join').disabled = false;
+    room.close();
+    netUi.room = null;
+  }
+}
+
+// This machine's input for one lockstep frame (10 numbers, see NetLockstep) plus the pending pause / rematch request.
+function versusSample() {
+  if (app.testInput) { // QA hook: scripted input arrays (the pause / rematch requests still ride along)
+    const t = [...app.testInput(app.versus ? app.versus.slot : 0)];
+    if (app.versus) { t[9] = (t[9] | app.versus.ctl) >>> 0; app.versus.ctl = 0; }
+    return t;
+  }
+  const i = app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll();
+  const live = app.state === 'playing' || app.state === 'results';
+  const f = live ? i : { status: 7, lean: 0, block: 0, punchMask: 0 };
+  const ctl = app.versus ? app.versus.ctl : 0;
+  if (app.versus) app.versus.ctl = 0;
+  return [f.status, f.confidence ?? 1, f.lean || 0, f.leanForward || 0, f.block || 0, f.punchMask || 0, f.kickMask || 0,
+    f.moveForward || 0, f.moveSide || 0, ctl];
+}
+
+async function beginVersus(room, slot, start) {
+  // the lockstep object exists at once, so the other side's first frames are kept while the arena loads
+  const lock = new NetLockstep({ core: null, room, slot, delay: start.delay, sample: versusSample,
+    onDesync: (f) => {
+      app.hud.banner('СБОЙ СЕТИ', 'бой разошёлся у вас двоих — вернись в меню и начни заново', 8, 'bad');
+      if (app.versus) app.versus.broken = true;
+      console.error('desync at frame', f);
+    } });
+  app.versus = { room, slot, lock, ctl: 0, broken: false, started: false };
+  app.viewSlot = slot;
+  try {
+    if (!app.loaded) {
+      $('#online').hidden = true;
+      $('#loading').hidden = false;
+      await ensureWorld();
+      $('#loading').hidden = true;
+    }
+  } catch (err) {
+    console.error(err);
+    leaveOnline();
+    $('#loading').hidden = true;
+    $('#menu').hidden = false;
+    return;
+  }
+  lock.core = app.core;
+  $('#online').hidden = true;
+  startBout({ seed: start.seed, roundSeconds: start.roundSeconds });
+  app.versus.started = true;
+}
+
+function netStep(dt) {
+  const v = app.versus;
+  if (!v || !v.started || v.broken) return;
+  v.lock.update(dt);
+}
+
+function versusUi(snap) {
+  const v = app.versus;
+  let badge = document.getElementById('net-state');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'net-state';
+    badge.style.cssText = 'position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 74px);transform:translateX(-50%);padding:3px 10px;border-radius:4px;'
+      + 'background:rgba(10,11,14,.7);font:700 12px/1.3 Inter,system-ui,sans-serif;letter-spacing:.06em;color:#9aa3ae;z-index:4;pointer-events:none';
+    document.querySelector('#stage').appendChild(badge);
+  }
+  badge.hidden = false;
+  const stalled = v.lock.stalled;
+  badge.textContent = stalled > 20 ? 'ЖДЁМ СОПЕРНИКА…' : `ОНЛАЙН · ${Math.round(v.room.rtt)} мс · задержка ввода ${Math.round((v.lock.delay / 60) * 1000)} мс`;
+  badge.style.color = stalled > 20 ? '#ff7a6b' : '#9aa3ae';
+  $('#pause').hidden = snap.match.phaseName !== 'Paused';
+  if (!$('#pause').hidden) {
+    $('#resume').textContent = 'ПРОДОЛЖИТЬ (нужны оба)';
+  }
+}
+
+function versusRematchVisuals() {
+  app.hud.hideResults();
+  app.hud.resetTrail('p');
+  app.hud.resetTrail('o');
+  app.anim.player.outcome = app.anim.opponent.outcome = '';
+  app.resultsShown = false;
+  app.resultTimer = 0;
+  app.lastPhase = '';
+  app.intro = 3.2;
+  resetStage();
+  app.state = 'playing';
+  $('#pause').hidden = true;
 }
 
 // ---------------------------------------------------------------- stage
@@ -408,12 +621,15 @@ function stagePoint(s, y = 0) { return new THREE.Vector3(stage.cx + Math.cos(sta
 function updateStage(snap) {
   const p = snap.player;
   const o = snap.opponent;
-  stage.theta = Math.atan2(o.y - p.y, o.x - p.x);
+  // the stage line runs from the fighter the camera is behind (a) to the other one (b)
+  const a = app.viewSlot === 1 ? o : p;
+  const b = app.viewSlot === 1 ? p : o;
+  stage.theta = Math.atan2(b.y - a.y, b.x - a.x);
   stage.cx = (p.x + o.x) / 2;
   stage.cz = -(p.y + o.y) / 2;
   const half = Math.hypot(o.x - p.x, o.y - p.y) / 2;
-  p.position = -half; // along the fight line (camera, effects)
-  o.position = half;
+  a.position = -half; // along the fight line (camera, effects)
+  b.position = half;
   // the current punch's line, in the puncher's own frame: along = forward, side = to its right
   for (const f of [p, o]) {
     const rx = f.aimX - f.x;
@@ -426,15 +642,16 @@ function placeFighters(snap) {
   const { player, opponent } = app.holders;
   player.face.position.copy(stagePoint(snap.player.position));
   opponent.face.position.copy(stagePoint(snap.opponent.position));
-  player.face.rotation.y = stage.theta;
-  opponent.face.rotation.y = stage.theta + Math.PI;
+  player.face.rotation.y = stage.theta + (app.viewSlot === 1 ? Math.PI : 0);
+  opponent.face.rotation.y = stage.theta + (app.viewSlot === 1 ? 0 : Math.PI);
 }
 
 // ---------------------------------------------------------------- camera
 function updateCamera(dt, snap) {
   const m = snap.match;
-  const px = snap.player.position;
-  const ox = snap.opponent.position;
+  const mine = app.viewSlot === 1 ? snap.opponent : snap.player;
+  const px = mine.position;
+  const ox = (app.viewSlot === 1 ? snap.player : snap.opponent).position;
   let pos;
   let look;
   if (app.intro > 0 && (m.phaseName === 'WaitingForPlayer' || m.phaseName === 'Countdown')) {
@@ -445,13 +662,13 @@ function updateCamera(dt, snap) {
     look = new THREE.Vector3(0, 1.25, 0);
   } else if (m.phaseName === 'MatchOver') {
     const t = performance.now() / 1000;
-    const w = stagePoint(m.hasWinner ? (m.winner === 0 ? px : ox) : (px + ox) / 2);
+    const w = stagePoint(m.hasWinner ? (m.winner === app.viewSlot ? px : ox) : (px + ox) / 2);
     pos = new THREE.Vector3(w.x + Math.cos(t * 0.25) * 3.4, 1.8, w.z + Math.sin(t * 0.25) * 3.4);
     look = new THREE.Vector3(w.x, 1.3, w.z);
   } else {
     // three-quarter broadcast view from behind the player's right side: both robots in full, feet included
-    const downP = snap.player.stateName === 'KnockedDown' || snap.player.stateName === 'KnockedOut';
-    const sway = 0.18 * Math.max(-1, Math.min(1, -snap.player.dodge || 0));
+    const downP = mine.stateName === 'KnockedDown' || mine.stateName === 'KnockedOut';
+    const sway = 0.18 * Math.max(-1, Math.min(1, -mine.dodge || 0));
     const n = stageSide();
     const mid = (px + ox) / 2;
     pos = downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.9, 1.8).addScaledVector(n, 3.25 - sway);
@@ -477,8 +694,9 @@ function currentInput() {
 function step(dt, input, now) {
   if (app.state === 'paused') return; // frozen frame behind the pause panel
   if (app.state !== 'menu') {
-    app.core.frame(dt, input);
+    if (app.versus) netStep(dt); else app.core.frame(dt, input);
     const snap = app.core.snapshot();
+    if (app.versus) versusUi(snap);
     const ev = app.core.drainEvents();
     for (const e of ev.combat) onCombat(e, snap);
     for (const e of ev.match) onMatch(e, snap);
@@ -553,7 +771,7 @@ app.debugAdvance = (seconds, inputFn = () => ({ status: 7, lean: 0, block: 0, pu
     steps: [app.anim.player.steps, app.anim.opponent.steps] };
 };
 
-const IDLE = { stateName: 'Guard', stageName: 'None', blocking: 0, dodge: 0, lean: 0, gassedTicksLeft: 0, stamina: 100, maxStamina: 100, hand: 0,
+const IDLE = { kind: 0, legSlow: 0, stateName: 'Guard', stageName: 'None', blocking: 0, dodge: 0, lean: 0, gassedTicksLeft: 0, stamina: 100, maxStamina: 100, hand: 0,
   stageAlpha: 0, headOffset: 0, zone: 0, speedForward: 0, speedSide: 0 };
 
 // ---------------------------------------------------------------- menu wiring
@@ -578,6 +796,7 @@ function wireMenu() {
   if (phoneBtn) phoneBtn.hidden = location.hostname !== '127.0.0.1';
   if (settings.control === 'phone' && (!phoneBtn || phoneBtn.hidden)) settings.control = 'keys';
   pick('control', 'control');
+  pick('tracking', 'tracking');
   $('#start').addEventListener('click', async () => {
     if ($('#start').disabled) return;
     app.sound.start();
@@ -603,9 +822,15 @@ function wireMenu() {
     startBout();
   });
   $('#resume').addEventListener('click', resumeBout);
-  $('#restart').addEventListener('click', startBout);
+  $('#restart').addEventListener('click', () => startBout());
   $('#to-menu').addEventListener('click', toMenu);
-  $('#rematch').addEventListener('click', startBout);
+  $('#rematch').addEventListener('click', () => startBout());
+  $('#to-online').addEventListener('click', openLobby);
+  $('#on-back').addEventListener('click', closeLobby);
+  $('#on-create').addEventListener('click', createRoom);
+  $('#on-join').addEventListener('click', () => joinRoom($('#on-input').value));
+  $('#on-input').addEventListener('keydown', (e) => { if (e.code === 'Enter') { e.preventDefault(); e.stopPropagation(); joinRoom($('#on-input').value); } });
+  $('#on-input').addEventListener('input', () => { $('#on-input').value = NET_NORMALIZE_CODE($('#on-input').value); });
   $('#res-menu').addEventListener('click', toMenu);
   $('#sound').addEventListener('click', () => {
     app.sound.setEnabled(!app.sound.enabled);
@@ -622,6 +847,7 @@ function wireMenu() {
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
       if (visible('#menu') && !$('#start').disabled) { e.preventDefault(); $('#start').click(); }
       else if (app.state === 'results' && visible('#results')) { e.preventDefault(); startBout(); }
+      else if (visible('#online')) { e.preventDefault(); }
     } else if (e.code === 'Escape' && app.state === 'results' && visible('#results')) {
       e.preventDefault();
       toMenu();
@@ -664,6 +890,11 @@ async function offerCameraDownload() {
 
 wireMenu();
 offerCameraDownload();
+// a link with ?room=CODE opens the lobby and joins that room
+{
+  const room = new URLSearchParams(location.search).get('room');
+  if (room) { openLobby(); joinRoom(room); }
+}
 ensureWorld().catch((err) => {
   console.error(err);
   const note = $('#menu-load');

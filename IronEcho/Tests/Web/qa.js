@@ -169,7 +169,7 @@ async function camera(browser) {
     cam.active = false; // the synthetic body replaces the video from here, through the same processor and UI
     const frames = await (await fetch('/__synthetic.json')).json();
     cam.proc = new cam.proc.constructor((a, b, c) => cam._say(a, b, c));
-    const msgs = []; let k = 0; let calibrated = false; let fought = false; let peakLean = 0; let stepIn = 0;
+    const msgs = []; let k = 0; let calibrated = false; let fought = false; let peakLean = 0; let stepIn = 0; let peakBlock = 0;
     const feed = () => { const f = frames[Math.min(k, frames.length - 1)]; k++;
       cam.proc.process(f.w ? f.w.map(([x, y, z, visibility]) => ({ x, y, z, visibility })) : null, f.t); return cam.poll(); };
     while (k < frames.length) {
@@ -179,14 +179,18 @@ async function camera(browser) {
       calibrated = calibrated || !!cam.proc.cal;
       fought = fought || app.core.snapshot().match.phaseName === 'Fighting';
       peakLean = Math.max(peakLean, cam.proc.leanForward);
+      if (cam.proc.cal) peakBlock = Math.max(peakBlock, cam.proc.blockPersonal);
       if (cam.proc.leanForward > 0.55) stepIn = Math.max(stepIn, app.core.snapshot().player.speedForward);
     }
     const s = app.core.snapshot();
-    return { msgs, calibrated, fought, detected: cam.proc.punches.length, thrown: s.player.thrown, landed: s.player.landed, peakLean, stepIn };
+    return { msgs, calibrated, fought, detected: cam.proc.punches.length, thrown: s.player.thrown, landed: s.player.landed, peakLean, stepIn, peakBlock,
+      kicksDetected: cam.proc.kicks.map((x) => x[1] + x[2]).join(','), kicksThrown: s.player.kicksThrown, personal: !!(cam.proc.cal && cam.proc.cal.blockPose) };
   });
   check('camera: calibration completes with on-screen steps', r.calibrated && r.msgs.length >= 3, r.msgs.join(' → '));
   check('camera: the bout starts after calibration', r.fought);
   check('camera: body punches reach the opponent', r.thrown >= 20 && r.landed > 0, `detected ${r.detected}, thrown ${r.thrown}, landed ${r.landed}`);
+  check('camera: the personal block pose is calibrated and read back', r.personal && r.peakBlock > 0.85, `peak ${r.peakBlock.toFixed(2)}`);
+  check('camera: four leg kicks are detected (mid and low, both legs) and thrown', r.kicksDetected === '0mid,1mid,0low,1low' && r.kicksThrown >= 4, `${r.kicksDetected}; thrown ${r.kicksThrown}`);
   check('camera: leaning toward the screen steps the robot in', r.peakLean >= 0.55 && r.stepIn > 0.3, `lean ${r.peakLean.toFixed(2)}, speed ${r.stepIn.toFixed(2)} m/s`);
   check('camera: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
   await page.close();

@@ -132,6 +132,7 @@ def build_release(project: Path, here: Path, out_root: Path) -> Path:
     (out / "index.html").write_text(landing.replace(local_fonts, CDN_FONTS), encoding="utf-8")
     (out / "play").mkdir()
     shutil.copy2(game, out / "play" / "index.html")
+    shutil.copy2(public / "play" / "vendor" / "peerjs" / "peerjs.min.js", out / "play" / "peerjs.min.js")  # online duel
     shutil.copytree(public / "media", out / "media")
     shutil.copytree(public / "download", out / "download")
     (out / "vercel.json").write_text(json.dumps(VERCEL_JSON, indent=2) + "\n", encoding="utf-8")

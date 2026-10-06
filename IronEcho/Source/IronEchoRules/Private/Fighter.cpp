@@ -48,6 +48,7 @@ namespace IronEchoCore
 		Snap.Health = Config.MaxHealth;
 		Snap.MaxStamina = Config.MaxStamina;
 		Snap.Stamina = Config.MaxStamina;
+		Snap.LegSlowTicksLeft = 0;
 		Snap.Location = Location;
 		Snap.Facing = Vec2{Location.X > 0.0f ? -1.0f : 1.0f, 0.0f};
 		LastOutcome = AttackOutcome::Pending;
@@ -74,6 +75,7 @@ namespace IronEchoCore
 		Snap.bDodgeEffective = false;
 		Snap.LeanLateral = 0.0f;
 		Snap.HeadOffset = 0.0f;
+		Snap.LegSlowTicksLeft = 0;
 		Snap.Location = Location;
 		Snap.Facing = Vec2{Location.X > 0.0f ? -1.0f : 1.0f, 0.0f};
 		Snap.Velocity = Vec2{};
@@ -154,6 +156,7 @@ namespace IronEchoCore
 		Event.bTired = Snap.bAttackTired;
 		Event.Dodge = Snap.Dodge;
 		Event.Zone = Snap.AttackZone;
+		Event.Kind = Snap.AttackType;
 		Event.Tick = Tick;
 		return Event;
 	}
@@ -179,6 +182,10 @@ namespace IronEchoCore
 	{
 		CurrentTick = Tick;
 		Snap.GassedTicksLeft = GassedUntilTick > Tick ? GassedUntilTick - Tick : 0;
+		if (Snap.LegSlowTicksLeft > 0)
+		{
+			--Snap.LegSlowTicksLeft;
+		}
 		if (Snap.State == ActionState::KnockedOut || Snap.State == ActionState::KnockedDown)
 		{
 			return;
@@ -226,7 +233,7 @@ namespace IronEchoCore
 			int32_t Recovery = Spec.RecoveryTicks;
 			if (LastOutcome == AttackOutcome::Dodged || LastOutcome == AttackOutcome::Whiffed)
 			{
-				Recovery += Config.WhiffPenaltyTicks;
+				Recovery += Snap.AttackType == AttackKind::Kick ? Config.KickWhiffPenaltyTicks : Config.WhiffPenaltyTicks;
 			}
 			Snap.Stage = AttackStage::Recovery;
 			Snap.StageTicksTotal = Recovery;
@@ -262,7 +269,7 @@ namespace IronEchoCore
 		}
 	}
 
-	bool Fighter::CanStartAttack(Hand InHand) const
+	bool Fighter::CanStartAttack(Hand InHand, AttackKind Kind) const
 	{
 		if (CurrentTick < AttackLockedUntilTick || CurrentTick < GassedUntilTick)
 		{
@@ -274,8 +281,10 @@ namespace IronEchoCore
 		case ActionState::Block:
 			return true;
 		case ActionState::Attack:
-			// Combo cancel: the other hand may interrupt this hand's recovery.
-			return Snap.Stage == AttackStage::Recovery && Snap.AttackHand != InHand;
+			// Combo cancel: another move may interrupt a punch's recovery (the other hand, or a kick). A kick's recovery
+			// cannot be cancelled: the fighter is standing on one leg.
+			return Snap.Stage == AttackStage::Recovery && Snap.AttackType == AttackKind::Punch
+				&& (Snap.AttackHand != InHand || Kind == AttackKind::Kick);
 		case ActionState::HitStun:
 		case ActionState::BlockStun:
 		case ActionState::KnockedOut:
@@ -285,7 +294,7 @@ namespace IronEchoCore
 		return false;
 	}
 
-	void Fighter::StartAttack(Hand InHand, PunchZone Zone, int32_t Tick, CombatEventBuffer& Events)
+	void Fighter::StartAttack(Hand InHand, PunchZone Zone, AttackKind Kind, int32_t Tick, CombatEventBuffer& Events)
 	{
 		if (Snap.State == ActionState::Attack)
 		{
@@ -297,12 +306,13 @@ namespace IronEchoCore
 			Events.Push(MakeEvent(CombatEventType::BlockEnded, Tick));
 		}
 
-		const AttackSpec Spec = SpecFor(InHand, Zone);
+		const AttackSpec Spec = SpecFor(InHand, Zone, Kind);
 		const bool bTired = Snap.Stamina < Spec.StaminaCost;
 		Snap.State = ActionState::Attack;
 		Snap.Stage = AttackStage::Windup;
 		Snap.AttackHand = InHand;
-		Snap.AttackZone = Zone;
+		Snap.AttackZone = (Kind == AttackKind::Punch && Zone == PunchZone::Leg) ? PunchZone::Body : Zone;
+		Snap.AttackType = Kind;
 		Snap.AttackId = NextAttackId++;
 		Snap.bAttackResolved = false;
 		Snap.bAttackTired = bTired;
@@ -315,6 +325,10 @@ namespace IronEchoCore
 		Snap.StageTicksLeft = Windup;
 		LastOutcome = AttackOutcome::Pending;
 		++Snap.PunchesThrown;
+		if (Kind == AttackKind::Kick)
+		{
+			++Snap.KicksThrown;
+		}
 		SpendStamina(Spec.StaminaCost, Tick, Events);
 		Events.Push(MakeEvent(CombatEventType::AttackStarted, Tick));
 	}
@@ -391,9 +405,9 @@ namespace IronEchoCore
 		for (int32_t Index = 0; Index < Intent.PunchCount; ++Index)
 		{
 			const PunchRequest& Request = Intent.Punches[Index];
-			if (!bStarted && CanStartAttack(Request.PunchHand))
+			if (!bStarted && CanStartAttack(Request.PunchHand, Request.Kind))
 			{
-				StartAttack(Request.PunchHand, Request.Zone, Tick, Events);
+				StartAttack(Request.PunchHand, Request.Zone, Request.Kind, Tick, Events);
 				bStarted = true;
 				if (bHasBuffered && Buffered.PunchHand == Request.PunchHand)
 				{
@@ -423,10 +437,10 @@ namespace IronEchoCore
 				Events.Push(Dropped);
 				bHasBuffered = false;
 			}
-			else if (CanStartAttack(Buffered.PunchHand))
+			else if (CanStartAttack(Buffered.PunchHand, Buffered.Kind))
 			{
 				bHasBuffered = false;
-				StartAttack(Buffered.PunchHand, Buffered.Zone, Tick, Events);
+				StartAttack(Buffered.PunchHand, Buffered.Zone, Buffered.Kind, Tick, Events);
 				bStarted = true;
 			}
 		}
@@ -451,10 +465,24 @@ namespace IronEchoCore
 		return Snap.Stage == AttackStage::Active && Snap.StageTicksLeft <= 1;
 	}
 
-	AttackSpec Fighter::SpecFor(Hand InHand, PunchZone Zone) const
+	AttackSpec Fighter::SpecFor(Hand InHand, PunchZone Zone, AttackKind Kind) const
 	{
+		if (Kind == AttackKind::Kick)
+		{
+			AttackSpec Spec = Config.Kicks[HandIndex(InHand)];
+			if (Zone == PunchZone::Leg)
+			{
+				Spec.ReachMeters += Config.LegKickReachDelta;
+				Spec.Damage *= Config.LegKickDamageFactor;
+			}
+			else
+			{
+				Spec.Damage *= Config.KickMidDamageFactor; // mid kick (Body); a head kick is not in the game
+			}
+			return Spec;
+		}
 		AttackSpec Spec = Config.Attacks[HandIndex(InHand)];
-		if (Zone == PunchZone::Body)
+		if (Zone == PunchZone::Body || Zone == PunchZone::Leg)
 		{
 			Spec.ReachMeters += Config.BodyReachDelta;
 			Spec.Damage *= Config.BodyDamageFactor;
@@ -465,7 +493,7 @@ namespace IronEchoCore
 
 	AttackSpec Fighter::CurrentAttackSpec() const
 	{
-		return SpecFor(Snap.AttackHand, Snap.AttackZone);
+		return SpecFor(Snap.AttackHand, Snap.AttackZone, Snap.AttackType);
 	}
 
 	float Fighter::CurrentAttackDamage(bool bCounter) const
@@ -502,9 +530,13 @@ namespace IronEchoCore
 		{
 			++Snap.PunchesLanded;
 			++Snap.RoundPunchesLanded;
-			if (Snap.AttackZone == PunchZone::Body)
+			if (Snap.AttackZone == PunchZone::Body && Snap.AttackType == AttackKind::Punch)
 			{
 				++Snap.BodyPunchesLanded;
+			}
+			if (Snap.AttackType == AttackKind::Kick)
+			{
+				++Snap.KicksLanded;
 			}
 			if (bCounter)
 			{

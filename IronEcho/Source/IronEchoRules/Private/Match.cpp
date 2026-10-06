@@ -70,6 +70,10 @@ namespace IronEchoCore
 	{
 		FighterConfig PlayerCfg = Setup.PlayerFighter;
 		FighterConfig OpponentCfg = Mode == MatchMode::Training ? Setup.TrainingBag : Setup.OpponentFighter;
+		if (Mode == MatchMode::Versus)
+		{
+			OpponentCfg = Setup.PlayerFighter; // two humans fight with the same rules and the same short windups
+		}
 		if (!Setup.Rules.bKnockdowns)
 		{
 			PlayerCfg.bKnockdowns = false;
@@ -158,11 +162,12 @@ namespace IronEchoCore
 		SetupData.Mode = Mode;
 		SetupData.Seed = Seed;
 		SimData = MakeSim(SetupData, Mode);
+		SimData.SetAssistBoth(Mode == MatchMode::Versus);
 		SimData.ResetForMatch();
 		Bot.Reset(Seed);
 		Snap = MatchSnapshot{};
 		Snap.Mode = Mode;
-		Snap.Rounds = Mode == MatchMode::Bout ? SetupData.Rules.Rounds : 0;
+		Snap.Rounds = Mode != MatchMode::Training ? SetupData.Rules.Rounds : 0;
 		Snap.Seed = Seed;
 		CountdownTarget = MatchPhase::Fighting;
 		bRoundInProgress = false;
@@ -246,7 +251,8 @@ namespace IronEchoCore
 	void Match::Tick(const MatchInput& Input, CombatEventBuffer& CombatEvents, MatchEventBuffer& MatchEvents)
 	{
 		++Snap.Tick;
-		if (Input.bInputReady)
+		const bool bReady = Input.bInputReady && (Snap.Mode != MatchMode::Versus || Input.bOpponentReady);
+		if (bReady)
 		{
 			++ReadyTicks;
 			NotReadyTicks = 0;
@@ -380,7 +386,8 @@ namespace IronEchoCore
 	void Match::StepFight(const MatchInput& Input, bool bTraining, CombatEventBuffer& CombatEvents, MatchEventBuffer& MatchEvents)
 	{
 		++Snap.SimTick;
-		const FighterIntent OpponentIntent = bTraining ? FighterIntent{} : Bot.Think(SimData, Snap.SimTick);
+		const FighterIntent OpponentIntent = Snap.Mode == MatchMode::Versus ? Input.OpponentIntent
+			: (bTraining ? FighterIntent{} : Bot.Think(SimData, Snap.SimTick));
 		const int32_t FirstEvent = CombatEvents.Num();
 		SimData.Step(Input.PlayerIntent, OpponentIntent, Snap.SimTick, CombatEvents);
 
@@ -490,12 +497,14 @@ namespace IronEchoCore
 	{
 		CountTicks = 0;
 		PlayerGuardHeldTicks = 0;
+		OpponentGuardHeldTicks = 0;
 		BotGetUpCount = -1;
 		Snap.KnockdownCount = 0;
 		Snap.GetUpProgress = 0;
+		Snap.GetUpProgressOpponent = 0;
 		Snap.PostGetUpTicksLeft = 0;
 		const Fighter& OpponentF = SimData.Get(FighterSlot::Opponent);
-		if (OpponentF.IsKnockedDown())
+		if (OpponentF.IsKnockedDown() && Snap.Mode != MatchMode::Versus)
 		{
 			BotGetUpCount = Bot.DecideGetUpCount(OpponentF.Snapshot().KnockdownsSuffered);
 		}
@@ -541,7 +550,18 @@ namespace IronEchoCore
 				PlayerF.GetUp(Snap.SimTick, CombatEvents);
 			}
 		}
-		if (OpponentF.IsKnockedDown() && bCountAllowsGetUp && BotGetUpCount > 0 && Snap.KnockdownCount >= BotGetUpCount)
+		if (Snap.Mode == MatchMode::Versus && OpponentF.IsKnockedDown())
+		{
+			// the second human beats the count the same way: guard up and hold
+			OpponentGuardHeldTicks = Input.OpponentIntent.bBlock ? OpponentGuardHeldTicks + 1 : 0;
+			const int32_t Hold = Rules.GetUpHoldTicks > 0 ? Rules.GetUpHoldTicks : 1;
+			Snap.GetUpProgressOpponent = OpponentGuardHeldTicks >= Hold ? 100 : (100 * OpponentGuardHeldTicks) / Hold;
+			if (bCountAllowsGetUp && OpponentGuardHeldTicks >= Hold)
+			{
+				OpponentF.GetUp(Snap.SimTick, CombatEvents);
+			}
+		}
+		else if (OpponentF.IsKnockedDown() && bCountAllowsGetUp && BotGetUpCount > 0 && Snap.KnockdownCount >= BotGetUpCount)
 		{
 			OpponentF.GetUp(Snap.SimTick, CombatEvents);
 		}
@@ -574,6 +594,7 @@ namespace IronEchoCore
 		{
 			SimData.ResetPositions();
 			Snap.GetUpProgress = 0;
+			Snap.GetUpProgressOpponent = 0;
 			Snap.PostGetUpTicksLeft = Rules.PostGetUpTicks > 0 ? Rules.PostGetUpTicks : 1;
 		}
 	}

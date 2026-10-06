@@ -41,7 +41,8 @@ namespace IronEchoCore
 		DodgeDir Dodge = DodgeDir::None;
 		bool bCounterHit = false;
 		bool bTired = false;
-		PunchZone Zone = PunchZone::Head; // punch events: where it was aimed (1.2)
+		PunchZone Zone = PunchZone::Head; // attack events: where it was aimed (1.2)
+		AttackKind Kind = AttackKind::Punch; // attack events: hand or leg (1.4)
 		bool bGlancing = false;           // contact events: the glove only grazed the target (1.2)
 		bool bSmothered = false;          // contact events: too close, arm not extended (1.2)
 		float Power = 1.0f;               // contact events: fraction of the punch's full damage that landed (1.2)

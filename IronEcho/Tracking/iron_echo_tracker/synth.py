@@ -39,7 +39,7 @@ def _smooth(x: float) -> float:
 class Segment:
     start: float
     end: float
-    kind: str  # punch | block | slip | raise | down | hide | lean_fwd
+    kind: str  # punch | block | slip | raise | down | hide | lean_fwd | kick
     side: int = 0  # arm side or slip direction (-1 left / +1 right stored in amount sign)
     amount: float = 0.0
 
@@ -95,6 +95,12 @@ class Script:
         self._extend(start + seconds)
         return self
 
+    def kick(self, start: float, side: int, peak: float = 0.55, up: float = 0.16, hold: float = 0.08, down: float = 0.26) -> "Script":
+        """A leg kick: the ankle of `side` (0 left, 1 right) rises by `peak` metres and comes back."""
+        self.segments.append(Segment(start, start + up + hold + down, "kick", side, amount=peak))
+        self._extend(start + up + hold + down)
+        return self
+
     def lean_forward(self, start: float, seconds: float, metres: float) -> "Script":
         self.segments.append(Segment(start, start + seconds, "lean_fwd", amount=metres))
         self._extend(start + seconds)
@@ -113,6 +119,20 @@ def _punch_extension(seg: Segment, t: float) -> float:
     if local < total - retract:
         return 1.0
     return _smooth((total - local) / retract)
+
+
+def _punch_extension_kick(seg: "Segment", t: float) -> float:
+    up = 0.16
+    total = seg.end - seg.start
+    local = t - seg.start
+    if local < 0 or local > total:
+        return 0.0
+    down = 0.26
+    if local < up:
+        return _smooth(local / up)
+    if local < total - down:
+        return 1.0
+    return _smooth((total - local) / down)
 
 
 def _two_bone_elbow(shoulder: np.ndarray, wrist: np.ndarray, pole: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -148,6 +168,7 @@ class SynthBody:
         lean_fwd = 0.008 * math.sin(2 * math.pi * 0.21 * t + 1.0)
         arm_pose = [dict(guard=1.0), dict(guard=1.0)]
         punch_ext = [0.0, 0.0]
+        leg_lift = [0.0, 0.0]
         for seg in script.segments:
             if seg.kind == "slip":
                 lean_lat += seg.amount * seg.weight(t)
@@ -155,6 +176,8 @@ class SynthBody:
                 lean_fwd += seg.amount * seg.weight(t)
             elif seg.kind == "punch":
                 punch_ext[seg.side] = max(punch_ext[seg.side], _punch_extension(seg, t))
+            elif seg.kind == "kick":
+                leg_lift[seg.side] = max(leg_lift[seg.side], seg.amount * _punch_extension_kick(seg, t))
             elif seg.kind == "block":
                 w = seg.weight(t)
                 for side in (0, 1):
@@ -165,7 +188,7 @@ class SynthBody:
                 w = seg.weight(t, 0.2)
                 for side in (0, 1):
                     arm_pose[side]["down"] = max(arm_pose[side].get("down", 0.0), w)
-        points = self._skeleton(lean_lat, lean_fwd, arm_pose, punch_ext, t)
+        points = self._skeleton(lean_lat, lean_fwd, arm_pose, punch_ext, t, leg_lift)
         world = np.empty_like(points)  # body frame -> MediaPipe world
         world[:, 0] = -points[:, 1]
         world[:, 1] = -points[:, 2]
@@ -178,7 +201,7 @@ class SynthBody:
             world, vis = B.mirror_raw(world, vis)
         return PoseSample(t=t, world=world, visibility=vis)
 
-    def _skeleton(self, lean_lat: float, lean_fwd: float, arm_pose, punch_ext, t: float) -> np.ndarray:
+    def _skeleton(self, lean_lat: float, lean_fwd: float, arm_pose, punch_ext, t: float, leg_lift=(0.0, 0.0)) -> np.ndarray:
         s = self.scale
         p = np.zeros((B.NUM_LANDMARKS, 3))
 
@@ -196,6 +219,17 @@ class SynthBody:
         put(30, -0.05, 0.13, -0.92)
         put(31, 0.12, -0.14, -0.93)
         put(32, 0.12, 0.14, -0.93)
+        for side in (0, 1):  # a kick lifts the ankle, the knee comes up and forward, the foot goes forward
+            lift = leg_lift[side]
+            if lift > 0:
+                for knee, ankle, heel, toe in ((25, 27, 29, 31), (26, 28, 30, 32)):
+                    if (knee == 25) != (side == 0):
+                        continue
+                    p[knee][2] += 0.55 * lift * s
+                    p[knee][0] += 0.45 * lift * s
+                    for index in (ankle, heel, toe):
+                        p[index][2] += lift * s
+                        p[index][0] += 0.55 * lift * s
         # Upper body before lean.
         put(B.LEFT_SHOULDER, 0.0, -0.19, SHOULDER_Z)
         put(B.RIGHT_SHOULDER, 0.0, 0.19, SHOULDER_Z)

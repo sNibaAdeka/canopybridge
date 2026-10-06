@@ -7,16 +7,18 @@ const PUNCH_LEFT = 1;  // jab (lead, left hand)
 const PUNCH_RIGHT = 2; // cross (rear, right hand)
 const BODY_LEFT = 4;   // jab to the body
 const BODY_RIGHT = 8;  // cross to the body
+// kick mask: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick
 
 export const KEY_HELP = [
   ['W / S', 'шаг вперёд / назад'], ['A / D', 'кружить влево / вправо'], ['J / K', 'джеб / кросс в голову'],
-  ['Shift+J / K', 'в корпус (или N / M)'], ['Q / E', 'уклон'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
+  ['Shift+J / K', 'в корпус (или N / M)'], ['U / I', 'удар ногой (Shift — по ногам)'], ['Q / E', 'уклон'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
 ];
 const MOVE_KEYS = { KeyW: 'fwd', ArrowUp: 'fwd', KeyS: 'back', KeyA: 'left', KeyD: 'right' };
 
 export class ManualInput {
   constructor(root) {
     this.mask = 0;
+    this.kickMask = 0;
     this.blockKeys = new Set();
     this.leftHeld = false;
     this.rightHeld = false;
@@ -26,12 +28,15 @@ export class ManualInput {
     this.touchRight = false;
     this.onPause = null;
     this.enabled = true;
+    const typing = (e) => e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
     const down = (e) => {
-      if (!this.enabled || e.repeat) return;
+      if (!this.enabled || e.repeat || typing(e)) return;
       const k = e.code;
       const body = e.shiftKey;
       if (k === 'KeyJ' || k === 'KeyF') { this.mask |= body ? BODY_LEFT : PUNCH_LEFT; e.preventDefault(); }
       else if (k === 'KeyK' || k === 'KeyG') { this.mask |= body ? BODY_RIGHT : PUNCH_RIGHT; e.preventDefault(); }
+      else if (k === 'KeyU') { this.kickMask |= body ? 4 : 1; e.preventDefault(); }
+      else if (k === 'KeyI') { this.kickMask |= body ? 8 : 2; e.preventDefault(); }
       else if (k === 'KeyN') { this.mask |= BODY_LEFT; e.preventDefault(); }
       else if (k === 'KeyM') { this.mask |= BODY_RIGHT; e.preventDefault(); }
       else if (k === 'Space' || k === 'KeyL' || k === 'ArrowDown') { this.blockKeys.add(k); e.preventDefault(); }
@@ -63,6 +68,8 @@ export class ManualInput {
     const set = (act, on) => {
       if (act === 'jab' && on) this.mask |= PUNCH_LEFT;
       if (act === 'cross' && on) this.mask |= PUNCH_RIGHT;
+      if (act === 'kick' && on) this.kickMask |= 2;
+      if (act === 'low' && on) this.kickMask |= 8;
       if (act === 'block') this.touchBlock = on;
       if (act === 'left') this.touchLeft = on;
       if (act === 'right') this.touchRight = on;
@@ -79,7 +86,9 @@ export class ManualInput {
   // One frame of input for core.frame().
   poll() {
     const mask = this.enabled ? this.mask : 0;
+    const kickMask = this.enabled ? this.kickMask : 0;
     this.mask = 0;
+    this.kickMask = 0;
     const left = this.leftHeld || this.touchLeft;
     const right = this.rightHeld || this.touchRight;
     const block = this.enabled && (this.blockKeys.size > 0 || this.touchBlock);
@@ -89,6 +98,7 @@ export class ManualInput {
       lean: left && !right ? -1 : right && !left ? 1 : 0, // + = player's right (InputFrame.LeanLateral)
       block: block ? 1 : 0,
       punchMask: mask,
+      kickMask,
       confidence: 1,
       moveForward: (m.has('fwd') ? 1 : 0) - (m.has('back') ? 1 : 0),
       moveSide: (m.has('right') ? 1 : 0) - (m.has('left') ? 1 : 0), // + = circle to the player's right

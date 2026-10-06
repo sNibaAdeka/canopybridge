@@ -36,6 +36,10 @@ private:
 	int32 PendingRight = 0;
 	int32 PendingBodyLeft = 0;
 	int32 PendingBodyRight = 0;
+	int32 PendingKickLeft = 0;
+	int32 PendingKickRight = 0;
+	int32 PendingKickLowLeft = 0;
+	int32 PendingKickLowRight = 0;
 	float KeyboardLean = 0.0f;
 	float KeyboardMoveForward = 0.0f;
 	float KeyboardMoveLateral = 0.0f;

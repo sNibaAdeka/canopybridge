@@ -32,6 +32,7 @@ namespace IronEchoCore
 		float Strength = 0.0f;     // 0..1 (v1: cosmetic only)
 		float Confidence = 0.0f;   // 0..1
 		PunchZone Zone = PunchZone::Head; // 1.2; the v1 wire protocol carries head punches only
+		AttackKind Kind = AttackKind::Punch; // 1.4; kicks come from the keyboard and the web camera
 		float AgeSeconds = 0.0f;   // time since the source frame was captured
 		uint32_t SourceEventId = 0;
 	};
@@ -71,6 +72,7 @@ namespace IronEchoCore
 		Hand PunchHand = Hand::Left;
 		float Strength = 1.0f;
 		PunchZone Zone = PunchZone::Head;
+		AttackKind Kind = AttackKind::Punch;
 	};
 
 	// What a fighter wants to do this tick. Produced by IntentMapper (player) or BotBrain (opponent).
@@ -84,7 +86,7 @@ namespace IronEchoCore
 		int32_t PunchCount = 0;
 		PunchRequest Punches[kMaxPunchesPerFrame];
 
-		bool AddPunch(Hand InHand, float Strength = 1.0f, PunchZone Zone = PunchZone::Head)
+		bool AddPunch(Hand InHand, float Strength = 1.0f, PunchZone Zone = PunchZone::Head, AttackKind Kind = AttackKind::Punch)
 		{
 			if (PunchCount >= kMaxPunchesPerFrame)
 			{
@@ -92,7 +94,8 @@ namespace IronEchoCore
 			}
 			Punches[PunchCount].PunchHand = InHand;
 			Punches[PunchCount].Strength = Strength;
-			Punches[PunchCount].Zone = Zone;
+			Punches[PunchCount].Zone = (Kind == AttackKind::Punch && Zone == PunchZone::Leg) ? PunchZone::Body : Zone; // no low punches
+			Punches[PunchCount].Kind = Kind;
 			++PunchCount;
 			return true;
 		}

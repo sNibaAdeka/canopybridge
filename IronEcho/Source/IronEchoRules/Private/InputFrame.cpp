@@ -60,7 +60,7 @@ namespace IronEchoCore
 			const PunchIntent& Punch = Frame.Punches[Index];
 			if (Punch.Confidence >= Config.MinPunchConfidence)
 			{
-				Intent.AddPunch(Punch.PunchHand, Punch.Strength, Punch.Zone);
+				Intent.AddPunch(Punch.PunchHand, Punch.Strength, Punch.Zone, Punch.Kind);
 			}
 		}
 

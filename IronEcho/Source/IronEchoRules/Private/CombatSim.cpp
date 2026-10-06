@@ -71,9 +71,9 @@ namespace IronEchoCore
 	Vec2 CombatSim::TargetPoint(FighterSlot Slot, PunchZone Zone) const
 	{
 		const FighterSnapshot& S = Get(Slot).Snapshot();
-		if (Zone == PunchZone::Body)
+		if (Zone != PunchZone::Head)
 		{
-			return S.Location;
+			return S.Location; // body and legs: the middle of the disc, not moved by a slip
 		}
 		return S.Location + FacingOf(Slot).RightOf() * S.HeadOffset;
 	}
@@ -204,7 +204,7 @@ namespace IronEchoCore
 		Result.bGlancing = !G.bClean;
 		Result.bSmothered = G.Power < 0.85f;
 		Result.Power = G.Power * (Result.bGlancing ? Attacker.GetConfig().GlancingDamageFactor : 1.0f);
-		if (Defender.IsBlocking())
+		if (Defender.IsBlocking() && A.AttackZone != PunchZone::Leg) // hands do not cover the legs
 		{
 			const float Drain = Defender.BlockDrain(Attacker.CurrentAttackDamage(false), Spec.Damage, A.AttackZone);
 			Result.Outcome = Defender.CanAffordBlock(Drain) ? AttackOutcome::Blocked : AttackOutcome::GuardBroken;
@@ -232,6 +232,7 @@ namespace IronEchoCore
 		Event.AttackId = A.AttackId;
 		Event.bTired = A.bAttackTired;
 		Event.Zone = A.AttackZone;
+		Event.Kind = A.AttackType;
 		Event.Tick = Tick;
 
 		float Applied = 0.0f;
@@ -252,7 +253,13 @@ namespace IronEchoCore
 			Applied = Defender.ReceiveHit(Spec, Damage, Tick, Events, A.AttackId, Stun, A.bAttackTired);
 			if (A.AttackZone == PunchZone::Body)
 			{
-				Defender.TakeStaminaDamage(AC.BodyStaminaDamage * Result.Power, Tick, Events);
+				const float Wind = A.AttackType == AttackKind::Kick ? AC.KickBodyStaminaDamage : AC.BodyStaminaDamage;
+				Defender.TakeStaminaDamage(Wind * Result.Power, Tick, Events);
+			}
+			else if (A.AttackZone == PunchZone::Leg)
+			{
+				Defender.TakeStaminaDamage(AC.LegKickStaminaDamage * Result.Power, Tick, Events);
+				Defender.ApplyLegSlow(static_cast<int32_t>(static_cast<float>(AC.LegSlowTicks) * Result.Power));
 			}
 			Knockback(Defender.Snapshot().Slot, Spec.KnockbackMeters * Result.Power);
 			Event.Type = CombatEventType::HitConfirmed;
@@ -323,20 +330,24 @@ namespace IronEchoCore
 			{
 				Fwd = Clamp(Intents[Index]->MoveForward, -1.0f, 1.0f);
 				Lat = Clamp(Intents[Index]->MoveSide, -1.0f, 1.0f);
-				if (Index == 0 && MovementCfg.PlayerAutoCloseGap > 0.0f && Fwd == 0.0f && Lat == 0.0f && GapNow > MovementCfg.PlayerAutoCloseGap)
+				if ((Index == 0 || bAssistBoth) && MovementCfg.PlayerAutoCloseGap > 0.0f && Fwd == 0.0f && Lat == 0.0f && GapNow > MovementCfg.PlayerAutoCloseGap)
 				{
 					Fwd = MovementCfg.AutoCloseFactor;
 				}
 				switch (S.State)
 				{
 				case ActionState::Guard: Factor = 1.0f; break;
-				case ActionState::Attack: Factor = C.AttackMoveFactor; break;
+				case ActionState::Attack: Factor = S.AttackType == AttackKind::Kick ? C.KickMoveFactor : C.AttackMoveFactor; break;
 				case ActionState::Block: Factor = C.BlockMoveFactor; break;
 				default: Factor = 0.0f; break; // stunned: the legs belong to the punch that landed
 				}
 				if (S.GassedTicksLeft > 0)
 				{
 					Factor *= C.GassedMoveFactor;
+				}
+				if (S.LegSlowTicksLeft > 0)
+				{
+					Factor *= C.LegSlowFactor; // low kicks: the legs are gone
 				}
 			}
 			if (C.bPassive && !F.IsDown())

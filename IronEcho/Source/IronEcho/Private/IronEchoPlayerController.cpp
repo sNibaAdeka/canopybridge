@@ -44,6 +44,15 @@ void AIronEchoPlayerController::PlayerTick(float DeltaTime)
 	{
 		++PendingBodyRight;
 	}
+	// U / I: lead / rear leg kick to the body, with Shift to the legs.
+	if (WasInputKeyJustPressed(EKeys::U))
+	{
+		++(bShift ? PendingKickLowLeft : PendingKickLeft);
+	}
+	if (WasInputKeyJustPressed(EKeys::I))
+	{
+		++(bShift ? PendingKickLowRight : PendingKickRight);
+	}
 	// Q / E: slip left / right. W / S: step in / back. A / D: circle left / right.
 	const float TargetLean = (IsInputKeyDown(EKeys::Q) ? -1.0f : 0.0f) + (IsInputKeyDown(EKeys::E) ? 1.0f : 0.0f);
 	KeyboardLean = FMath::FInterpTo(KeyboardLean, TargetLean, DeltaTime, 14.0f);
@@ -137,9 +146,24 @@ IronEchoCore::InputFrame AIronEchoPlayerController::ConsumeKeyboardFrame()
 			Frame.AddPunch(Punch);
 		}
 	}
+	const int32 KickCounts[4] = {PendingKickLeft, PendingKickRight, PendingKickLowLeft, PendingKickLowRight};
+	for (int32 Kind = 0; Kind < 4; ++Kind)
+	{
+		for (int32 Index = 0; Index < KickCounts[Kind]; ++Index)
+		{
+			IronEchoCore::PunchIntent Kick;
+			Kick.PunchHand = (Kind % 2 == 0) ? IronEchoCore::Hand::Left : IronEchoCore::Hand::Right;
+			Kick.Kind = IronEchoCore::AttackKind::Kick;
+			Kick.Zone = Kind >= 2 ? IronEchoCore::PunchZone::Leg : IronEchoCore::PunchZone::Body;
+			Kick.Strength = 1.0f;
+			Kick.Confidence = 1.0f;
+			Frame.AddPunch(Kick);
+		}
+	}
 	PendingLeft = 0;
 	PendingRight = 0;
 	PendingBodyLeft = 0;
 	PendingBodyRight = 0;
+	PendingKickLeft = PendingKickRight = PendingKickLowLeft = PendingKickLowRight = 0;
 	return Frame;
 }
