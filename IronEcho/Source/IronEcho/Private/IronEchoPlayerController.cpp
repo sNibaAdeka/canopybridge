@@ -26,16 +26,29 @@ void AIronEchoPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+	// J / K: jab / cross to the head; with Shift (or N / M): to the body.
+	const bool bShift = IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
 	if (WasInputKeyJustPressed(EKeys::J))
 	{
-		++PendingLeft;
+		++(bShift ? PendingBodyLeft : PendingLeft);
 	}
 	if (WasInputKeyJustPressed(EKeys::K))
 	{
-		++PendingRight;
+		++(bShift ? PendingBodyRight : PendingRight);
 	}
-	const float TargetLean = (IsInputKeyDown(EKeys::A) ? -1.0f : 0.0f) + (IsInputKeyDown(EKeys::D) ? 1.0f : 0.0f);
+	if (WasInputKeyJustPressed(EKeys::N))
+	{
+		++PendingBodyLeft;
+	}
+	if (WasInputKeyJustPressed(EKeys::M))
+	{
+		++PendingBodyRight;
+	}
+	// Q / E: slip left / right. W / S: step in / back. A / D: circle left / right.
+	const float TargetLean = (IsInputKeyDown(EKeys::Q) ? -1.0f : 0.0f) + (IsInputKeyDown(EKeys::E) ? 1.0f : 0.0f);
 	KeyboardLean = FMath::FInterpTo(KeyboardLean, TargetLean, DeltaTime, 14.0f);
+	KeyboardMoveForward = (IsInputKeyDown(EKeys::W) ? 1.0f : 0.0f) - (IsInputKeyDown(EKeys::S) ? 1.0f : 0.0f);
+	KeyboardMoveLateral = (IsInputKeyDown(EKeys::D) ? 1.0f : 0.0f) - (IsInputKeyDown(EKeys::A) ? 1.0f : 0.0f);
 
 	AIronEchoGameMode* Mode = GetWorld() ? GetWorld()->GetAuthGameMode<AIronEchoGameMode>() : nullptr;
 	UIronEchoTrackingSubsystem* Tracking = GetGameInstance() ? GetGameInstance()->GetSubsystem<UIronEchoTrackingSubsystem>() : nullptr;
@@ -102,6 +115,8 @@ IronEchoCore::InputFrame AIronEchoPlayerController::ConsumeKeyboardFrame()
 	Frame.Status = IronEchoCore::TrackingStatus::Live;
 	Frame.Confidence = 1.0f;
 	Frame.LeanLateral = KeyboardLean;
+	Frame.MoveForward = KeyboardMoveForward;
+	Frame.MoveLateral = KeyboardMoveLateral;
 	const bool bBlock = IsInputKeyDown(EKeys::SpaceBar);
 	Frame.BlockAmount = bBlock ? 1.0f : 0.0f;
 	const float Raise = bBlock ? 0.62f : 0.25f;
@@ -109,15 +124,22 @@ IronEchoCore::InputFrame AIronEchoPlayerController::ConsumeKeyboardFrame()
 	Frame.HandPos[1] = IronEchoCore::Vec3{bBlock ? 0.32f : 0.45f, 0.15f, Raise};
 	Frame.HandConfidence[0] = 1.0f;
 	Frame.HandConfidence[1] = 1.0f;
-	for (int32 Index = 0; Index < PendingLeft + PendingRight; ++Index)
+	const int32 Counts[4] = {PendingLeft, PendingRight, PendingBodyLeft, PendingBodyRight};
+	for (int32 Kind = 0; Kind < 4; ++Kind)
 	{
-		IronEchoCore::PunchIntent Punch;
-		Punch.PunchHand = Index < PendingLeft ? IronEchoCore::Hand::Left : IronEchoCore::Hand::Right;
-		Punch.Strength = 1.0f;
-		Punch.Confidence = 1.0f;
-		Frame.AddPunch(Punch);
+		for (int32 Index = 0; Index < Counts[Kind]; ++Index)
+		{
+			IronEchoCore::PunchIntent Punch;
+			Punch.PunchHand = (Kind % 2 == 0) ? IronEchoCore::Hand::Left : IronEchoCore::Hand::Right;
+			Punch.Zone = Kind >= 2 ? IronEchoCore::PunchZone::Body : IronEchoCore::PunchZone::Head;
+			Punch.Strength = 1.0f;
+			Punch.Confidence = 1.0f;
+			Frame.AddPunch(Punch);
+		}
 	}
 	PendingLeft = 0;
 	PendingRight = 0;
+	PendingBodyLeft = 0;
+	PendingBodyRight = 0;
 	return Frame;
 }

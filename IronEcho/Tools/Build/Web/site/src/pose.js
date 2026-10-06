@@ -101,6 +101,8 @@ const STEPS = {
   slipRight: 'Уклон ВПРАВО — наклони голову вправо и задержи',
 };
 
+const BODY_PUNCH_DROP = 0.25; // wrist below the shoulder line by this many arm lengths at the punch: body shot
+
 // Pure tracker logic (no DOM, no MediaPipe): feed world landmarks, read InputFrame fields. Tested against the Python
 // tracker by Tools/Build/Web/check_pose.mjs.
 export class PoseProcessor {
@@ -160,7 +162,10 @@ export class PoseProcessor {
       const fwd = delta[0] / c.arm[side];
       const vis = Math.min(pose.vis[WRIST_I[side]], pose.vis[ELBOW_I[side]], pose.vis[SHOULDER_I[side]]);
       if (this.detectors[side].update(t, ext, fwd, vis, c.guardExt[side])) {
-        this.mask |= side === 0 ? 1 : 2;
+        // a punch that ends well below the shoulders goes to the body (web only for now: the v1 tracker protocol
+        // carries head punches; see Docs/Contracts/INPUT_CONTRACT.md 1.2)
+        const low = pose.p[WRIST_I[side]][2] - pose.shoulderMid()[2] < -BODY_PUNCH_DROP * c.arm[side];
+        this.mask |= side === 0 ? (low ? 4 : 1) : (low ? 8 : 2);
         this.punches.push([t, side]);
       }
     }
@@ -249,7 +254,7 @@ export class PoseProcessor {
       slipRight: this.slip[1],
     };
     this._resetMotion();
-    this._say('Готово! Бой начинается', 100, 'Джеб и кросс — резкий прямой удар к экрану. Блок — обе руки к лицу. Уклон — голову в сторону.');
+    this._say('Готово! Бой начинается', 100, 'Удар — резко к экрану (ниже плеч — в корпус). Блок — руки к лицу. Уклон — голову в сторону. Наклон к экрану — шаг вперёд, назад — отход.');
     setTimeout(() => this._say(''), 2600);
   }
 

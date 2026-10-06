@@ -62,11 +62,14 @@ export class Core {
     this.ex.ie_clear_events();
   }
 
-  // input: { status, lean, leanForward, block, punchMask, confidence }
+  // input: { status, lean, leanForward, block, punchMask, confidence, moveForward, moveSide }
+  // punchMask bits: 1 jab, 2 cross, 4 jab to the body, 8 cross to the body.
   frame(dt, input) {
     return this.ex.ie_frame(dt, input.status, input.confidence ?? 1, input.lean ?? 0, input.leanForward ?? 0,
-      input.block ?? 0, input.punchMask ?? 0, 1.0);
+      input.block ?? 0, input.punchMask ?? 0, 1.0, input.moveForward ?? 0, input.moveSide ?? 0);
   }
+
+  ringHalfSize() { return this.ex.ie_ring_half_size ? this.ex.ie_ring_half_size() : 2.95; }
 
   pause() { this.ex.ie_pause(); }
   resume() { this.ex.ie_resume(); }

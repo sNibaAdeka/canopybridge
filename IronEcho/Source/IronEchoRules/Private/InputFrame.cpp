@@ -60,7 +60,7 @@ namespace IronEchoCore
 			const PunchIntent& Punch = Frame.Punches[Index];
 			if (Punch.Confidence >= Config.MinPunchConfidence)
 			{
-				Intent.AddPunch(Punch.PunchHand, Punch.Strength);
+				Intent.AddPunch(Punch.PunchHand, Punch.Strength, Punch.Zone);
 			}
 		}
 
@@ -77,6 +77,20 @@ namespace IronEchoCore
 			bBlocking = false;
 		}
 		Intent.bBlock = bBlocking;
+
+		// Footwork: a direct source wins; otherwise the camera's forward lean steps in or out (hysteresis).
+		const float Fwd = Frame.LeanForward;
+		if (CurrentStep == 0)
+		{
+			CurrentStep = Fwd >= Config.StepEnter ? 1 : (Fwd <= -Config.StepEnter ? -1 : 0);
+		}
+		else if ((CurrentStep > 0 && Fwd < Config.StepExit) || (CurrentStep < 0 && Fwd > -Config.StepExit))
+		{
+			CurrentStep = 0;
+		}
+		const bool bDirect = Frame.MoveForward != 0.0f || Frame.MoveLateral != 0.0f;
+		Intent.MoveForward = bDirect ? Clamp(Frame.MoveForward, -1.0f, 1.0f) : static_cast<float>(CurrentStep);
+		Intent.MoveSide = Clamp(Frame.MoveLateral, -1.0f, 1.0f);
 		return Intent;
 	}
 
@@ -84,5 +98,6 @@ namespace IronEchoCore
 	{
 		bBlocking = false;
 		CurrentDodge = DodgeDir::None;
+		CurrentStep = 0;
 	}
 }

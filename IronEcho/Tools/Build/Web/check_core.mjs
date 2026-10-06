@@ -24,8 +24,8 @@ function run(exports, input) {
   };
   const lines = [];
   for (let f = 0; f < frames; f++) {
-    const o = 6 + f * 5;
-    exports.ie_frame(h[o], h[o + 1] | 0, 1.0, h[o + 2], 0.0, h[o + 3], h[o + 4] | 0, 1.0);
+    const o = 6 + f * 7;
+    exports.ie_frame(h[o], h[o + 1] | 0, 1.0, h[o + 2], 0.0, h[o + 3], h[o + 4] | 0, 1.0, h[o + 5], h[o + 6]);
     mix(exports.ie_state(), exports.ie_state_size());
     mix(exports.ie_combat_events(), exports.ie_combat_event_count() * exports.ie_combat_event_size());
     exports.ie_clear_events();

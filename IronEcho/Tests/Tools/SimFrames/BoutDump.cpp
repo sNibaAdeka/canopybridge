@@ -7,10 +7,10 @@ using namespace IronEchoCore;
 
 static void DumpFighter(FILE* f, const FighterSnapshot& s) {
 	std::fprintf(f, "{\"hp\":%.2f,\"maxhp\":%.1f,\"st\":%.2f,\"maxst\":%.1f,\"state\":%d,\"stage\":%d,\"hand\":%d,\"alpha\":%.3f,"
-		"\"block\":%d,\"dodge\":%d,\"lean\":%.2f,\"pos\":%.3f,\"thrown\":%d,\"landed\":%d,\"blocks\":%d,\"dodges\":%d,\"counters\":%d,"
+		"\"block\":%d,\"dodge\":%d,\"lean\":%.2f,\"pos\":%.3f,\"y\":%.3f,\"thrown\":%d,\"landed\":%d,\"blocks\":%d,\"dodges\":%d,\"counters\":%d,"
 		"\"combo\":%d,\"maxcombo\":%d,\"kd\":%d}",
 		s.Health, s.MaxHealth, s.Stamina, s.MaxStamina, int(s.State), int(s.Stage), int(s.AttackHand), s.StageAlpha(),
-		int(s.bBlocking), int(s.Dodge), s.LeanLateral, s.Position, s.PunchesThrown, s.PunchesLanded, s.BlocksMade, s.DodgesMade,
+		int(s.bBlocking), int(s.Dodge), s.LeanLateral, s.Location.X, s.Location.Y, s.PunchesThrown, s.PunchesLanded, s.BlocksMade, s.DodgesMade,
 		s.CounterHits, s.ComboCount, s.MaxCombo, s.KnockdownsSuffered);
 }
 

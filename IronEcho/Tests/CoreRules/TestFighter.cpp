@@ -30,7 +30,7 @@ namespace
 	{
 		FighterIntent Intent;
 		Intent.Dodge = Dir;
-		Intent.LeanLateral = Dir == DodgeDir::Left ? -0.8f : 0.8f;
+		Intent.LeanLateral = Dir == DodgeDir::Left ? -1.0f : 1.0f;
 		return Intent;
 	}
 
@@ -303,33 +303,6 @@ IE_TEST(Fighter_TrainingBagTakesHitsForever)
 	IE_EXPECT_NEAR(H.O().Health, H.O().MaxHealth, 1e-4);
 }
 
-IE_TEST(Movement_AutoDistanceRecoversAfterKnockback)
-{
-	Harness H;
-	const float Engage = MovementConfig().EngageDistance;
-	H.Step(PunchIntentFor(Hand::Right), Idle());
-	for (int Guard = 0; Guard < 40 && H.Count(CombatEventType::HitConfirmed, FighterSlot::Player) == 0; ++Guard)
-	{
-		H.Step(Idle(), Idle());
-	}
-	IE_EXPECT(H.Sim.Gap() > Engage + 0.10f); // cross knockback is 0.15 m
-	H.Run(kTickRate * 2);
-	IE_EXPECT_NEAR(H.Sim.Gap(), Engage, 0.03);
-	const float Limit = MovementConfig().RingHalfLength - MovementConfig().FighterRadius;
-	IE_EXPECT(H.P().Position >= -Limit && H.O().Position <= Limit);
-}
-
-IE_TEST(Movement_RetreatOpensDistanceTemporarily)
-{
-	Harness H;
-	FighterIntent Retreat;
-	Retreat.bRetreat = true;
-	H.Run(kTickRate, Idle(), Retreat);
-	IE_EXPECT(H.Sim.Gap() > MakeDefaultFighterConfig().Attacks[1].ReachMeters);
-	H.Run(kTickRate * 3);
-	IE_EXPECT_NEAR(H.Sim.Gap(), MovementConfig().EngageDistance, 0.03);
-}
-
 IE_TEST(Fighter_KnockdownAndGetUpRecovery)
 {
 	FighterConfig Glass = MakeDefaultFighterConfig();
@@ -375,6 +348,7 @@ IE_TEST(Fighter_ComboCountsConsecutiveCleanHits)
 	IE_EXPECT(Combos.size() == 2 && Combos[0] == 1 && Combos[1] == 2);
 	IE_EXPECT_EQ(H.P().MaxCombo, 2);
 	H.Run(kTickRate * 2); // outside the combo window
+	H.Sim.ResetPositions(); // the knock-backs pushed it out of reach
 	H.Step(PunchIntentFor(Hand::Left), Idle());
 	H.Run(30);
 	int32_t LastCombo = 0;

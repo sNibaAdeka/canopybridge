@@ -26,6 +26,7 @@ namespace IronEchoTest
 		float CrossShare = 0.40f;
 		float PunishChance = 0.0f;  // throws at once when the bot is recovering or stunned by a block
 		double FatiguePerRound = 0.15; // punch gaps grow by this fraction every round
+		bool bRangeDiscipline = false; // 1.2: steps in instead of throwing from out of reach
 	};
 
 	inline HumanProfile CasualHuman()
@@ -62,6 +63,7 @@ namespace IronEchoTest
 		P.CrossShare = 0.45f;
 		P.PunishChance = 0.70f;
 		P.FatiguePerRound = 0.10;
+		P.bRangeDiscipline = true;
 		return P;
 	}
 
@@ -131,6 +133,13 @@ namespace IronEchoTest
 					Intent.Dodge = DodgeSide;
 					Intent.LeanLateral = DodgeSide == DodgeDir::Left ? -0.9f : 0.9f;
 				}
+				return Intent;
+			}
+
+			// A disciplined player closes the distance first (keyboard W / leaning in) instead of punching air.
+			if (Profile.bRangeDiscipline && M.Sim().Gap() > M.Sim().Get(FighterSlot::Player).GetConfig().Attacks[1].ReachMeters - 0.03f)
+			{
+				Intent.MoveForward = 1.0f;
 				return Intent;
 			}
 

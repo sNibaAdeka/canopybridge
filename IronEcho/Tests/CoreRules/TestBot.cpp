@@ -3,6 +3,8 @@
 #include "IronEchoRules/BotBrain.h"
 #include "IronEchoRules/CombatSim.h"
 
+#include <cmath>
+#include <cstdio>
 #include <vector>
 
 using namespace IronEchoCore;
@@ -18,8 +20,9 @@ namespace
 		std::vector<CombatEvent> Log;
 		int32_t Tick = 0;
 
-		BotHarness(const FighterConfig& PlayerCfg, const FighterConfig& BotCfg, const BotConfig& Brain, uint64_t Seed = 3)
-			: Sim(PlayerCfg, BotCfg, MovementConfig())
+		BotHarness(const FighterConfig& PlayerCfg, const FighterConfig& BotCfg, const BotConfig& Brain, uint64_t Seed = 3,
+			const MovementConfig& Movement = MovementConfig())
+			: Sim(PlayerCfg, BotCfg, Movement)
 			, Bot(Brain, Seed)
 		{
 		}
@@ -84,6 +87,8 @@ namespace
 		Brain.CounterChance = 0.0f;
 		Brain.FlurryBlockBonus = 0.0f;
 		Brain.HurtBlockBonus = 0.0f;
+		Brain.CircleChance = 0.0f; // footwork is not what these tests measure
+		Brain.StepBackChance = 0.0f;
 		return Brain;
 	}
 
@@ -202,4 +207,97 @@ IE_TEST(Bot_PressesAGassedPlayer)
 	const int Gassed = BotPunches(MakeBotConfig(BotLevel::Normal).PressureStaminaThreshold * 0.5f);
 	std::printf("  info: bot punches in 30 s: fresh player=%d gassed player=%d\n", Fresh, Gassed);
 	IE_EXPECT(Gassed > Fresh);
+}
+
+// ---- footwork (1.2) ----
+
+namespace
+{
+	MovementConfig NoAssist()
+	{
+		MovementConfig M;
+		M.PlayerAutoCloseGap = 0.0f; // only the bot walks in these tests
+		return M;
+	}
+
+	FighterIntent Walk(float Forward, float Side = 0.0f)
+	{
+		FighterIntent Intent;
+		Intent.MoveForward = Forward;
+		Intent.MoveSide = Side;
+		return Intent;
+	}
+}
+
+IE_TEST(Bot_WalksBackIntoItsWorkingDistance)
+{
+	BotHarness H(MakeDefaultFighterConfig(), MakeBotFighterConfig(BotLevel::Normal), QuietBot(BotLevel::Normal), 3, NoAssist());
+	H.Run(SecondsToTicks(0.8), Walk(-1.0f)); // the player backs off; the bot follows
+	IE_EXPECT(H.Sim.Get(FighterSlot::Player).Snapshot().Location.X < -1.3f);
+	H.Run(SecondsToTicks(3.0));
+	const float Work = MovementConfig().EngageDistance;
+	IE_EXPECT(H.Sim.Gap() <= Work + MakeBotConfig(BotLevel::Normal).RangeSlack + 0.03f);
+	IE_EXPECT(H.Sim.Gap() >= MovementConfig().MinDistance);
+}
+
+IE_TEST(Bot_StepsInToLandAPlannedPunch)
+{
+	BotConfig Brain = MakeBotConfig(BotLevel::Normal);
+	Brain.ReactionTicks = 1000000;
+	Brain.CircleChance = 0.0f;
+	BotHarness H(MakeDefaultFighterConfig(), MakeBotFighterConfig(BotLevel::Normal), Brain, 5, NoAssist());
+	H.Run(SecondsToTicks(0.5), Walk(-1.0f));
+	// The player keeps drifting away slowly: the bot follows and still lands.
+	H.Run(SecondsToTicks(6.0), Walk(-0.15f));
+	IE_EXPECT(H.Count(CombatEventType::HitConfirmed, FighterSlot::Opponent) >= 2);
+}
+
+IE_TEST(Bot_SlidesOffTheRopes)
+{
+	BotHarness H(MakeDefaultFighterConfig(), MakeBotFighterConfig(BotLevel::Normal), QuietBot(BotLevel::Normal), 7, NoAssist());
+	H.Run(SecondsToTicks(3.0), Walk(1.0f)); // walk the bot down to the ropes
+	H.Run(SecondsToTicks(2.0));
+	const FighterSnapshot& B = H.Sim.Get(FighterSlot::Opponent).Snapshot();
+	IE_EXPECT(!B.bOnRopes);
+	IE_EXPECT(std::fabs(B.Location.Y) > 0.4f); // it went sideways, not through the player
+}
+
+IE_TEST(Bot_CirclesBetweenExchanges)
+{
+	BotHarness H(MakeDefaultFighterConfig(), MakeBotFighterConfig(BotLevel::Hard), QuietBot(BotLevel::Hard), 11, NoAssist());
+	BotConfig Brain = QuietBot(BotLevel::Hard);
+	Brain.CircleChance = 1.0f;
+	H.Bot.SetConfig(Brain);
+	H.Run(SecondsToTicks(4.0));
+	const Vec2 Line = H.Sim.Get(FighterSlot::Opponent).Snapshot().Location - H.Sim.Get(FighterSlot::Player).Snapshot().Location;
+	IE_EXPECT(std::fabs(std::atan2(Line.Y, Line.X)) > 0.3f); // the fight line turned
+	IE_EXPECT(std::fabs(H.Sim.Gap() - MovementConfig().EngageDistance) < 0.25f);
+}
+
+IE_TEST(Bot_GoesToTheBodyMoreAgainstAGuard)
+{
+	auto BodyShare = [](bool bGuard) {
+		BotConfig Brain = MakeBotConfig(BotLevel::Hard);
+		Brain.ReactionTicks = 1000000;
+		BotHarness H(MakeDefaultFighterConfig(), MakeBotFighterConfig(BotLevel::Hard), Brain, 13);
+		FighterIntent Player;
+		Player.bBlock = bGuard;
+		H.Run(SecondsToTicks(60.0), Player);
+		int Body = 0;
+		int All = 0;
+		for (const CombatEvent& E : H.Log)
+		{
+			if (E.Type == CombatEventType::AttackStarted && E.Actor == FighterSlot::Opponent)
+			{
+				++All;
+				Body += E.Zone == PunchZone::Body ? 1 : 0;
+			}
+		}
+		return All > 0 ? static_cast<float>(Body) / static_cast<float>(All) : 0.0f;
+	};
+	const float Open = BodyShare(false);
+	const float Guarded = BodyShare(true);
+	std::printf("  info: bot body-shot share: open=%.2f guard=%.2f\n", Open, Guarded);
+	IE_EXPECT(Open > 0.05f);
+	IE_EXPECT(Guarded > Open + 0.15f);
 }

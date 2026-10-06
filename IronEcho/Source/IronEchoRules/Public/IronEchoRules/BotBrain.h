@@ -1,6 +1,7 @@
 // Opponent AI. Deterministic for a given seed and input history (PCG32, fixed decision order).
 // It perceives the player's attack only through the rules snapshot and reacts after ReactionTicks,
-// so it cannot read inputs the player has not committed yet.
+// so it cannot read inputs the player has not committed yet. Since 1.2 it also walks: keeps its working distance,
+// circles between exchanges, gets off the ropes, cuts the ring off and steps out of telegraphed punches.
 #pragma once
 
 #include "IronEchoRules/CombatConfig.h"
@@ -34,6 +35,9 @@ namespace IronEchoCore
 			DodgeRight,
 		};
 
+		// Footwork for this tick: distance, circling, ropes, cutting the ring off.
+		void Footwork(const CombatSim& Sim, int32_t Tick, bool bRetreating, bool bWantsToAttack, FighterIntent& Intent);
+
 		BotConfig Config;
 		Pcg32 Rng;
 		bool bInitialized = false;
@@ -48,6 +52,8 @@ namespace IronEchoCore
 
 		int32_t NextAttackTick = 0;
 		Hand PlannedHand = Hand::Left;
+		PunchZone PlannedZone = PunchZone::Head;
+		bool bGuardRolled = false; // the guard-invites-body roll was made for the current plan
 		bool bComboQueued = false;
 		Hand ComboHand = Hand::Left;
 		int32_t ComboTick = 0;
@@ -61,5 +67,12 @@ namespace IronEchoCore
 		int32_t FlurryCount = 0;
 		int32_t LastPlayerAttackTick = -1000000;
 		int32_t LastDefenses = -1;
+
+		int32_t CircleDir = 1;          // +1 = to its own right
+		int32_t CircleUntilTick = -1;
+		int32_t NextCircleRollTick = 0;
+		uint32_t StepOutRolledId = 0;
+		int32_t StepOutUntilTick = -1;
+		int32_t EscapeDir = 0;          // off the ropes: +1 to its right, -1 left, 0 = not escaping
 	};
 }

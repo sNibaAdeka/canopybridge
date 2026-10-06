@@ -36,10 +36,10 @@ namespace IronEchoCore
 		: Config(InConfig)
 	{
 		Snap.Slot = InSlot;
-		ResetForMatch(0.0f);
+		ResetForMatch(Vec2{});
 	}
 
-	void Fighter::ResetForMatch(float Position)
+	void Fighter::ResetForMatch(Vec2 Location)
 	{
 		const FighterSlot Slot = Snap.Slot;
 		Snap = FighterSnapshot{};
@@ -48,7 +48,8 @@ namespace IronEchoCore
 		Snap.Health = Config.MaxHealth;
 		Snap.MaxStamina = Config.MaxStamina;
 		Snap.Stamina = Config.MaxStamina;
-		Snap.Position = Position;
+		Snap.Location = Location;
+		Snap.Facing = Vec2{Location.X > 0.0f ? -1.0f : 1.0f, 0.0f};
 		LastOutcome = AttackOutcome::Pending;
 		bWantsBlock = false;
 		LastStaminaSpendTick = -1000000;
@@ -58,7 +59,7 @@ namespace IronEchoCore
 		GassedUntilTick = -1000000;
 	}
 
-	void Fighter::ResetForRound(float Position, float HealthRecoveryFraction)
+	void Fighter::ResetForRound(Vec2 Location, float HealthRecoveryFraction)
 	{
 		Snap.Health = Clamp(Snap.Health + HealthRecoveryFraction * Config.MaxHealth, 0.0f, Config.MaxHealth);
 		Snap.Stamina = Config.MaxStamina;
@@ -72,7 +73,14 @@ namespace IronEchoCore
 		Snap.DodgeHeldTicks = 0;
 		Snap.bDodgeEffective = false;
 		Snap.LeanLateral = 0.0f;
-		Snap.Position = Position;
+		Snap.HeadOffset = 0.0f;
+		Snap.Location = Location;
+		Snap.Facing = Vec2{Location.X > 0.0f ? -1.0f : 1.0f, 0.0f};
+		Snap.Velocity = Vec2{};
+		Snap.SpeedForward = 0.0f;
+		Snap.SpeedSide = 0.0f;
+		Snap.bMoving = false;
+		Snap.bOnRopes = false;
 		ClearRoundStats();
 		Snap.ComboCount = 0;
 		bWantsBlock = false;
@@ -145,6 +153,7 @@ namespace IronEchoCore
 		Event.AttackId = Snap.AttackId;
 		Event.bTired = Snap.bAttackTired;
 		Event.Dodge = Snap.Dodge;
+		Event.Zone = Snap.AttackZone;
 		Event.Tick = Tick;
 		return Event;
 	}
@@ -178,7 +187,7 @@ namespace IronEchoCore
 		// Stamina regeneration (not while attacking, delayed after spending).
 		if (Snap.State != ActionState::Attack && Tick - LastStaminaSpendTick >= Config.StaminaRegenDelayTicks)
 		{
-			const float Factor = Snap.bBlocking ? Config.BlockRegenFactor : 1.0f;
+			const float Factor = (Snap.bBlocking ? Config.BlockRegenFactor : 1.0f) * (Snap.bMoving ? Config.MoveRegenFactor : 1.0f);
 			Snap.Stamina = Clamp(Snap.Stamina + Config.StaminaRegenPerSecond * Factor / static_cast<float>(kTickRate), 0.0f, Config.MaxStamina);
 		}
 
@@ -276,7 +285,7 @@ namespace IronEchoCore
 		return false;
 	}
 
-	void Fighter::StartAttack(Hand InHand, int32_t Tick, CombatEventBuffer& Events)
+	void Fighter::StartAttack(Hand InHand, PunchZone Zone, int32_t Tick, CombatEventBuffer& Events)
 	{
 		if (Snap.State == ActionState::Attack)
 		{
@@ -288,11 +297,12 @@ namespace IronEchoCore
 			Events.Push(MakeEvent(CombatEventType::BlockEnded, Tick));
 		}
 
-		const AttackSpec& Spec = Config.Attacks[HandIndex(InHand)];
+		const AttackSpec Spec = SpecFor(InHand, Zone);
 		const bool bTired = Snap.Stamina < Spec.StaminaCost;
 		Snap.State = ActionState::Attack;
 		Snap.Stage = AttackStage::Windup;
 		Snap.AttackHand = InHand;
+		Snap.AttackZone = Zone;
 		Snap.AttackId = NextAttackId++;
 		Snap.bAttackResolved = false;
 		Snap.bAttackTired = bTired;
@@ -320,6 +330,7 @@ namespace IronEchoCore
 
 		Snap.LeanLateral = Intent.LeanLateral;
 		bWantsBlock = Intent.bBlock;
+		const float Dt = static_cast<float>(kTickSeconds);
 
 		// ---- cover-up: raise the guard out of a hit stun once the flinch is over ----
 		if (Snap.State == ActionState::HitStun && bWantsBlock && StunTicksElapsed >= Config.CoverUpTicks)
@@ -342,7 +353,8 @@ namespace IronEchoCore
 			Snap.bDodgeEffective = false;
 			if (WantedDodge != DodgeDir::None)
 			{
-				if (Snap.Stamina >= Config.DodgeEntryStaminaCost)
+				bSlipWeak = Snap.Stamina < Config.DodgeEntryStaminaCost;
+				if (!bSlipWeak)
 				{
 					SpendStamina(Config.DodgeEntryStaminaCost, Tick, Events);
 					Snap.bDodgeEffective = true;
@@ -359,6 +371,21 @@ namespace IronEchoCore
 			}
 		}
 
+		// ---- the head: the lean moves it off the centre line at a finite speed (a late slip does not get there) ----
+		{
+			float Wanted = Clamp(Snap.LeanLateral, -1.0f, 1.0f) * Config.HeadSlipMeters;
+			if (Snap.State == ActionState::HitStun)
+			{
+				Wanted = 0.0f;
+			}
+			else if (Snap.Dodge != DodgeDir::None && bSlipWeak)
+			{
+				Wanted *= 0.5f;
+			}
+			const float MaxStep = Config.HeadSlipSpeed * Dt;
+			Snap.HeadOffset += Clamp(Wanted - Snap.HeadOffset, -MaxStep, MaxStep);
+		}
+
 		// ---- punches (new requests replace the buffered one) ----
 		bool bStarted = false;
 		for (int32_t Index = 0; Index < Intent.PunchCount; ++Index)
@@ -366,7 +393,7 @@ namespace IronEchoCore
 			const PunchRequest& Request = Intent.Punches[Index];
 			if (!bStarted && CanStartAttack(Request.PunchHand))
 			{
-				StartAttack(Request.PunchHand, Tick, Events);
+				StartAttack(Request.PunchHand, Request.Zone, Tick, Events);
 				bStarted = true;
 				if (bHasBuffered && Buffered.PunchHand == Request.PunchHand)
 				{
@@ -399,7 +426,7 @@ namespace IronEchoCore
 			else if (CanStartAttack(Buffered.PunchHand))
 			{
 				bHasBuffered = false;
-				StartAttack(Buffered.PunchHand, Tick, Events);
+				StartAttack(Buffered.PunchHand, Buffered.Zone, Tick, Events);
 				bStarted = true;
 			}
 		}
@@ -424,9 +451,21 @@ namespace IronEchoCore
 		return Snap.Stage == AttackStage::Active && Snap.StageTicksLeft <= 1;
 	}
 
-	const AttackSpec& Fighter::CurrentAttackSpec() const
+	AttackSpec Fighter::SpecFor(Hand InHand, PunchZone Zone) const
 	{
-		return Config.Attacks[HandIndex(Snap.AttackHand)];
+		AttackSpec Spec = Config.Attacks[HandIndex(InHand)];
+		if (Zone == PunchZone::Body)
+		{
+			Spec.ReachMeters += Config.BodyReachDelta;
+			Spec.Damage *= Config.BodyDamageFactor;
+			Spec.StaminaCost *= Config.BodyStaminaCostFactor;
+		}
+		return Spec;
+	}
+
+	AttackSpec Fighter::CurrentAttackSpec() const
+	{
+		return SpecFor(Snap.AttackHand, Snap.AttackZone);
 	}
 
 	float Fighter::CurrentAttackDamage(bool bCounter) const
@@ -463,6 +502,10 @@ namespace IronEchoCore
 		{
 			++Snap.PunchesLanded;
 			++Snap.RoundPunchesLanded;
+			if (Snap.AttackZone == PunchZone::Body)
+			{
+				++Snap.BodyPunchesLanded;
+			}
 			if (bCounter)
 			{
 				++Snap.CounterHits;
@@ -552,7 +595,16 @@ namespace IronEchoCore
 		return Applied;
 	}
 
-	float Fighter::ReceiveBlockedHit(const AttackSpec& Spec, float Damage, int32_t Tick)
+	void Fighter::TakeStaminaDamage(float Amount, int32_t Tick, CombatEventBuffer& Events)
+	{
+		if (Config.bInvulnerable || Snap.State == ActionState::KnockedOut || Snap.State == ActionState::KnockedDown)
+		{
+			return;
+		}
+		SpendStamina(Amount, Tick, Events);
+	}
+
+	float Fighter::ReceiveBlockedHit(const AttackSpec& Spec, float Damage, int32_t Tick, PunchZone Zone)
 	{
 		const float Chip = Damage * Config.BlockChipFactor;
 		const float Before = Snap.Health;
@@ -564,7 +616,7 @@ namespace IronEchoCore
 		// The guard pays for the punch it stops (a tired arm punch far less than a full one). Absorbing a punch
 		// is not spending: it does not restart the regeneration delay, so a flurry cannot starve a guard.
 		(void)Tick;
-		Snap.Stamina = Clamp(Snap.Stamina - BlockDrain(Damage, Spec.Damage), 0.0f, Config.MaxStamina);
+		Snap.Stamina = Clamp(Snap.Stamina - BlockDrain(Damage, Spec.Damage, Zone), 0.0f, Config.MaxStamina);
 		++Snap.BlocksMade;
 		++Snap.RoundDefenses;
 		if (!Config.bPassive)

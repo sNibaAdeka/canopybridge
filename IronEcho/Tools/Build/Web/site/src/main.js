@@ -304,19 +304,26 @@ function onCombat(e, snap) {
     const power = Math.min(1.6, e.damage / 2.2 + (e.counter ? 0.3 : 0));
     let at;
     if (target === 'opponent' && app.training) at = stagePoint(snap.opponent.position - 0.18, 1.45);
-    else at = app.rigs[target].headWorld();
+    else {
+      at = app.rigs[target].headWorld();
+      if (e.zone === 1) at.y -= 0.45; // body shot: the spark is on the ribs
+    }
     const dir = stageDir().multiplyScalar(e.actor === 0 ? 1 : -1).setY(0.15).normalize();
     app.sparks.burst(at, dir, e.counter ? 'counter' : 'hit', 0.7 + 0.4 * power);
     app.sound.hit(0.7 + 0.3 * power, !!e.counter);
     if (app.training && target === 'opponent') app.bag.hit(power, e.hand === 0 ? 1 : -1);
-    else app.anim[target].takeHit(e.hand, e.damage, !!e.counter);
+    else app.anim[target].takeHit(e.hand, e.damage, !!e.counter, e.zone);
     app.hitStop = e.counter ? 0.06 : 0.035;
     app.shake.add(target === 'player' ? 0.45 * power : 0.18 * power);
     if (target === 'player') app.hud.flash('hit');
     if (playerActs) {
       if (e.counter) app.hud.feed('КОНТРУДАР!', 'good');
+      else if (e.glancing) app.hud.feed('ВСКОЛЬЗЬ', '');
+      else if (e.smothered) app.hud.feed('СЛИШКОМ БЛИЗКО — ОТОЙДИ', 'warn');
+      else if (e.zone === 1) app.hud.feed('В КОРПУС!', 'good');
       if (e.combo >= 2) app.hud.combo(e.combo);
     } else if (e.counter) app.hud.feed('ПОЙМАЛ НА ВСТРЕЧНОМ', 'bad');
+    else if (e.zone === 1 && !e.glancing) app.hud.feed('ПРОПУСТИЛ В КОРПУС', 'bad');
     if (power > 1.1) app.sound.crowdSwell(0.6);
     return;
   }
@@ -337,6 +344,10 @@ function onCombat(e, snap) {
   }
   if (type === 'Dodged') {
     app.hud.feed(playerActs ? 'СОПЕРНИК УКЛОНИЛСЯ' : 'УКЛОН!', playerActs ? '' : 'good');
+    return;
+  }
+  if (type === 'Whiffed' && playerActs) {
+    app.hud.feed('НЕ ДОСТАЛ — ШАГНИ ВПЕРЁД', 'warn');
     return;
   }
   if (type === 'StaminaExhausted' && actor === 'player') {
@@ -386,30 +397,30 @@ function onMatch(e, snap) {
 }
 
 // ---------------------------------------------------------------- stage
-// The rules core places both fighters on one line (metres, +X toward the opponent). On screen that line circles the
-// ring: it turns slowly around the fighters' midpoint and its centre wanders over the canvas, so the robots work
-// around each other with real footwork instead of sliding on a rail. Visual only: distance and reach stay the core's.
-const stage = { theta: 0, omega: 0, cx: 0, cz: 0, t: 0 };
-function resetStage() { Object.assign(stage, { theta: 0, omega: 0, cx: 0, cz: 0, t: 0 }); }
+// The rules core walks both fighters on the canvas (metres; core X = scene X, core Y = scene -Z) and keeps them facing
+// each other. The "stage" is the fight line between them: its angle and midpoint, with the fighters at -+gap/2 on it.
+// Everything on screen comes from the core: where the robots stand, how they circle, where a punch goes.
+const stage = { theta: 0, cx: 0, cz: 0 };
+function resetStage() { Object.assign(stage, { theta: 0, cx: 0, cz: 0 }); }
 function stageDir() { return new THREE.Vector3(Math.cos(stage.theta), 0, -Math.sin(stage.theta)); }
 function stageSide() { return new THREE.Vector3(Math.sin(stage.theta), 0, Math.cos(stage.theta)); }
 function stagePoint(s, y = 0) { return new THREE.Vector3(stage.cx + Math.cos(stage.theta) * s, y, stage.cz - Math.sin(stage.theta) * s); }
-function updateStage(dt, snap) {
-  if (app.training) { resetStage(); return; }
-  const fighting = snap.match.phaseName === 'Fighting';
-  if (fighting) stage.t += dt;
-  const t = stage.t;
-  const busy = (f) => f.stateName === 'Attack' || f.stateName === 'HitStun' || f.blocking > 0.5;
-  let w = fighting ? 0.42 * (0.65 * Math.sin(t * 0.23 + 0.4) + 0.35 * Math.sin(t * 0.61 + 2.1)) : 0;
-  if (busy(snap.player) || busy(snap.opponent)) w *= 0.3; // plant to exchange, circle between exchanges
-  stage.omega += (w - stage.omega) * Math.min(1, dt * 1.8);
-  stage.theta += stage.omega * dt;
-  // the centre drifts over the middle of the canvas (well inside the ropes: the ring is 6.1 m)
-  const tx = fighting ? 0.75 * Math.sin(t * 0.093 + 1.0) : stage.cx;
-  const tz = fighting ? 0.65 * Math.sin(t * 0.071 + 2.6) : stage.cz;
-  const k = Math.min(1, dt * 0.8);
-  stage.cx += (tx - stage.cx) * k;
-  stage.cz += (tz - stage.cz) * k;
+function updateStage(snap) {
+  const p = snap.player;
+  const o = snap.opponent;
+  stage.theta = Math.atan2(o.y - p.y, o.x - p.x);
+  stage.cx = (p.x + o.x) / 2;
+  stage.cz = -(p.y + o.y) / 2;
+  const half = Math.hypot(o.x - p.x, o.y - p.y) / 2;
+  p.position = -half; // along the fight line (camera, effects)
+  o.position = half;
+  // the current punch's line, in the puncher's own frame: along = forward, side = to its right
+  for (const f of [p, o]) {
+    const rx = f.aimX - f.x;
+    const ry = f.aimY - f.y;
+    f.aimAlong = rx * f.faceX + ry * f.faceY;
+    f.aimSide = rx * f.faceY - ry * f.faceX;
+  }
 }
 function placeFighters(snap) {
   const { player, opponent } = app.holders;
@@ -492,7 +503,7 @@ function step(dt, input, now) {
     }
     const gap = snap.match.gap;
     const ctx = { gap, phase };
-    updateStage(dt, snap);
+    updateStage(snap);
     placeFighters(snap);
     app.anim.player.update(animDt, snap.player, ctx);
     if (!app.training) app.anim.opponent.update(animDt, snap.opponent, ctx);
@@ -542,7 +553,8 @@ app.debugAdvance = (seconds, inputFn = () => ({ status: 7, lean: 0, block: 0, pu
     steps: [app.anim.player.steps, app.anim.opponent.steps] };
 };
 
-const IDLE = { stateName: 'Guard', stageName: 'None', blocking: 0, dodge: 0, lean: 0, gassedTicksLeft: 0, stamina: 100, maxStamina: 100, hand: 0, stageAlpha: 0 };
+const IDLE = { stateName: 'Guard', stageName: 'None', blocking: 0, dodge: 0, lean: 0, gassedTicksLeft: 0, stamina: 100, maxStamina: 100, hand: 0,
+  stageAlpha: 0, headOffset: 0, zone: 0, speedForward: 0, speedSide: 0 };
 
 // ---------------------------------------------------------------- menu wiring
 function wireMenu() {

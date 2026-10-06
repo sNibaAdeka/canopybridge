@@ -17,7 +17,7 @@ namespace IronEchoCore
 		HitConfirmed,       // clean hit (also emitted after GuardBroken)
 		Blocked,
 		Dodged,
-		Whiffed,            // out of range
+		Whiffed,            // out of range, or off the line with no slip
 		GuardBroken,        // block attempted without stamina -> full hit
 		KnockedOut,
 		StaminaExhausted,
@@ -41,6 +41,10 @@ namespace IronEchoCore
 		DodgeDir Dodge = DodgeDir::None;
 		bool bCounterHit = false;
 		bool bTired = false;
+		PunchZone Zone = PunchZone::Head; // punch events: where it was aimed (1.2)
+		bool bGlancing = false;           // contact events: the glove only grazed the target (1.2)
+		bool bSmothered = false;          // contact events: too close, arm not extended (1.2)
+		float Power = 1.0f;               // contact events: fraction of the punch's full damage that landed (1.2)
 		float Damage = 0.0f;
 		float TargetHealthAfter = 0.0f;
 		float TargetStaminaAfter = 0.0f;

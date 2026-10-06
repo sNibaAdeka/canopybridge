@@ -153,7 +153,7 @@ IE_TEST(Match_FullBoutReachesResultWithInvariants)
 			const FighterSnapshot& F = R.M.Sim().Get(Slot).Snapshot();
 			IE_EXPECT(F.Health >= 0.0f && F.Health <= F.MaxHealth);
 			IE_EXPECT(F.Stamina >= 0.0f && F.Stamina <= F.MaxStamina);
-			IE_EXPECT(std::isfinite(F.Position));
+			IE_EXPECT(std::isfinite(F.Location.X) && std::isfinite(F.Location.Y));
 		}
 		const float Gap = R.M.Sim().Gap();
 		IE_EXPECT(Gap >= R.M.Setup().Movement.MinDistance - 1e-4f);

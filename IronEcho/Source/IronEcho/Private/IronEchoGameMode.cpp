@@ -225,6 +225,7 @@ void AIronEchoGameMode::SetupView(APlayerController* Player)
 				Camera->GetCameraComponent()->SetFieldOfView(70.0f);
 			}
 			ViewCamera = Camera;
+			bFallbackCamera = Camera != nullptr;
 		}
 	}
 	if (ViewCamera != nullptr)
@@ -286,7 +287,8 @@ void AIronEchoGameMode::RebuildMatch(IronEchoCore::MatchMode Mode, EIronEchoBotL
 	{
 		for (TActorIterator<AIronEchoRingAnchor> It(GetWorld()); It; ++It)
 		{
-			Setup.Movement.RingHalfLength = FMath::Max(1.5f, It->UsableHalfLength / IronEchoConvert::MetersToCm);
+			// UsableHalfLength: how far a fighter's centre may go from the anchor, now on both axes (square ring).
+			Setup.Movement.RingHalfSize = FMath::Max(1.5f, It->UsableHalfLength / IronEchoConvert::MetersToCm) + Setup.Movement.FighterRadius;
 			break;
 		}
 	}
@@ -437,10 +439,11 @@ void AIronEchoGameMode::StepSimulation(float DeltaSeconds, const IronEchoCore::I
 
 FTransform AIronEchoGameMode::SlotTransform(IronEchoCore::FighterSlot Slot) const
 {
-	const float Position = Match->Sim().Get(Slot).Snapshot().Position * IronEchoConvert::MetersToCm;
-	const FRotator Facing(0.0f, Slot == IronEchoCore::FighterSlot::Player ? 0.0f : 180.0f, 0.0f);
-	const FTransform Local(Facing, FVector(Position, 0.0f, 0.0f));
-	return Local * RingTransform;
+	// Core ring frame is right-handed (Y to the player's starting left); Unreal is left-handed: Y and yaw flip.
+	const IronEchoCore::FighterSnapshot& S = Match->Sim().Get(Slot).Snapshot();
+	const FRotator Facing(0.0f, -FMath::RadiansToDegrees(FMath::Atan2(S.Facing.Y, S.Facing.X)), 0.0f);
+	const FVector Location(S.Location.X * IronEchoConvert::MetersToCm, -S.Location.Y * IronEchoConvert::MetersToCm, 0.0f);
+	return FTransform(Facing, Location) * RingTransform;
 }
 
 FIronEchoFighterVisualState AIronEchoGameMode::MakeVisualState(IronEchoCore::FighterSlot Slot, const IronEchoCore::InputFrame& Frame) const
@@ -472,6 +475,11 @@ FIronEchoFighterVisualState AIronEchoGameMode::MakeVisualState(IronEchoCore::Fig
 	V.KnockdownsSuffered = S.KnockdownsSuffered;
 	V.ComboCount = S.ComboCount;
 	V.DistanceToOpponent = Match->Sim().Gap() * IronEchoConvert::MetersToCm;
+	V.MoveForwardSpeed = S.SpeedForward * IronEchoConvert::MetersToCm;
+	V.MoveRightSpeed = S.SpeedSide * IronEchoConvert::MetersToCm;
+	V.HeadSlip = S.HeadOffset * IronEchoConvert::MetersToCm;
+	V.bOnRopes = S.bOnRopes;
+	V.bBodyShot = S.AttackZone == IronEchoCore::PunchZone::Body;
 	V.LastHitTakenTime = Memory.LastHitTakenTime;
 	V.LastHitTakenFromHand = Memory.LastHitFromHand;
 	V.HitsTaken = Memory.HitsTaken;
@@ -518,6 +526,28 @@ void AIronEchoGameMode::PushVisuals(float DeltaSeconds, const IronEchoCore::Inpu
 		Bag->SetActorHiddenInGame(!bTraining);
 		Bag->UpdateBag(SlotTransform(IronEchoCore::FighterSlot::Opponent), DeltaSeconds);
 	}
+	UpdateFallbackCamera(DeltaSeconds);
+}
+
+void AIronEchoGameMode::UpdateFallbackCamera(float DeltaSeconds)
+{
+	// The fallback camera (no Codex camera class) follows the fight line as the fighters circle: behind the player's
+	// right shoulder, both robots in frame. A camera class from DA_IronEchoVisuals drives itself.
+	if (!bFallbackCamera || ViewCamera == nullptr)
+	{
+		return;
+	}
+	using namespace IronEchoModeLocal;
+	const FTransform PlayerT = SlotTransform(IronEchoCore::FighterSlot::Player);
+	const FTransform OpponentT = SlotTransform(IronEchoCore::FighterSlot::Opponent);
+	const FVector Mid = 0.5f * (PlayerT.GetLocation() + OpponentT.GetLocation());
+	const FVector Line = (OpponentT.GetLocation() - PlayerT.GetLocation()).GetSafeNormal2D();
+	const FVector Right = FVector::CrossProduct(FVector::UpVector, Line); // Unreal: Z x X = +Y (right)
+	const FVector Eye = PlayerT.GetLocation() - Line * CameraBack + Right * CameraSide + FVector::UpVector * CameraHeight;
+	const FVector Look = Mid + FVector::UpVector * (LookHeight - 40.0f);
+	const float Blend = 1.0f - FMath::Exp(-DeltaSeconds * 4.0f);
+	const FVector NewEye = FMath::Lerp(ViewCamera->GetActorLocation(), Eye, Blend);
+	ViewCamera->SetActorLocationAndRotation(NewEye, (Look - NewEye).Rotation());
 }
 
 void AIronEchoGameMode::DispatchEvents()
@@ -535,6 +565,10 @@ void AIronEchoGameMode::DispatchEvents()
 		Event.Hand = IronEchoConvert::ToUnreal(Core.AttackHand);
 		Event.Dodge = IronEchoConvert::ToUnreal(Core.Dodge);
 		Event.bCounterHit = Core.bCounterHit;
+		Event.bBodyShot = Core.Zone == IronEchoCore::PunchZone::Body;
+		Event.bGlancing = Core.bGlancing;
+		Event.bSmothered = Core.bSmothered;
+		Event.Power = Core.Power;
 		Event.bTired = Core.bTired;
 		Event.Damage = Core.Damage;
 		Event.TargetHealthAfter = Core.TargetHealthAfter;

@@ -29,12 +29,13 @@ namespace
 	const char* const kFighterFields[] = {
 		"health", "maxHealth", "stamina", "maxStamina", "state", "stage", "hand", "attackId", "resolved", "tired",
 		"stageAlpha", "stageTicksTotal", "stageTicksLeft", "stateTicksLeft", "gassedTicksLeft", "blocking", "dodge",
-		"dodgeEffective", "lean", "position", "roundDamage", "totalDamage", "thrown", "landed", "punchesBlocked",
-		"dodgesMade", "blocksMade", "counterHits", "combo", "maxCombo", "knockdowns", "roundKnockdowns", "roundLanded",
-		"roundDefenses"};
+		"dodgeEffective", "lean", "x", "y", "faceX", "faceY", "speedForward", "speedSide", "moving", "onRopes", "headOffset", "zone",
+		"aimX", "aimY", "roundDamage", "totalDamage", "thrown", "landed", "punchesBlocked", "dodgesMade", "blocksMade",
+		"counterHits", "combo", "maxCombo", "knockdowns", "roundKnockdowns", "roundLanded", "roundDefenses", "bodyLanded",
+		"glancingHits"};
 	const char* const kCombatEventFields[] = {
 		"type", "actor", "target", "hand", "dodge", "counter", "tired", "damage", "targetHealthAfter",
-		"targetStaminaAfter", "attackId", "combo", "knockdownNumber", "tick"};
+		"targetStaminaAfter", "attackId", "combo", "knockdownNumber", "tick", "zone", "glancing", "smothered", "power"};
 	const char* const kMatchEventFields[] = {
 		"type", "phase", "previousPhase", "reason", "method", "hasWinner", "winner", "round", "countdownSeconds",
 		"scorePlayer", "scoreOpponent", "decision", "hasDowned", "downed", "tick"};
@@ -90,6 +91,10 @@ namespace
 			O[11] = E.ComboCount;
 			O[12] = E.KnockdownNumber;
 			O[13] = E.Tick;
+			O[14] = static_cast<double>(E.Zone);
+			O[15] = E.bGlancing ? 1.0 : 0.0;
+			O[16] = E.bSmothered ? 1.0 : 0.0;
+			O[17] = E.Power;
 			++CombatOutCount;
 		}
 		CombatEvents.Clear();
@@ -131,12 +136,15 @@ namespace
 			static_cast<double>(F.AttackHand), static_cast<double>(F.AttackId), F.bAttackResolved ? 1.0 : 0.0,
 			F.bAttackTired ? 1.0 : 0.0, F.StageAlpha(), static_cast<double>(F.StageTicksTotal), static_cast<double>(F.StageTicksLeft),
 			static_cast<double>(F.StateTicksLeft), static_cast<double>(F.GassedTicksLeft), F.bBlocking ? 1.0 : 0.0,
-			static_cast<double>(F.Dodge), F.bDodgeEffective ? 1.0 : 0.0, F.LeanLateral, F.Position, F.RoundDamageDealt,
+			static_cast<double>(F.Dodge), F.bDodgeEffective ? 1.0 : 0.0, F.LeanLateral, F.Location.X, F.Location.Y, F.Facing.X, F.Facing.Y,
+			F.SpeedForward, F.SpeedSide, F.bMoving ? 1.0 : 0.0, F.bOnRopes ? 1.0 : 0.0, F.HeadOffset,
+			static_cast<double>(F.AttackZone), F.AimPoint.X, F.AimPoint.Y, F.RoundDamageDealt,
 			F.TotalDamageDealt, static_cast<double>(F.PunchesThrown), static_cast<double>(F.PunchesLanded),
 			static_cast<double>(F.PunchesBlocked), static_cast<double>(F.DodgesMade), static_cast<double>(F.BlocksMade),
 			static_cast<double>(F.CounterHits), static_cast<double>(F.ComboCount), static_cast<double>(F.MaxCombo),
 			static_cast<double>(F.KnockdownsSuffered), static_cast<double>(F.RoundKnockdownsSuffered),
-			static_cast<double>(F.RoundPunchesLanded), static_cast<double>(F.RoundDefenses)};
+			static_cast<double>(F.RoundPunchesLanded), static_cast<double>(F.RoundDefenses),
+			static_cast<double>(F.BodyPunchesLanded), static_cast<double>(F.GlancingHits)};
 		static_assert(sizeof(Values) / sizeof(Values[0]) == kFighterCount, "fighter layout");
 		for (int32_t Index = 0; Index < kFighterCount; ++Index)
 		{
@@ -243,7 +251,7 @@ namespace
 	void BuildLayout()
 	{
 		Writer W;
-		W.Raw("{\"version\":1,");
+		W.Raw("{\"version\":2,");
 		W.Str("tickRate");
 		W.Raw(":");
 		W.Int(kTickRate);
@@ -322,10 +330,11 @@ IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int3
 }
 
 // One render frame of input. Status: TrackingStatus (7 = Live). Lean/Block as in InputFrame (calibrated units).
-// PunchMask: bit 0 = left (jab), bit 1 = right (cross); each set bit is one new punch this frame.
-// Returns the number of 120 Hz ticks simulated.
+// PunchMask: bit 0 = left (jab), bit 1 = right (cross), bit 2 = left to the body, bit 3 = right to the body; each set
+// bit is one new punch this frame. MoveForward / MoveLateral: InputFrame footwork (-1..1; 0, 0 = the camera's lean
+// steps). Returns the number of 120 Hz ticks simulated.
 IE_EXPORT(ie_frame) int32_t ie_frame(double DeltaSeconds, int32_t Status, double Confidence, double LeanLateral, double LeanForward,
-	double BlockAmount, int32_t PunchMask, double PunchConfidence)
+	double BlockAmount, int32_t PunchMask, double PunchConfidence, double MoveForward, double MoveLateral)
 {
 	if (Game == nullptr)
 	{
@@ -337,12 +346,15 @@ IE_EXPORT(ie_frame) int32_t ie_frame(double DeltaSeconds, int32_t Status, double
 	Frame.LeanLateral = static_cast<float>(LeanLateral);
 	Frame.LeanForward = static_cast<float>(LeanForward);
 	Frame.BlockAmount = static_cast<float>(BlockAmount);
-	for (int32_t Bit = 0; Bit < 2; ++Bit)
+	Frame.MoveForward = static_cast<float>(MoveForward);
+	Frame.MoveLateral = static_cast<float>(MoveLateral);
+	for (int32_t Bit = 0; Bit < 4; ++Bit)
 	{
 		if ((PunchMask & (1 << Bit)) != 0)
 		{
 			PunchIntent Punch;
-			Punch.PunchHand = Bit == 0 ? Hand::Left : Hand::Right;
+			Punch.PunchHand = Bit % 2 == 0 ? Hand::Left : Hand::Right;
+			Punch.Zone = Bit >= 2 ? PunchZone::Body : PunchZone::Head;
 			Punch.Strength = 1.0f;
 			Punch.Confidence = static_cast<float>(PunchConfidence);
 			Frame.AddPunch(Punch);
@@ -355,7 +367,7 @@ IE_EXPORT(ie_frame) int32_t ie_frame(double DeltaSeconds, int32_t Status, double
 	bLastReady = Input.bInputReady;
 	for (int32_t Index = 0; Index < CarriedPunches.PunchCount; ++Index)
 	{
-		Input.PlayerIntent.AddPunch(CarriedPunches.Punches[Index].PunchHand, CarriedPunches.Punches[Index].Strength);
+		Input.PlayerIntent.AddPunch(CarriedPunches.Punches[Index].PunchHand, CarriedPunches.Punches[Index].Strength, CarriedPunches.Punches[Index].Zone);
 	}
 	CarriedPunches.PunchCount = 0;
 
@@ -405,5 +417,6 @@ IE_EXPORT(ie_rematch) void ie_rematch()
 	}
 }
 
-// Tunables that the page exposes (for quick sessions): reach of a punch and the engage distance.
+// Tunables that the page exposes: the engage distance and the ring size (rope line, from the centre).
 IE_EXPORT(ie_engage_distance) double ie_engage_distance() { return Game != nullptr ? Game->Sim().Movement().EngageDistance : 1.35; }
+IE_EXPORT(ie_ring_half_size) double ie_ring_half_size() { return Game != nullptr ? Game->Sim().Movement().RingHalfSize : 2.95; }

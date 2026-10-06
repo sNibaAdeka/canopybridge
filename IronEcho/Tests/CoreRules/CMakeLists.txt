@@ -36,6 +36,7 @@ add_executable(CoreRulesTests
   TestPacketGate.cpp
   TestIntent.cpp
   TestFighter.cpp
+  TestRing.cpp
   TestMatch.cpp
   TestBot.cpp
   TestBalance.cpp)

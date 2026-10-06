@@ -74,11 +74,12 @@ def to_classic_script(esm: str) -> str:
 
 
 def make_input_script(path: Path, seed: int = 20261004, frames: int = 7200) -> None:
-    """Deterministic input: mixed frame rates, punches, blocks, slips and a tracking dropout."""
+    """Deterministic input: mixed frame rates, punches (head and body), blocks, slips, footwork, a tracking dropout."""
     rng = random.Random(seed)
     values = [0.0, 1.0, 7.0, 3.0, 40.0, float(frames)]  # bout, Normal, seed 7, 3 x 40 s
-    block_until = slip_until = -1
+    block_until = slip_until = move_until = -1
     slip = 0.0
+    move = (0.0, 0.0)
     for f in range(frames):
         dt = rng.choice([1 / 60, 1 / 60, 1 / 60, 1 / 144, 1 / 30, 1 / 240])
         status = 7.0 if not (2400 <= f < 2460) else 3.0  # one tracking loss
@@ -87,14 +88,20 @@ def make_input_script(path: Path, seed: int = 20261004, frames: int = 7200) -> N
             mask |= 1
         if rng.random() < 0.02:
             mask |= 2
+        if rng.random() < 0.01:
+            mask |= rng.choice([4, 8])  # body jab / body cross
         if f >= block_until and rng.random() < 0.01:
             block_until = f + rng.randint(10, 50)
         if f >= slip_until and rng.random() < 0.006:
             slip_until = f + rng.randint(8, 40)
             slip = rng.choice([-1.0, 1.0])
+        if f >= move_until and rng.random() < 0.01:
+            move_until = f + rng.randint(20, 120)
+            move = (rng.choice([-1.0, 0.0, 0.5, 1.0]), rng.choice([-1.0, 0.0, 0.0, 1.0]))
         block = 1.0 if f < block_until else 0.0
         lean = slip if f < slip_until else 0.0
-        values += [dt, status, lean, block, float(mask)]
+        fwd, side = move if f < move_until else (0.0, 0.0)
+        values += [dt, status, lean, block, float(mask), fwd, side]
     path.write_bytes(struct.pack(f"<{len(values)}d", *values))
 
 

@@ -72,10 +72,19 @@ export class FighterAnimator {
     this.steps = 0;       // steps taken (debug / tests)
   }
 
-  // A clean hit landed on this fighter. hand: attacker's hand (0 lead/jab, 1 rear/cross).
-  takeHit(hand, damage, counter) {
+  // A clean hit landed on this fighter. hand: attacker's hand (0 lead/jab, 1 rear/cross); zone 1 = body shot.
+  takeHit(hand, damage, counter, zone = 0) {
     const power = clamp(damage / 2.8, 0.4, 1.6) * (counter ? 1.25 : 1);
     const side = hand === 0 ? 1 : -1; // jab from the opponent's lead hand turns this head one way, cross the other
+    if (zone === 1) {
+      // to the body: folds forward around the glove, the head stays
+      this.kickV.nod += 260 * power;
+      this.kickV.lean += 520 * power;
+      this.kickV.x -= 2.4 * power;
+      this.kickV.twist += side * 180 * power;
+      this.stagger = Math.max(this.stagger, clamp(power - 0.5, 0, 1));
+      return;
+    }
     this.kickV.nod -= 900 * power;
     this.kickV.turn += side * 640 * power;
     this.kickV.lean -= 420 * power;
@@ -115,8 +124,12 @@ export class FighterAnimator {
       const energy = gassed ? 0.45 : 1;
       T.crouch = 0.10 + 0.018 * energy * bounce;
       heelL = heelR = 0.018 * energy * (0.5 + 0.5 * Math.sin(t * 2 * Math.PI * hz + 1.2));
-      T.body_x = 0.045 * energy * noise(t, 1.25, ph);         // in and out of range
-      T.lateral = 0.30 * energy * noise(t, 0.85, ph + 2.0);   // head off the centre line
+      // the legs move for real now (the rules walk the robot): the rocking only fills the pauses
+      const still = 1 - clamp(Math.hypot(f.speedForward || 0, f.speedSide || 0) / 0.6, 0, 1);
+      T.body_x = 0.045 * energy * still * noise(t, 1.25, ph);  // in and out of range
+      T.lateral = 0.15 * energy * noise(t, 0.85, ph + 2.0);   // a small weave; the real slip comes from the rules
+      T.lean += 5 * clamp(f.speedForward || 0, -1.5, 1.5);    // into the step, away when backing off
+      T.side_bend += -3 * clamp(f.speedSide || 0, -1.5, 1.5);
       T.yaw += 5 * noise(t, 0.7, ph + 4.0);
       T.twist += 4 * noise(t, 1.1, ph + 5.0);
       T.side_bend = 3 * noise(t, 0.9, ph + 6.0);
@@ -152,8 +165,11 @@ export class FighterAnimator {
       T.body_x *= 0.3;
       T.lateral *= 0.3;
     }
+    // the head goes exactly where the rules put it (headOffset, m to the own right; that is what punches miss):
+    // 0.30 m of slip = pose lateral 1.3 (+lateral = own left)
+    const slip = -4.33 * (f.headOffset || 0);
     if (f.dodge !== 0) {
-      T.lateral = -1.3 * f.dodge; // core: Left = -1 (own left); pose: +lateral = own left
+      T.lateral = slip;
       T.crouch = 0.16;
       T.lean = 16;
       T.nod = 16;
@@ -161,8 +177,8 @@ export class FighterAnimator {
       const s = T.lateral;
       lead = [0.26, 0.10 + 0.07 * s, 1.38];
       rear = [0.18, -0.08 + 0.07 * s, 1.36];
-    } else if (Math.abs(f.lean) > 0.05) {
-      T.lateral += -0.45 * clamp(f.lean, -1, 1);
+    } else if (Math.abs(slip) > 0.02) {
+      T.lateral += slip;
     }
     if (f.stateName === 'HitStun') {
       T.lean -= 8;
@@ -182,7 +198,11 @@ export class FighterAnimator {
       if (f.stageName === 'Windup') e = a < L ? -0.15 * smooth(a / L) : -0.15 + 1.15 * easeOut((a - L) / (1 - L));
       else if (f.stageName === 'Active') e = 1;
       else if (f.stageName === 'Recovery') e = 1 - smooth(a);
-      const reach = clamp(ctx.gap - 0.38, 0.62, 0.98);
+      // the glove goes down the punch line to the aim point: if the target slipped off it, the glove misses beside it
+      const reach = clamp((f.aimAlong ?? ctx.gap) - 0.38, 0.62, 0.98);
+      const aimY = -clamp(f.aimSide || 0, -0.35, 0.35); // armature +y = own left
+      const body = f.zone === 1;
+      const strikeZ = body ? 1.12 : 1.56;
       const pos = clamp(e, 0, 1);
       const load = clamp(-e / 0.15, 0, 1);
       const big = this.isBot ? 1.0 : 0.5; // the bot's load is exaggerated on purpose: it is the cue to react to
@@ -190,7 +210,7 @@ export class FighterAnimator {
       // the step of a jab and the drive of a cross both start before the hand lands
       const drive = f.stageName === 'Recovery' ? 1 - smooth(a * 1.4) : (f.stageName === 'Active' ? 1 : smooth((a - L * 0.5) / (1 - L * 0.5)));
       if (hand === 0) {
-        const strike = [reach, 0.06, 1.56];
+        const strike = [reach, 0.06 + aimY, strikeZ];
         const loaded = [lead[0] - 0.16 * big, lead[1] + 0.06 * big, lead[2] - 0.08 * big];
         lead = load > 0 ? lerp3(lead, loaded, load) : lerp3(lead, strike, pos);
         T.yaw = lerp(T.yaw, -36, pos) + 10 * load * big;
@@ -204,7 +224,7 @@ export class FighterAnimator {
         rearBias = lerp(rearBias, 0.06, drive);
         rear[2] += 0.04 * pos; // chin cover
       } else {
-        const strike = [reach, -0.02, 1.55];
+        const strike = [reach, -0.02 + aimY, strikeZ - 0.01];
         const loaded = [rear[0] - 0.20 * big, rear[1] - 0.08 * big, rear[2] - 0.08 * big];
         rear = load > 0 ? lerp3(rear, loaded, load) : lerp3(rear, strike, pos);
         T.yaw = lerp(T.yaw, 16, pos) - 16 * load * big;            // hips turn through the target
@@ -220,6 +240,10 @@ export class FighterAnimator {
         leadBias = lerp(leadBias, 0.04, drive);
         lead[2] += 0.05 * pos;
         lead[0] -= 0.05 * pos;
+      }
+      if (body) {
+        T.crouch += 0.08 * pos + 0.03 * load; // level change: bend the knees to go downstairs
+        T.lean += 7 * pos;
       }
       if (this.isBot && load > 0) {
         T.side_bend = (hand === 0 ? 7 : -9) * load; // shoulder dip: part of the telegraph
@@ -277,7 +301,8 @@ export class FighterAnimator {
     for (const side of ['lead', 'rear']) {
       const st = STANCE[side];
       const bias = side === 'lead' ? tg.leadBias : tg.rearBias;
-      desired[side] = new THREE.Vector3(st[0] + bias, st[1] + P.lateral * 0.05, ANKLE_Z);
+      // a walking robot places its feet ahead of the body, in the direction it travels
+      desired[side] = new THREE.Vector3(st[0] + bias + 0.10 * (this.speedF || 0), st[1] + P.lateral * 0.05 - 0.10 * (this.speedS || 0), ANKLE_Z);
     }
     if (!live) {
       for (const side of ['lead', 'rear']) {
@@ -343,6 +368,8 @@ export class FighterAnimator {
 
   update(dt, f, ctx) {
     this.t += dt;
+    this.speedF = f.speedForward || 0;
+    this.speedS = f.speedSide || 0;
     this.telegraph = 0;
     const down = f.stateName === 'KnockedDown' || f.stateName === 'KnockedOut';
     [this.fall, this.fallV] = spring(this.fall, this.fallV, down ? 1 : 0, down ? 5.5 : 4.0, dt);

@@ -53,7 +53,19 @@ namespace IronEchoCore
 		int32_t DodgeHeldTicks = 0;
 		bool bDodgeEffective = false;
 		float LeanLateral = 0.0f;
-		float Position = 0.0f;        // metres along the fight line, +X toward the opponent's side
+		// ---- ring (1.2) ----
+		Vec2 Location;                // centre of the fighter on the canvas (ring frame, see Vec2)
+		Vec2 Facing{1.0f, 0.0f};      // unit vector toward the opponent (a vector, not an angle: no libm in the rules)
+		Vec2 Velocity;                // m/s on the canvas
+		float SpeedForward = 0.0f;    // m/s toward the opponent (- = backing off)
+		float SpeedSide = 0.0f;       // m/s circling to the fighter's own right
+		bool bMoving = false;
+		bool bOnRopes = false;        // within MovementConfig.RopeMargin of a rope: no room to back off
+		float HeadOffset = 0.0f;      // m, head off the centre line to the fighter's right (the real slip)
+		PunchZone AttackZone = PunchZone::Head;
+		Vec2 AimPoint;                // where the current punch goes (tracks the target in the windup, then frozen)
+		int32_t BodyPunchesLanded = 0;
+		int32_t GlancingHits = 0;     // this fighter's punches that only grazed
 		// Statistics for the current round / match.
 		float RoundDamageDealt = 0.0f;
 		float TotalDamageDealt = 0.0f;
@@ -97,8 +109,8 @@ namespace IronEchoCore
 	public:
 		Fighter(FighterSlot InSlot, const FighterConfig& InConfig);
 
-		void ResetForMatch(float Position);
-		void ResetForRound(float Position, float HealthRecoveryFraction);
+		void ResetForMatch(Vec2 Location);
+		void ResetForRound(Vec2 Location, float HealthRecoveryFraction);
 
 		// Phase A1: advance timers by one tick (stage transitions, stun expiry, stamina regen).
 		void AdvanceTimers(int32_t Tick, CombatEventBuffer& Events);
@@ -108,7 +120,9 @@ namespace IronEchoCore
 		// Resolution queries (phase B).
 		bool HasPendingActiveAttack() const;
 		bool IsLastActiveTick() const;
-		const AttackSpec& CurrentAttackSpec() const;
+		// The current punch's spec with its zone applied (body shots: shorter, weaker, dearer).
+		AttackSpec CurrentAttackSpec() const;
+		AttackSpec SpecFor(Hand InHand, PunchZone Zone) const;
 		bool IsDodgeEffective() const { return Snap.bDodgeEffective; }
 		bool IsBlocking() const { return Snap.bBlocking; }
 		bool IsWindingUp() const { return Snap.State == ActionState::Attack && Snap.Stage == AttackStage::Windup; }
@@ -116,10 +130,10 @@ namespace IronEchoCore
 		bool IsKnockedDown() const { return Snap.State == ActionState::KnockedDown; }
 		bool IsDown() const { return IsKnockedOut() || IsKnockedDown(); }
 		// Stamina a guard pays to stop a punch of this damage from an attack with this full damage.
-		float BlockDrain(float Damage, float FullDamage) const
+		float BlockDrain(float Damage, float FullDamage, PunchZone Zone = PunchZone::Head) const
 		{
 			const float Power = FullDamage > 0.0f ? Clamp(Damage / FullDamage, 0.0f, 2.0f) : 1.0f;
-			return Config.BlockStaminaCost * Power;
+			return Config.BlockStaminaCost * Power * (Zone == PunchZone::Body ? Config.BodyBlockDrainFactor : 1.0f);
 		}
 		// The guard holds while it can pay for the punch; an empty tank breaks it.
 		bool CanAffordBlock(float Drain) const { return Snap.Stamina >= Drain; }
@@ -132,9 +146,23 @@ namespace IronEchoCore
 		// this fighter is already winding up (the damage still counts).
 		float ReceiveHit(const AttackSpec& Spec, float Damage, int32_t Tick, CombatEventBuffer& Events, uint32_t AttackerAttackId,
 			int32_t StunTicks = -1, bool bArmPunch = false);
-		float ReceiveBlockedHit(const AttackSpec& Spec, float Damage, int32_t Tick);
+		float ReceiveBlockedHit(const AttackSpec& Spec, float Damage, int32_t Tick, PunchZone Zone = PunchZone::Head);
+		// A body shot takes the wind: stamina lost (can empty the tank and gas the fighter).
+		void TakeStaminaDamage(float Amount, int32_t Tick, CombatEventBuffer& Events);
 
-		void SetPosition(float NewPosition) { Snap.Position = NewPosition; }
+		// Ring state, written by CombatSim.
+		void SetLocation(Vec2 NewLocation) { Snap.Location = NewLocation; }
+		void SetMotion(float Forward, float Side, Vec2 InVelocity, Vec2 InFacing, bool bInOnRopes)
+		{
+			Snap.SpeedForward = Forward;
+			Snap.SpeedSide = Side;
+			Snap.Velocity = InVelocity;
+			Snap.Facing = InFacing;
+			Snap.bOnRopes = bInOnRopes;
+			Snap.bMoving = InVelocity.LengthSquared() > 0.04f; // faster than 0.2 m/s
+		}
+		void SetAimPoint(Vec2 Point) { Snap.AimPoint = Point; }
+		void NoteGlancing() { ++Snap.GlancingHits; }
 		void ClearRoundStats();
 		void NoteDodge();
 
@@ -147,7 +175,7 @@ namespace IronEchoCore
 
 	private:
 		bool CanStartAttack(Hand InHand) const;
-		void StartAttack(Hand InHand, int32_t Tick, CombatEventBuffer& Events);
+		void StartAttack(Hand InHand, PunchZone Zone, int32_t Tick, CombatEventBuffer& Events);
 		void EnterGuardOrBlock(bool bWantBlock, int32_t Tick, CombatEventBuffer& Events);
 		void SpendStamina(float Amount, int32_t Tick, CombatEventBuffer& Events);
 		CombatEvent MakeEvent(CombatEventType Type, int32_t Tick) const;
@@ -167,5 +195,6 @@ namespace IronEchoCore
 		int32_t StunTicksElapsed = 0;
 		int32_t GassedUntilTick = -1000000;
 		int32_t AttackLockedUntilTick = -1000000; // cover-up keeps the rest of the hit stun for punches
+		bool bSlipWeak = false; // the slip started without the stamina to pay for it: half a slip
 	};
 }

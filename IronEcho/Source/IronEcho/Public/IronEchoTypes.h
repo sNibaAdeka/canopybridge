@@ -7,8 +7,8 @@
 
 #include "IronEchoTypes.generated.h"
 
-#define IRONECHO_VISUAL_CONTRACT_VERSION 1
-#define IRONECHO_VISUAL_CONTRACT_MINOR 1
+#define IRONECHO_VISUAL_CONTRACT_VERSION 2
+#define IRONECHO_VISUAL_CONTRACT_MINOR 0
 
 IRONECHO_API DECLARE_LOG_CATEGORY_EXTERN(LogIronEcho, Log, All);
 
@@ -248,8 +248,18 @@ struct IRONECHO_API FIronEchoFighterVisualState
 	/** Current run of clean hits by this fighter (1.1). */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Stats") int32 ComboCount = 0;
 
-	/** Centre-to-centre distance to the opponent along the fight line, cm. */
+	/** Centre-to-centre distance to the opponent, cm. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Space") float DistanceToOpponent = 135.0f;
+	/** Footwork (contract 2): the robot's own speed toward the opponent (- = backing off) and to its own right
+	 *  (circling), cm/s. The actor transform already moves and turns the robot; drive the leg cycle with these. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Space") float MoveForwardSpeed = 0.0f;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Space") float MoveRightSpeed = 0.0f;
+	/** Ropes behind / beside the robot (no room to back off): lean back on them, cornered poses. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Space") bool bOnRopes = false;
+	/** The head's real offset off the centre line to the robot's right, cm (what hit detection uses). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Defense") float HeadSlip = 0.0f;
+	/** The current punch goes to the body (contract 2): lower the punch path, bend the knees. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bBodyShot = false;
 
 	/** World time (seconds) of the last clean hit taken; < 0 if none. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Reaction") float LastHitTakenTime = -1.0f;
@@ -356,6 +366,14 @@ struct IRONECHO_API FIronEchoCombatEvent
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") EIronEchoDodge Dodge = EIronEchoDodge::None;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bCounterHit = false;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bTired = false;
+	/** Contract 2: the punch went to the body. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bBodyShot = false;
+	/** Contract 2: a graze (HitConfirmed): reduced damage, show a lighter reaction. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bGlancing = false;
+	/** Contract 2: too close, the arm was not extended (HitConfirmed / Blocked): a short, jammed punch. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bSmothered = false;
+	/** Contract 2: fraction of the punch's full damage that landed (distance and graze), 0..1. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") float Power = 1.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") float Damage = 0.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") float TargetHealthAfter = 0.0f;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") int32 AttackId = 0;

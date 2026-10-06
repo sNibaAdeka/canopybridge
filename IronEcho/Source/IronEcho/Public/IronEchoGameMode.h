@@ -53,6 +53,7 @@ private:
 	void DispatchEvents();
 	void UpdateHudState();
 	FTransform SlotTransform(IronEchoCore::FighterSlot Slot) const;
+	void UpdateFallbackCamera(float DeltaSeconds);
 	FIronEchoFighterVisualState MakeVisualState(IronEchoCore::FighterSlot Slot, const IronEchoCore::InputFrame& Frame) const;
 	AIronEchoGameState* GetIronEchoGameState() const;
 	uint64 MakeSeed() const;
@@ -86,6 +87,7 @@ private:
 	UPROPERTY() TObjectPtr<AIronEchoFighter> OpponentFighter;
 	UPROPERTY() TObjectPtr<AIronEchoPunchingBag> Bag;
 	UPROPERTY() TObjectPtr<AActor> ViewCamera;
+	bool bFallbackCamera = false;
 	UPROPERTY() TObjectPtr<UIronEchoVisualConfig> VisualConfig;
 	UPROPERTY() TObjectPtr<UUserWidget> HudWidget;
 };

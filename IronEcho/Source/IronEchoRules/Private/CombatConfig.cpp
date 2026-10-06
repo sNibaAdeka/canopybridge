@@ -54,6 +54,11 @@ namespace IronEchoCore
 		Config.Attacks[HandIndex(Hand::Left)].StaminaCost *= 0.75f;
 		Config.Attacks[HandIndex(Hand::Right)].StaminaCost *= 0.75f;
 		Config.StaminaRegenPerSecond = 18.0f;
+		// Precision: the long windup is telegraph, not a slow arm; the bot reads a punch and snaps the head away
+		// like a machine (otherwise the player's 0.09 s jab could never be slipped), and its own punches follow a
+		// human slip slowly (a slip made in time beats them, one held from long before does not).
+		Config.HeadSlipSpeed = 8.0f;
+		Config.AimTrackSpeed = 0.20f;
 		return Config;
 	}
 
@@ -88,6 +93,11 @@ namespace IronEchoCore
 			Config.ComboChance = 0.15f;
 			Config.CrossChance = 0.35f;
 			Config.GuardUpChance = 0.30f;
+			Config.CircleChance = 0.25f;
+			Config.StepBackChance = 0.05f;
+			Config.bCutOffRing = false;
+			Config.BodyShotChance = 0.10f;
+			Config.BodyVsGuardBonus = 0.10f;
 			break;
 		case BotLevel::Normal:
 			break;
@@ -106,6 +116,10 @@ namespace IronEchoCore
 			Config.ComboChance = 0.45f;
 			Config.CrossChance = 0.45f;
 			Config.GuardUpChance = 0.35f;
+			Config.CircleChance = 0.50f;
+			Config.StepBackChance = 0.12f;
+			Config.BodyShotChance = 0.20f;
+			Config.BodyVsGuardBonus = 0.40f;
 			break;
 		}
 		return Config;

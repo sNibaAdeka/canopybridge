@@ -1,6 +1,6 @@
 // IRON ECHO release QA for the browser game (the same build is /play on the website and the Windows app).
 //
-//   node Tests/Web/qa.js [--only flows,ui,camera,offline,soak]
+//   node Tests/Web/qa.js [--only flows,ui,ring,camera,offline,soak]
 //
 // Needs Playwright with Chromium (NODE_PATH pointing at a node_modules that has `playwright`) and a built
 // Build/Web/standalone (Tools/Build/Web/build_web.py site). IRONECHO_STANDALONE overrides the folder;
@@ -169,7 +169,7 @@ async function camera(browser) {
     cam.active = false; // the synthetic body replaces the video from here, through the same processor and UI
     const frames = await (await fetch('/__synthetic.json')).json();
     cam.proc = new cam.proc.constructor((a, b, c) => cam._say(a, b, c));
-    const msgs = []; let k = 0; let calibrated = false; let fought = false;
+    const msgs = []; let k = 0; let calibrated = false; let fought = false; let peakLean = 0; let stepIn = 0;
     const feed = () => { const f = frames[Math.min(k, frames.length - 1)]; k++;
       cam.proc.process(f.w ? f.w.map(([x, y, z, visibility]) => ({ x, y, z, visibility })) : null, f.t); return cam.poll(); };
     while (k < frames.length) {
@@ -178,14 +178,66 @@ async function camera(browser) {
       if (m && msgs[msgs.length - 1] !== m) msgs.push(m);
       calibrated = calibrated || !!cam.proc.cal;
       fought = fought || app.core.snapshot().match.phaseName === 'Fighting';
+      peakLean = Math.max(peakLean, cam.proc.leanForward);
+      if (cam.proc.leanForward > 0.55) stepIn = Math.max(stepIn, app.core.snapshot().player.speedForward);
     }
     const s = app.core.snapshot();
-    return { msgs, calibrated, fought, detected: cam.proc.punches.length, thrown: s.player.thrown, landed: s.player.landed };
+    return { msgs, calibrated, fought, detected: cam.proc.punches.length, thrown: s.player.thrown, landed: s.player.landed, peakLean, stepIn };
   });
   check('camera: calibration completes with on-screen steps', r.calibrated && r.msgs.length >= 3, r.msgs.join(' → '));
   check('camera: the bout starts after calibration', r.fought);
   check('camera: body punches reach the opponent', r.thrown >= 20 && r.landed > 0, `detected ${r.detected}, thrown ${r.thrown}, landed ${r.landed}`);
+  check('camera: leaning toward the screen steps the robot in', r.peakLean >= 0.55 && r.stepIn > 0.3, `lean ${r.peakLean.toFixed(2)}, speed ${r.stepIn.toFixed(2)} m/s`);
   check('camera: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
+  await page.close();
+}
+
+// Footwork and precision through the real page: keys -> core -> robots on the canvas.
+async function ring(browser) {
+  const page = await open(browser, { width: 1280, height: 720 });
+  await page.click('[data-group="level"] button[data-value="1"]');
+  await page.click('#start');
+  // keys map to the InputFrame footwork / body-shot fields
+  const keys = {};
+  for (const [k, field, want] of [['w', 'moveForward', 1], ['s', 'moveForward', -1], ['d', 'moveSide', 1], ['a', 'moveSide', -1]]) {
+    await page.keyboard.down(k);
+    keys[k] = await page.evaluate((f) => globalThis.IRONECHO_APP.input.poll()[f], field) === want;
+    await page.keyboard.up(k);
+  }
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('j');
+  await page.keyboard.up('Shift');
+  keys.bodyJab = await page.evaluate(() => globalThis.IRONECHO_APP.input.poll().punchMask) === 4;
+  await page.keyboard.press('q');
+  check('ring: W/S/A/D move, Q/E slip, Shift+J/K go to the body', Object.values(keys).every(Boolean), JSON.stringify(keys));
+
+  const r = await page.evaluate(() => {
+    const app = globalThis.IRONECHO_APP;
+    const quiet = (extra = {}) => () => ({ status: 7, lean: 0, block: 1, punchMask: 0, ...extra });
+    for (let k = 0; k < 40 && app.core.snapshot().match.phaseName !== 'Fighting'; k++) app.debugAdvance(0.5, quiet());
+    const s0 = app.core.snapshot();
+    app.debugAdvance(1.0, quiet({ moveForward: -1 }));
+    const s1 = app.core.snapshot();
+    const walked = Math.hypot(s1.player.x - s0.player.x, s1.player.y - s0.player.y);
+    const theta0 = app.debugAdvance(0.01, quiet()).theta;
+    app.debugAdvance(1.5, quiet({ moveSide: 1 }));
+    const theta1 = app.debugAdvance(0.01, quiet()).theta;
+    const s = app.core.snapshot();
+    // the robots stand where the core says and face each other
+    const P = app.holders.player.face.position;
+    const O = app.holders.opponent.face.position;
+    const off = Math.max(Math.hypot(P.x - s.player.x, P.z + s.player.y), Math.hypot(O.x - s.opponent.x, O.z + s.opponent.y));
+    const face = Math.abs(Math.cos(app.holders.player.face.rotation.y) - s.player.faceX);
+    return { fighting: s.match.phaseName === 'Fighting', walked, gapBack: s1.match.gap, turn: Math.abs(theta1 - theta0), off, face,
+      steps: app.anim.player.steps, inRing: Math.abs(s.player.x) < 2.61 && Math.abs(s.player.y) < 2.61 };
+  });
+  check('ring: the bout runs', r.fighting);
+  check('ring: the player walks back and the bot follows', r.walked > 0.5 && r.gapBack < 2.0, `walked ${r.walked.toFixed(2)} m, gap ${r.gapBack.toFixed(2)}`);
+  check('ring: circling turns the fight line', r.turn > 0.25, `${r.turn.toFixed(2)} rad`);
+  check('ring: robots stand where the core puts them and face each other', r.off < 0.01 && r.face < 0.01 && r.inRing, `off ${r.off.toFixed(4)} m`);
+  check('ring: the feet step while walking', r.steps > 6, `${r.steps} steps`);
+  await page.screenshot({ path: path.join(PROJECT, 'Build', 'Web', 'qa_ring.png') });
+  check('ring: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
   await page.close();
 }
 
@@ -228,6 +280,7 @@ const PORT = 8790 + Math.floor(Math.random() * 100);
   try {
     if (want('flows')) await flows(browser);
     if (want('ui')) await ui(browser);
+    if (want('ring')) await ring(browser);
     if (want('camera')) await camera(browser);
     if (want('offline')) await offline(browser);
     if (want('soak')) await soak(browser);

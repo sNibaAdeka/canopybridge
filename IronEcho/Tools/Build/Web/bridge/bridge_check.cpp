@@ -1,7 +1,7 @@
 // Native twin of the browser core: runs an input script through the same bridge and prints state hashes.
 // Used by Tools/Build/Web/build_web.py to prove the WebAssembly (and wasm2js) core is bit-identical to native.
 // Input (stdin): doubles, header [mode, level, seed, rounds, roundSeconds, frames], then per frame
-// [dt, status, lean, block, punchMask]. Output: one FNV-1a hash per 60 frames and a final line "final <hash>".
+// [dt, status, lean, block, punchMask, moveForward, moveLateral]. Output: one FNV-1a hash per 60 frames and a final line "final <hash>".
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -13,7 +13,7 @@ extern "C" int32_t ie_combat_event_count();
 extern "C" int32_t ie_combat_event_size();
 extern "C" void ie_clear_events();
 extern "C" void ie_init(int32_t, int32_t, double, int32_t, double);
-extern "C" int32_t ie_frame(double, int32_t, double, double, double, double, int32_t, double);
+extern "C" int32_t ie_frame(double, int32_t, double, double, double, double, int32_t, double, double, double);
 
 namespace
 {
@@ -46,8 +46,8 @@ int main()
 	uint64_t Hash = 14695981039346656037ULL; // FNV-1a 64 offset basis (0xcbf29ce484222325)
 	for (int32_t F = 0; F < Frames; ++F)
 	{
-		const double* R = In.data() + 6 + F * 5;
-		ie_frame(R[0], static_cast<int32_t>(R[1]), 1.0, R[2], 0.0, R[3], static_cast<int32_t>(R[4]), 1.0);
+		const double* R = In.data() + 6 + F * 7;
+		ie_frame(R[0], static_cast<int32_t>(R[1]), 1.0, R[2], 0.0, R[3], static_cast<int32_t>(R[4]), 1.0, R[5], R[6]);
 		Hash = Mix(Hash, ie_state(), ie_state_size());
 		Hash = Mix(Hash, ie_combat_events(), ie_combat_event_count() * ie_combat_event_size());
 		ie_clear_events();

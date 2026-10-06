@@ -15,7 +15,7 @@ namespace IronEchoCore
 		int32_t RecoveryTicks = 0;
 		float Damage = 0.0f;
 		float StaminaCost = 0.0f;
-		float ReachMeters = 0.0f;     // max centre-to-centre gap at which the punch connects
+		float ReachMeters = 0.0f;     // max distance from the attacker's centre to the target point (head) at contact
 		float KnockbackMeters = 0.0f;
 		int32_t HitStunTicks = 0;     // stun applied to the defender on a clean hit
 	};
@@ -60,19 +60,57 @@ namespace IronEchoCore
 		float KnockdownRecoverDecay = 0.70f;   // each further knockdown in the match multiplies the above
 		float GetUpStamina = 0.50f;            // fraction of max stamina after a get-up
 		int32_t ComboWindowTicks = SecondsToTicks(1.0); // next clean hit within this window extends the combo
+
+		// ---- precision (1.2): a punch is a line from the attacker toward an aim point, the hit is geometric ----
+		// The aim follows the target's body (leading its movement) during the windup, but a head slip only at
+		// AimTrackSpeed; AimCommitTicks before the active window the aim point freezes. So a slip or a change of
+		// direction made late takes the head off the line, while one held from early on is tracked and hit.
+		float AimTrackSpeed = 0.50f;         // m/s of head slip followed
+		int32_t AimCommitTicks = SecondsToTicks(0.10);
+		float AimLeadFactor = 0.8f;          // fraction of the target's own movement anticipated
+		float HeadSlipMeters = 0.30f;        // head shift off the centre line at a full lean (|LeanLateral| = 1)
+		float HeadSlipSpeed = 5.0f;          // m/s: a full keyboard slip takes 0.06 s (a camera lean is already real motion)
+		float HeadHitRadius = 0.12f;         // glove centre within this of the head: clean
+		float HeadGlanceRadius = 0.22f;      // within this: glancing blow; beyond: miss
+		float BodyHitRadius = 0.20f;         // the torso is wide and does not move with a slip
+		float BodyGlanceRadius = 0.30f;
+		float GlancingDamageFactor = 0.45f;  // damage and stun of a glancing blow
+		// Distance: full power in the last SweetSpotMeters of the reach (arm extended); closer, the punch is
+		// smothered and loses power down to SmotheredDamageFactor at the clinch distance (MovementConfig.MinDistance).
+		float SweetSpotMeters = 0.30f;
+		float SmotheredDamageFactor = 0.50f;
+		// Body shots: a little shorter, less damage, but they take the stamina and a guard pays more to stop them.
+		float BodyReachDelta = -0.08f;
+		float BodyDamageFactor = 0.70f;
+		float BodyStaminaDamage = 9.0f;      // defender's stamina lost to a full clean body shot
+		float BodyBlockDrainFactor = 1.8f;
+		float BodyStaminaCostFactor = 1.10f;
+
+		// ---- footwork (1.2) ----
+		float StepForwardSpeed = 1.50f;      // m/s
+		float StepBackSpeed = 1.35f;
+		float CircleSpeed = 1.45f;           // tangential, around the opponent
+		float MoveAccel = 9.0f;              // m/s^2 toward the wanted velocity (weight: no instant starts)
+		float MoveBrake = 14.0f;             // m/s^2 when stopping or reversing
+		float AttackMoveFactor = 0.35f;      // moving while punching (a step-in jab still carries the body)
+		float BlockMoveFactor = 0.60f;
+		float GassedMoveFactor = 0.60f;
+		float MoveRegenFactor = 0.75f;       // stamina regen multiplier while moving
 	};
 
+	// The ring (1.2): a square of ropes, fighters are discs on the canvas and always face each other.
 	struct MovementConfig
 	{
-		float EngageDistance = 1.35f;       // preferred centre-to-centre gap
-		float MinDistance = 1.00f;
-		float RingHalfLength = 2.60f;       // usable half length of the fight line (ropes minus margin)
+		float EngageDistance = 1.35f;       // starting centre-to-centre gap; also the bot's working distance
+		float MinDistance = 1.00f;          // clinch distance: bodies never get closer
+		float RingHalfSize = 2.95f;         // ropes at |X| and |Y| = this (5.9 m between the ropes)
 		float FighterRadius = 0.35f;
-		float FollowSpeed = 0.90f;          // automatic distance keeping, m/s
-		float RetreatSpeed = 1.10f;         // opponent step-back speed, m/s
-		float RetreatExtraDistance = 0.60f;
-		float RecenterSpeed = 0.15f;        // pull of the pair midpoint toward the ring centre, m/s
-		float Tolerance = 0.02f;
+		float RopeMargin = 0.15f;           // within this of the rope limit a fighter is "on the ropes"
+		// Assist for a player who does not walk (camera play): beyond this gap the player's robot closes in by
+		// itself at AutoCloseFactor of the step speed. Inside it, distance is the player's own business. 0 = off.
+		float PlayerAutoCloseGap = 1.38f;
+		float AutoCloseFactor = 0.80f;
+		float BagReturnSpeed = 0.9f;        // training bag swinging back to the engage distance, m/s
 	};
 
 	struct MatchConfig
@@ -153,6 +191,18 @@ namespace IronEchoCore
 		int32_t GuardUpPeriodTicks = SecondsToTicks(1.0);
 		float GuardAfterHitChance = 0.45f; // covers up after taking a clean hit
 		int32_t GuardAfterHitTicks = SecondsToTicks(0.8);
+		// ---- footwork (1.2) ----
+		float RangeSlack = 0.06f;           // works at MovementConfig.EngageDistance +- this
+		float CircleChance = 0.40f;         // rolled every CircleRollTicks between exchanges
+		int32_t CircleRollTicks = SecondsToTicks(1.1);
+		int32_t CircleMinTicks = SecondsToTicks(0.5);
+		int32_t CircleMaxTicks = SecondsToTicks(1.3);
+		float CircleSpeed = 0.60f;          // fraction of the full circling speed
+		float StepBackChance = 0.10f;       // after its own punch: step straight back out (hit and move)
+		bool bCutOffRing = true;            // walks a player on the ropes down instead of circling
+		// Offence: body shots, more of them against a guard.
+		float BodyShotChance = 0.12f;
+		float BodyVsGuardBonus = 0.30f;
 		float GetUpChance[3] = {0.90f, 0.65f, 0.35f}; // per knockdown in the match (1st, 2nd, 3rd+)
 		int32_t GetUpCountMin = 3;
 		int32_t GetUpCountMax = 8;

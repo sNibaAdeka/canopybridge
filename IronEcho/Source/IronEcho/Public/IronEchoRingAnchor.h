@@ -18,7 +18,7 @@ class IRONECHO_API AIronEchoRingAnchor : public AActor
 public:
 	AIronEchoRingAnchor();
 
-	/** Half length of the usable fight line in cm (inside the ropes); validated against the rules on BeginPlay. */
+	/** How far a fighter's centre may go from the anchor along X and Y, cm (square ring, inside the ropes). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IronEcho") float UsableHalfLength = 260.0f;
 
 #if WITH_EDITORONLY_DATA

@@ -9,6 +9,7 @@
 //   - all simulation timing is integer ticks at kTickRate.
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 
 namespace IronEchoCore
@@ -36,6 +37,30 @@ namespace IronEchoCore
 		float Z = 0.0f;
 	};
 
+	// Ring plane, metres, right-handed with Z up: origin at the ring centre, +X from the player's starting corner toward
+	// the opponent's, +Y to the player's left at the start. (Unreal is left-handed: UnrealY = -Y.)
+	struct Vec2
+	{
+		float X = 0.0f;
+		float Y = 0.0f;
+
+		constexpr Vec2 operator+(Vec2 O) const { return {X + O.X, Y + O.Y}; }
+		constexpr Vec2 operator-(Vec2 O) const { return {X - O.X, Y - O.Y}; }
+		constexpr Vec2 operator*(float S) const { return {X * S, Y * S}; }
+		constexpr float Dot(Vec2 O) const { return X * O.X + Y * O.Y; }
+		constexpr float Cross(Vec2 O) const { return X * O.Y - Y * O.X; } // + when O is to the left of this
+		constexpr float LengthSquared() const { return X * X + Y * Y; }
+		float Length() const { return std::sqrt(LengthSquared()); }
+		// Unit vector, or Fallback when the length is ~0.
+		Vec2 Normalized(Vec2 Fallback = {1.0f, 0.0f}) const
+		{
+			const float L = Length();
+			return L > 1.0e-6f ? Vec2{X / L, Y / L} : Fallback;
+		}
+		// Right-hand side of a facing direction (Z up): facing +X -> right is -Y.
+		constexpr Vec2 RightOf() const { return {Y, -X}; }
+	};
+
 	// Anatomical side of the player (and of the robot that mirrors the player). Never screen side.
 	enum class Hand : uint8_t
 	{
@@ -45,6 +70,13 @@ namespace IronEchoCore
 
 	inline constexpr int32_t HandIndex(Hand InHand) { return InHand == Hand::Left ? 0 : 1; }
 	inline constexpr Hand OtherHand(Hand InHand) { return InHand == Hand::Left ? Hand::Right : Hand::Left; }
+
+	// Where a punch is aimed. Head shots can be slipped; body shots cannot, they drain the stamina instead.
+	enum class PunchZone : uint8_t
+	{
+		Head = 0,
+		Body = 1,
+	};
 
 	// Lateral dodge (slip) direction, anatomical: Left = player's own left.
 	enum class DodgeDir : int8_t

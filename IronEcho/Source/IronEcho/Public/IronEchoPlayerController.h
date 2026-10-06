@@ -34,7 +34,11 @@ public:
 private:
 	int32 PendingLeft = 0;
 	int32 PendingRight = 0;
+	int32 PendingBodyLeft = 0;
+	int32 PendingBodyRight = 0;
 	float KeyboardLean = 0.0f;
+	float KeyboardMoveForward = 0.0f;
+	float KeyboardMoveLateral = 0.0f;
 	bool bShowDebugOverlay = true;
 	bool bTrackerPreview = false;
 };
