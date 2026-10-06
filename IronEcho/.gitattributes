@@ -29,3 +29,5 @@
 # Report screenshots are small and should render on GitHub and travel in git bundles: plain git, not LFS.
 Docs/Reports/**/*.png -filter -diff -merge -text binary
 Docs/Reports/**/*.jpg -filter -diff -merge -text binary
+# deployable website (served straight from GitHub by static hosts): plain git, no LFS
+Tools/Build/Web/release/** -filter -diff -merge -text binary

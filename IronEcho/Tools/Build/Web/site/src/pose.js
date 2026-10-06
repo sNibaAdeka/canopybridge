@@ -260,10 +260,14 @@ export class PoseProcessor {
   }
 }
 
+// source: 'webcam' (getUserMedia on this computer) or 'phone' (a phone on the same Wi-Fi streams its camera to the
+// Windows app's local server; the app shows a QR code to pair it).
 export class CameraInput {
-  constructor() {
+  constructor(source = 'webcam') {
+    this.source = source;
     this.active = false;
     this.lastVideoTime = -1;
+    this.phoneSeq = 0;
     this._ui();
     this.proc = new PoseProcessor((title, progress, note) => this._say(title, progress, note));
   }
@@ -298,12 +302,16 @@ export class CameraInput {
 
   async start() {
     this.box.hidden = false;
-    this._say('Включаю камеру…', 5, 'Разреши доступ к камере. Встань в 2–3 м, чтобы в кадре были голова, руки и бёдра.');
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });
-    this.video.srcObject = stream;
-    await this.video.play();
-    this.overlay.width = this.video.videoWidth || 640;
-    this.overlay.height = this.video.videoHeight || 480;
+    if (this.source === 'phone') {
+      await this._pairPhone();
+    } else {
+      this._say('Включаю камеру…', 5, 'Разреши доступ к камере. Встань в 2–3 м, чтобы в кадре были голова, руки и бёдра.');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });
+      this.video.srcObject = stream;
+      await this.video.play();
+      this.overlay.width = this.video.videoWidth || 640;
+      this.overlay.height = this.video.videoHeight || 480;
+    }
     this._say('Загружаю модель позы…', 30, 'MediaPipe PoseLandmarker (full), один раз ~10 МБ.');
     const vision = await import(/* @vite-ignore */ `${MP_BASE}/vision_bundle.mjs`);
     const fileset = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
@@ -318,6 +326,10 @@ export class CameraInput {
     this.connections = vision.PoseLandmarker.POSE_CONNECTIONS;
     this.active = true;
     this._say(STEPS.neutral, 0, 'Калибровка: 3 коротких шага.');
+    if (this.source === 'phone') {
+      this._phoneLoop();
+      return;
+    }
     const loop = () => {
       if (!this.active) return;
       this._process();
@@ -329,9 +341,97 @@ export class CameraInput {
 
   stop() {
     this.active = false;
+    this.stopped = true;
     const s = this.video.srcObject;
     if (s) s.getTracks().forEach((tr) => tr.stop());
     this.box.hidden = true;
+    if (this.pairBox) this.pairBox.remove();
+  }
+
+  // ---- phone as the camera (Windows app only: its local server relays the phone's frames)
+  async _pairPhone() {
+    this._say('Подключаю телефон…', 5, '');
+    const res = await fetch('/__ironecho/phone');
+    if (!res.ok) throw new Error('телефон-камера работает только в приложении IronEcho для Windows');
+    const info = await res.json();
+    if (!info.urls || !info.urls.length) throw new Error('компьютер не подключён к локальной сети (Wi-Fi или кабель)');
+    const url = info.urls[0];
+    const pair = document.createElement('div');
+    pair.id = 'phone-pair';
+    pair.innerHTML = `<div class="pp-qr"></div><div class="pp-text"><b>Камера телефона</b>
+      <ol><li>Телефон и компьютер — в одной сети Wi-Fi. Если Windows спросит о доступе к сети — «Разрешить».</li><li>Наведи камеру телефона на QR-код и открой ссылку.</li>
+      <li>Браузер предупредит о сертификате: «Дополнительно» → «Перейти на сайт» (это твой компьютер).</li>
+      <li>Разреши камеру, поставь телефон в 2–3 м так, чтобы было видно тебя от головы до бёдер.</li></ol>
+      <p class="pp-status">Жду телефон…</p><small></small></div>`;
+    const style = document.createElement('style');
+    style.textContent = `#phone-pair{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;gap:22px;align-items:center;
+      width:min(92vw,720px);background:rgba(10,11,14,.94);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:22px;z-index:6;color:#e8ecf2;
+      font:500 14px/1.45 Inter,system-ui,sans-serif}
+      #phone-pair .pp-qr{flex:none;background:#fff;padding:10px;border-radius:6px;line-height:0}
+      #phone-pair .pp-qr img{width:220px;height:220px;image-rendering:pixelated}
+      #phone-pair b{font:800 26px/1.1 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.05em}
+      #phone-pair ol{margin:10px 0 8px;padding-left:20px}#phone-pair .pp-status{margin:6px 0;color:#8fb3ff;font-weight:600}#phone-pair small{display:block;color:#9aa3ae;word-break:break-all}
+      @media (max-width:640px){#phone-pair{flex-direction:column;text-align:left}}`;
+    document.head.appendChild(style);
+    document.querySelector('#stage').appendChild(pair);
+    this.pairBox = pair;
+    pair.querySelector('small').textContent = info.urls.join('  ·  ');
+    try {
+      const mod = await import('./vendor/qrcode/qrcode.mjs');
+      const qr = mod.default(0, 'M');
+      qr.addData(url);
+      qr.make();
+      const img = document.createElement('img');
+      img.src = qr.createDataURL(6, 2);
+      img.alt = url;
+      pair.querySelector('.pp-qr').appendChild(img);
+    } catch {
+      pair.querySelector('.pp-qr').remove();
+    }
+    this._say(''); // the panel carries the status while pairing
+    // first frame = paired
+    for (;;) {
+      if (this.stopped) throw new Error('отменено');
+      const frame = await this._fetchFrame(4000);
+      if (frame) { frame.close(); break; }
+    }
+    pair.remove();
+    this.pairBox = null;
+    this.video.hidden = true;
+  }
+
+  async _fetchFrame(waitMs = 1500) {
+    let res;
+    try {
+      res = await fetch(`/__ironecho/phone/frame?after=${this.phoneSeq}&wait=${waitMs}`, { cache: 'no-store' });
+    } catch {
+      return null;
+    }
+    if (res.status !== 200) return null;
+    this.phoneSeq = Number(res.headers.get('X-Seq')) || this.phoneSeq + 1;
+    return createImageBitmap(await res.blob());
+  }
+
+  async _phoneLoop() {
+    while (this.active) {
+      const bmp = await this._fetchFrame();
+      if (!this.active) { if (bmp) bmp.close(); break; }
+      const now = performance.now();
+      if (!bmp) { this.proc.process(null, now / 1000); continue; } // no frames: the processor reports tracking lost
+      if (this.overlay.width !== bmp.width || this.overlay.height !== bmp.height) {
+        this.overlay.width = bmp.width;
+        this.overlay.height = bmp.height;
+      }
+      const res = this.landmarker.detectForVideo(bmp, now);
+      const ctx = this.overlay.getContext('2d');
+      ctx.drawImage(bmp, 0, 0);
+      if (res.landmarks && res.landmarks[0]) {
+        this.drawing.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
+        this.drawing.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
+      }
+      bmp.close();
+      this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, now / 1000);
+    }
   }
 
   _process() {

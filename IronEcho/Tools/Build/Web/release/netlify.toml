@@ -1,0 +1,4 @@
+# Static site, already built by Tools/Build/Web/build_web.py public: Netlify only publishes this folder.
+[build]
+  publish = "."
+  command = ""

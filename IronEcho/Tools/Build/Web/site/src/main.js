@@ -221,20 +221,22 @@ function startBout() {
   $('#menu').hidden = true;
   $('#pause').hidden = true;
   app.hud.show(true);
-  const useCamera = settings.control === 'camera' && typeof CameraInput !== 'undefined';
+  const camSource = settings.control === 'phone' ? 'phone' : 'webcam';
+  const useCamera = (settings.control === 'camera' || settings.control === 'phone') && typeof CameraInput !== 'undefined';
+  if (app.cameraInput && (!useCamera || app.cameraInput.source !== camSource)) {
+    app.cameraInput.stop();
+    app.cameraInput = null;
+  }
   $('#help').hidden = useCamera;
   $('#pad').hidden = useCamera || !('ontouchstart' in window || navigator.maxTouchPoints > 0);
   if (useCamera && !app.cameraInput) {
-    app.cameraInput = new CameraInput();
+    app.cameraInput = new CameraInput(camSource);
     app.cameraInput.start().catch((err) => {
       console.error(err);
       app.cameraInput.stop();
       app.cameraInput = null;
       app.hud.banner('КАМЕРА НЕДОСТУПНА', String(err && err.message ? err.message : err).slice(0, 90) + ' — играю с клавиатуры', 4, 'warn');
     });
-  } else if (!useCamera && app.cameraInput) {
-    app.cameraInput.stop();
-    app.cameraInput = null;
   }
 }
 
@@ -559,6 +561,10 @@ function wireMenu() {
   pick('mode', 'mode');
   pick('quality', 'quality');
   for (const b of document.querySelectorAll('[data-group="quality"] button')) b.addEventListener('click', applyQuality);
+  // the phone camera needs the Windows app's local server (it relays the phone's frames)
+  const phoneBtn = document.querySelector('[data-group="control"] button[data-value="phone"]');
+  if (phoneBtn) phoneBtn.hidden = location.hostname !== '127.0.0.1';
+  if (settings.control === 'phone' && (!phoneBtn || phoneBtn.hidden)) settings.control = 'keys';
   pick('control', 'control');
   $('#start').addEventListener('click', async () => {
     if ($('#start').disabled) return;

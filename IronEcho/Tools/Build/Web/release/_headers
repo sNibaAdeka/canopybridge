@@ -1,0 +1,15 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/play/*
+  Permissions-Policy: camera=(self), microphone=(), geolocation=()
+
+/play/vendor/*
+  Cache-Control: public, max-age=604800
+
+/play/assets/*
+  Cache-Control: public, max-age=86400
+
+/download/*
+  Content-Disposition: attachment

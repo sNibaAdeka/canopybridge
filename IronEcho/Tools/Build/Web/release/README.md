@@ -1,11 +1,14 @@
-# Опубликованный релиз IRON ECHO 1.0
+# Сайт IRON ECHO 1.0 (готов к деплою)
 
-Сгенерированные файлы, которые раздаются публично прямо из этого репозитория (`raw.githubusercontent.com`):
+Сгенерированная папка, коммитится целиком: статический хостинг (Vercel, Netlify) берёт её прямо из GitHub — root
+directory `IronEcho/Tools/Build/Web/release`, без команды сборки.
 
-| Файл | Откуда | Зачем |
-|---|---|---|
-| `index.html` | `Build/Web/IronEcho-Public.html` (`build_web.py site` с `IRONECHO_DOWNLOAD_URL`) | вся игра одной страницей (с камерой); Netlify импортирует её по ссылке |
-| `IronEcho-Windows.zip` | `Build/Desktop/IronEcho-Windows.zip` (`Tools/Build/Desktop/build_desktop.py`) | приложение для Windows, на него ведёт кнопка «Скачать для Windows» |
+| Путь | Что |
+|---|---|
+| `/` | главная: видео боя, «Играть в браузере», «Скачать для Windows», управление |
+| `/play/` | вся игра одной страницей (камера ПК работает; телефон-камера — только в приложении) |
+| `/download/IronEcho-Windows.zip` | приложение для Windows (`IronEcho.exe`, офлайн, телефон как камера) |
+| `vercel.json`, `_headers`, `netlify.toml` | заголовки (камера разрешена на `/play`, zip — скачиванием) |
 
-Обновление: пересобрать оба, скопировать сюда, закоммитить, повторить импорт в Netlify (тот же `claude_design_project_id`
-обновляет сайт на месте). Не редактировать вручную.
+Пересборка: `build_web.py site` (с `IRONECHO_DOWNLOAD_URL=/download/IronEcho-Windows.zip`) →
+`Tools/Build/Desktop/build_desktop.py` → `build_web.py public` → `build_web.py release`. Руками не править.

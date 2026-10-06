@@ -92,3 +92,51 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print(f"[public] {out} {size / 1e6:.0f} MB")
     return out
+
+
+# ------------------------------------------------------------------------------------------------------------- release
+# Tools/Build/Web/release: the deployable website, committed so a static host (Vercel, Netlify) can build it straight from
+# the public GitHub repository. Lighter than Build/Web/public: /play is the single-file game (Build/Web/IronEcho-Public.html,
+# assets inlined; three.js/MediaPipe from their CDNs), the Windows app is in /download.
+VERCEL_JSON = {
+    "headers": [
+        {"source": "/play/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}]},
+        {"source": "/download/(.*)", "headers": [{"key": "Content-Disposition", "value": "attachment"}]},
+        {"source": "/(.*)", "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}]},
+    ],
+}
+RELEASE_DOWNLOAD_URL = "/download/IronEcho-Windows.zip"
+
+
+def build_release(project: Path, here: Path, out_root: Path) -> Path:
+    import json
+
+    from site_build import CDN_FONTS  # noqa: E402 (sibling module)
+
+    public = out_root / "public"
+    game = out_root / "IronEcho-Public.html"
+    if not (public / "index.html").exists():
+        raise SystemExit("run build_web.py public first")
+    if not game.exists() or RELEASE_DOWNLOAD_URL not in game.read_text(encoding="utf-8"):
+        raise SystemExit(f"build the single page with IRONECHO_DOWNLOAD_URL={RELEASE_DOWNLOAD_URL} (build_web.py site)")
+    out = here / "release"
+    out.mkdir(exist_ok=True)
+    for p in list(out.iterdir()):  # generated content; README.md stays
+        if p.name == "README.md":
+            continue
+        shutil.rmtree(p) if p.is_dir() else p.unlink()
+    landing = (public / "index.html").read_text(encoding="utf-8")
+    local_fonts = '<link rel="stylesheet" href="play/vendor/fonts/fonts.css">'
+    if local_fonts not in landing:
+        raise SystemExit("landing page: fonts link not found")
+    (out / "index.html").write_text(landing.replace(local_fonts, CDN_FONTS), encoding="utf-8")
+    (out / "play").mkdir()
+    shutil.copy2(game, out / "play" / "index.html")
+    shutil.copytree(public / "media", out / "media")
+    shutil.copytree(public / "download", out / "download")
+    (out / "vercel.json").write_text(json.dumps(VERCEL_JSON, indent=2) + "\n", encoding="utf-8")
+    (out / "_headers").write_text(HEADERS, encoding="utf-8")
+    shutil.copy2(here / "public" / "netlify.toml", out / "netlify.toml")
+    size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
+    print(f"[release] {out} {size / 1e6:.0f} MB")
+    return out

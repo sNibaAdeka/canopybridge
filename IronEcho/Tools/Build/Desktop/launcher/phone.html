@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12">
+<title>IRON ECHO — камера телефона</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0d12; --panel: #141922; --line: #262e3b; --fg: #eef1f6; --dim: #98a2b3; --red: #ff4b3e; --good: #3ddc84; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+  main { min-height: 100%; display: flex; flex-direction: column; gap: 14px; padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px); }
+  h1 { margin: 0; font: 800 28px/1 'Arial Narrow', 'Roboto Condensed', sans-serif; letter-spacing: .06em; }
+  h1 span { color: var(--red); }
+  .view { position: relative; flex: 1; min-height: 240px; border-radius: 10px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  video.mirror { transform: scaleX(-1); }
+  .status { padding: 12px 14px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+  .status b { display: block; font-size: 17px; }
+  .status.ok b { color: var(--good); }
+  .status.bad b { color: var(--red); }
+  .row { display: flex; gap: 10px; }
+  button { flex: 1; padding: 15px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: 700 16px/1 system-ui, sans-serif; }
+  button.go { background: var(--red); border-color: var(--red); color: #fff; }
+  ol { margin: 0; padding-left: 20px; color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1>IRON <span>ECHO</span> · камера</h1>
+  <div class="status" id="status"><b>Телефон готов стать камерой</b><span id="detail">Нажми «Начать» и разреши доступ к камере.</span></div>
+  <div class="view"><video id="video" playsinline muted autoplay></video></div>
+  <div class="row"><button class="go" id="start" type="button">НАЧАТЬ</button><button id="flip" type="button">ДРУГАЯ КАМЕРА</button></div>
+  <ol>
+    <li>Поставь телефон в 2–3 м, на уровне груди, вертикально.</li>
+    <li>В кадре должно быть видно тебя от головы до бёдер.</li>
+    <li>Не закрывай эту страницу, пока играешь: экран не погаснет сам.</li>
+  </ol>
+</main>
+<script>
+(() => {
+  const key = new URLSearchParams(location.search).get('k') || '';
+  const video = document.getElementById('video');
+  const status = document.getElementById('status');
+  const detail = document.getElementById('detail');
+  const say = (title, text, tone = '') => { status.className = `status ${tone}`; status.querySelector('b').textContent = title; detail.textContent = text; };
+  let facing = 'user';
+  let stream = null;
+  let running = false;
+  let wake = null;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  async function openCamera() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+      video: { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } } });
+    video.srcObject = stream;
+    video.classList.toggle('mirror', facing === 'user');
+    await video.play();
+  }
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch { /* not granted: fine */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && running) keepAwake(); });
+
+  async function send() {
+    let sent = 0;
+    let t0 = performance.now();
+    while (running) {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) { await new Promise((r) => setTimeout(r, 50)); continue; }
+      const s = Math.min(1, 640 / Math.max(w, h));
+      canvas.width = Math.round(w * s);
+      canvas.height = Math.round(h * s);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.72));
+      try {
+        const res = await fetch(`/phone/frame?k=${encodeURIComponent(key)}`, { method: 'POST', body: blob, headers: { 'Content-Type': 'image/jpeg' } });
+        if (res.status === 403) { running = false; say('Ссылка устарела', 'Отсканируй QR-код в игре заново.', 'bad'); break; }
+        sent++;
+      } catch {
+        say('Нет связи с компьютером', 'Проверь, что телефон и компьютер в одной сети Wi-Fi и игра запущена.', 'bad');
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      const dt = performance.now() - t0;
+      if (dt > 1000) {
+        const fps = (sent * 1000) / dt;
+        say('Камера подключена к игре', `${fps.toFixed(fps < 10 ? 1 : 0)} кадров/с — смотри на экран компьютера`, 'ok');
+        sent = 0;
+        t0 = performance.now();
+      }
+    }
+  }
+
+  document.getElementById('start').addEventListener('click', async () => {
+    if (running) return;
+    if (!key) { say('Нет ключа в ссылке', 'Открой ссылку из QR-кода в игре.', 'bad'); return; }
+    try {
+      say('Включаю камеру…', 'Разреши доступ к камере.');
+      await openCamera();
+      running = true;
+      keepAwake();
+      document.getElementById('start').textContent = 'ИДЁТ ТРАНСЛЯЦИЯ';
+      send();
+    } catch (err) {
+      say('Камера недоступна', `${err && err.message ? err.message : err}. Разреши камеру в настройках браузера для этой страницы.`, 'bad');
+    }
+  });
+  document.getElementById('flip').addEventListener('click', async () => {
+    facing = facing === 'user' ? 'environment' : 'user';
+    if (stream) { try { await openCamera(); } catch (err) { say('Не удалось переключить камеру', String(err), 'bad'); } }
+  });
+  if (!window.isSecureContext || !navigator.mediaDevices) say('Камера недоступна', 'Открой ссылку из QR-кода (https).', 'bad');
+})();
+</script>
+</body>
+</html>

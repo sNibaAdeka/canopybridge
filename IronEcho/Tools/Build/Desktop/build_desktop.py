@@ -68,7 +68,7 @@ def main() -> int:
     shutil.rmtree(src, ignore_errors=True)  # generated staging folder
     src.mkdir(parents=True)
     for f in (HERE / "launcher").iterdir():
-        if f.suffix in (".go", ".mod"):
+        if f.suffix in (".go", ".mod", ".html"):
             shutil.copy2(f, src / f.name)
     shutil.copytree(STANDALONE, src / "game")
 

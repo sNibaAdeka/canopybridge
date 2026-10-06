@@ -174,6 +174,7 @@ def full_document(fragment: str) -> str:
 CAMERA_MENU = """<div class="opt" data-group="control"><span>Управление</span><div class="seg">
       <button type="button" data-value="keys">КЛАВИАТУРА<small>и мышь</small></button>
       <button type="button" data-value="camera">КАМЕРА<small>бокс телом</small></button>
+      <button type="button" data-value="phone" hidden>ТЕЛЕФОН<small>как камера</small></button>
     </div></div>"""
 
 
@@ -301,6 +302,12 @@ def build_standalone(project: Path, here: Path, out_root: Path) -> Path | None:
         (vendor / "mediapipe" / f).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(mp / f, vendor / "mediapipe" / f)
     shutil.copy2(model, vendor / "pose_landmarker_full.task")
+    qr = deps_dir / "qrcode-generator" / "dist" / "qrcode.mjs"  # QR code for pairing the phone camera (MIT)
+    if qr.exists():
+        (vendor / "qrcode").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(qr, vendor / "qrcode" / "qrcode.mjs")
+    else:
+        print("  [standalone] qrcode-generator missing in IRONECHO_WEBDEPS: the phone pairing shows the link only")
     fonts = local_fonts(out_root / "fonts", vendor / "fonts")
     template = (here / "site" / "index.template.html").read_text(encoding="utf-8")
     game = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "pose", "main"])

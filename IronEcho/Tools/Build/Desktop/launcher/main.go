@@ -37,6 +37,7 @@ var version = "dev" // set by -ldflags "-X main.version=..."
 
 func main() {
 	serve := flag.String("serve", "", "only serve the game on this address (for example 127.0.0.1:8799), no window")
+	flag.StringVar(&phoneAddr, "phone-addr", "", "listen address for the phone camera (default 0.0.0.0:47311)")
 	flag.Parse()
 
 	for ext, typ := range map[string]string{".mjs": "text/javascript", ".js": "text/javascript", ".wasm": "application/wasm",
@@ -125,6 +126,14 @@ func listen() (string, net.Listener) {
 func handler(game fs.FS) http.Handler {
 	files := http.FileServer(http.FS(game))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case pingPath + "/phone":
+			phoneInfo(w, r)
+			return
+		case pingPath + "/phone/frame":
+			phoneFrame(w, r)
+			return
+		}
 		if r.URL.Path == pingPath {
 			lastPing.Store(time.Now().UnixNano())
 			_, _ = io.WriteString(w, pingReply)
