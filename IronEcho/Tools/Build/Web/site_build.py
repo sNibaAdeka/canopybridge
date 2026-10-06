@@ -152,7 +152,7 @@ def favicon_data_uri() -> str:
 
 
 def page(template: str, core_dir: Path, game_js: str, *, assets_script: str = "", camera_menu: str = "",
-         fonts: str = CDN_FONTS, importmap: str = CDN_IMPORTMAP) -> str:
+         fonts: str = CDN_FONTS, importmap: str = CDN_IMPORTMAP, download_menu: str = "") -> str:
     wasm_b64 = base64.b64encode((core_dir / "ironecho_core.wasm").read_bytes()).decode("ascii")
     core_js = (core_dir / "ironecho_core.js").read_text(encoding="utf-8")
     for bad in ("</script", "<!--"):
@@ -162,6 +162,7 @@ def page(template: str, core_dir: Path, game_js: str, *, assets_script: str = ""
             .replace("@@ASSETS_SCRIPT@@", assets_script).replace("@@CAMERA_MENU@@", camera_menu)
             .replace("@@FONTS@@", fonts).replace("@@IMPORTMAP@@", importmap)
             .replace("@@FAVICON@@", favicon_data_uri()).replace("@@VERSION@@", GAME_VERSION)
+            .replace("@@DOWNLOAD_MENU@@", download_menu)
             .replace("@@GAME_JS@@", game_js))
 
 
@@ -218,6 +219,15 @@ def build_site(project: Path, here: Path, out_root: Path) -> None:
         game_cam = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "pose", "main"])
         single = full_document(page(template, core_dir, game_cam, assets_script=assets_script, camera_menu=CAMERA_MENU))
         (out_root / "IronEcho-Camera.html").write_text(single, encoding="utf-8")
+        # public single page (one HTML that a host can import from a URL): the same game plus a link to the Windows app
+        download_url = os.environ.get("IRONECHO_DOWNLOAD_URL")
+        if download_url:
+            menu = (f'<a class="ghost dl-win" href="{download_url}" download>СКАЧАТЬ ДЛЯ WINDOWS<small>IronEcho.exe, '
+                    'без интернета</small></a>')
+            public = full_document(page(template, core_dir, game_cam, assets_script=assets_script, camera_menu=CAMERA_MENU,
+                                        download_menu=menu))
+            (out_root / "IronEcho-Public.html").write_text(public, encoding="utf-8")
+            print(f"[site] IronEcho-Public.html {len(public.encode()) // (1024 * 1024)} MB (camera + Windows download link)")
         shutil.copy2(out_root / "IronEcho-Camera.html", site / "IronEcho-Camera.html")  # the page offers it as a download
         print(f"[site] IronEcho-Camera.html {len(single.encode()) // (1024 * 1024)} MB (self-contained, webcam)")
     build_standalone(project, here, out_root)
