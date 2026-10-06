@@ -1,4 +1,6 @@
-# Сайт IRON ECHO 1.0 (готов к деплою)
+# Сайт IRON ECHO 1.0
+
+Опубликован: https://iron-echo-boxing.vercel.app (Vercel, проект `iron-echo-boxing`, root directory ниже).
 
 Сгенерированная папка, коммитится целиком: статический хостинг (Vercel, Netlify) берёт её прямо из GitHub — root
 directory `IronEcho/Tools/Build/Web/release`, без команды сборки.
