@@ -36,8 +36,9 @@ async function open(browser, url) {
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
   await page.addInitScript((b) => { globalThis.IRONECHO_NET = { host: '127.0.0.1', port: b, path: '/', secure: false }; }, BROKER);
-  await page.goto(url);
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
+  await page.evaluate(() => { globalThis.IRONECHO_APP.frozen = true; }); // no idle rendering: the test pumps the pages itself
   if (await page.isVisible('[data-group="quality"] button[data-value="low"]')) await page.click('[data-group="quality"] button[data-value="low"]');
   return page;
 }
@@ -135,7 +136,9 @@ const queue = (p, slot, input) => p.evaluate(([s, i]) => { globalThis.__qa.next[
     a = await snap(host);
     check('the bout resumes through the ready check and a countdown', a.phase === 'Countdown' || a.phase === 'Fighting', a.phase);
 
-    // rematch from the host
+    // rematch from the host (asked from the pause panel, like the "ЗАНОВО" button)
+    await host.evaluate(() => globalThis.IRONECHO_APP.versus.ctl |= 1);
+    await pump([host, guest], 0.5);
     await host.evaluate(() => globalThis.IRONECHO_APP.versus.ctl |= 4);
     await pump([host, guest], 0.5);
     a = await snap(host);
@@ -144,8 +147,13 @@ const queue = (p, slot, input) => p.evaluate(([s, i]) => { globalThis.__qa.next[
 
     // disconnect: the guest leaves, the host is told
     await guest.context().close();
-    await host.waitForFunction(() => !globalThis.IRONECHO_APP.versus || document.querySelector('#hud-banner, .banner') !== null, null, { timeout: 30000 }).catch(() => {});
-    await sleep(3500);
+    // a vanished browser is noticed by the data channel within seconds (or by the ten-second lockstep stall at the latest)
+    for (let k = 0; k < 60; k++) {
+      await host.evaluate(() => globalThis.IRONECHO_APP.debugAdvance(0.7, () => ({ status: 7, lean: 0, block: 0, punchMask: 0 })));
+      if (await host.evaluate(() => !globalThis.IRONECHO_APP.versus)) break;
+      await sleep(300);
+    }
+    await sleep(3500); // the "return to the menu" happens three seconds after the banner
     check('when the opponent disconnects the host is returned to the menu', await host.evaluate(() => !globalThis.IRONECHO_APP.versus && !document.querySelector('#menu').hidden));
     check('no page errors', !host.errors.length, host.errors.slice(0, 3).join(' | '));
   } finally {

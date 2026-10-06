@@ -587,6 +587,7 @@ function versusUi(snap) {
   }
   badge.hidden = false;
   const stalled = v.lock.stalled;
+  if (stalled > 600 && !v.gaveUp) { v.gaveUp = true; onPeerLeft(); } // ten seconds without the other side's frames: gone
   badge.textContent = stalled > 20 ? 'ЖДЁМ СОПЕРНИКА…' : `ОНЛАЙН · ${Math.round(v.room.rtt)} мс · задержка ввода ${Math.round((v.lock.delay / 60) * 1000)} мс`;
   badge.style.color = stalled > 20 ? '#ff7a6b' : '#9aa3ae';
   $('#pause').hidden = snap.match.phaseName !== 'Paused';

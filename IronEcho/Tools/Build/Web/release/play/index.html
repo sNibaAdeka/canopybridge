@@ -15313,7 +15313,11 @@ async function joinRoom(rawCode) {
 
 // This machine's input for one lockstep frame (10 numbers, see NetLockstep) plus the pending pause / rematch request.
 function versusSample() {
-  if (app.testInput) return app.testInput(app.versus ? app.versus.slot : 0); // QA hook: scripted input arrays
+  if (app.testInput) { // QA hook: scripted input arrays (the pause / rematch requests still ride along)
+    const t = [...app.testInput(app.versus ? app.versus.slot : 0)];
+    if (app.versus) { t[9] = (t[9] | app.versus.ctl) >>> 0; app.versus.ctl = 0; }
+    return t;
+  }
   const i = app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll();
   const live = app.state === 'playing' || app.state === 'results';
   const f = live ? i : { status: 7, lean: 0, block: 0, punchMask: 0 };
@@ -15371,6 +15375,7 @@ function versusUi(snap) {
   }
   badge.hidden = false;
   const stalled = v.lock.stalled;
+  if (stalled > 600 && !v.gaveUp) { v.gaveUp = true; onPeerLeft(); } // ten seconds without the other side's frames: gone
   badge.textContent = stalled > 20 ? 'ЖДЁМ СОПЕРНИКА…' : `ОНЛАЙН · ${Math.round(v.room.rtt)} мс · задержка ввода ${Math.round((v.lock.delay / 60) * 1000)} мс`;
   badge.style.color = stalled > 20 ? '#ff7a6b' : '#9aa3ae';
   $('#pause').hidden = snap.match.phaseName !== 'Paused';
