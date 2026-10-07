@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>IRON ECHO · камера телефона</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { color-scheme: dark; --bg: #07080a; --ink: #e7eaef; --dim: #9aa3ae; --blue: #3f7dff; --good: #5ee08a; --bad: #ff5a4a; --amber: #ffb23f; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
+  body { font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 560px; margin: 0 auto; padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px calc(env(safe-area-inset-bottom, 0px) + 18px);
+    display: grid; gap: 12px; }
+  h1 { margin: 0; font: 800 26px/1.1 "Arial Narrow", "Roboto Condensed", Impact, sans-serif; letter-spacing: .06em; }
+  h1 span { color: var(--blue); }
+  .view { position: relative; background: #000; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,.12); aspect-ratio: 3 / 4; max-height: 62vh; justify-self: center; width: 100%; }
+  video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .badge { position: absolute; left: 8px; top: 8px; padding: 4px 9px; border-radius: 4px; font-weight: 700; font-size: 13px; background: rgba(10,11,14,.8); }
+  .badge.on { color: var(--good); } .badge.wait { color: var(--amber); } .badge.off { color: var(--bad); }
+  #st { font-weight: 700; min-height: 2.8em; }
+  #st.ok { color: var(--good); } #st.err { color: var(--bad); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  button { flex: 1 1 160px; padding: 14px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: #1d2530; color: var(--ink); font: 800 15px system-ui, sans-serif; letter-spacing: .04em; }
+  button.main { background: var(--blue); border-color: var(--blue); }
+  button:disabled { opacity: .45; }
+  ol { margin: 0; padding-left: 20px; color: var(--dim); }
+  small { color: var(--dim); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>IRON <span>ECHO</span> · КАМЕРА</h1>
+  <div class="view"><video id="v" playsinline muted autoplay></video><div class="badge off" id="badge">нет связи</div></div>
+  <div id="st">Нажми «Включить камеру» и разреши доступ.</div>
+  <div class="row">
+    <button class="main" id="go" type="button">ВКЛЮЧИТЬ КАМЕРУ</button>
+    <button id="flip" type="button" hidden>СМЕНИТЬ КАМЕРУ</button>
+  </div>
+  <ol>
+    <li>Поставь телефон на опору в 2–3 м от места, где будешь драться.</li>
+    <li>Видно должно быть тебя от головы до бёдер (лучше и ноги), без яркого окна за спиной.</li>
+    <li>Не двигай телефон во время игры. Экран можно не трогать: он не погаснет.</li>
+  </ol>
+  <small id="info"></small>
+</main>
+<script src="@@PEERJS@@"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const code = (params.get('cam') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  const slot = params.get('slot') === '2' ? 2 : 1;
+  const HOST_ID = 'ironecho-cam-' + code;
+  const say = (text, cls = '') => { $('st').textContent = text; $('st').className = cls; };
+  const badge = (text, cls) => { $('badge').textContent = text; $('badge').className = 'badge ' + cls; };
+  let facing = 'environment';
+  let stream = null;
+  let peer = null;
+  let call = null;
+  let wake = null;
+  let stopped = false;
+
+  if (code.length !== 6) { say('Ссылка неполная: открой ссылку или QR-код из игры (в ней есть код комнаты).', 'err'); $('go').disabled = true; return; }
+  if (!window.Peer) { say('Не загрузилась сетевая библиотека. Проверь интернет на телефоне.', 'err'); $('go').disabled = true; return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    say('Браузер не даёт доступ к камере: нужна защищённая страница (https) и современный Safari/Chrome.', 'err');
+    $('go').disabled = true;
+    return;
+  }
+
+  async function holdScreen() {
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch { /* optional */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && stream) holdScreen(); });
+
+  async function openCamera() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });
+    const track = stream.getVideoTracks()[0];
+    try { track.contentHint = 'motion'; } catch { /* optional */ }
+    const v = $('v');
+    v.srcObject = stream;
+    v.style.transform = facing === 'user' ? 'scaleX(-1)' : 'none';
+    await v.play().catch(() => {});
+    const s = track.getSettings();
+    $('info').textContent = `${s.width || '?'}×${s.height || '?'} · ${Math.round(s.frameRate || 0)} к/с · камера: ${facing === 'user' ? 'фронтальная' : 'основная'}`;
+  }
+
+  function tune(c) { // keep the frame rate when the network is tight: shrink the picture, not the speed
+    try {
+      for (const sender of c.peerConnection.getSenders()) {
+        if (!sender.track || sender.track.kind !== 'video') continue;
+        const p = sender.getParameters();
+        p.degradationPreference = 'maintain-framerate';
+        if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+        p.encodings[0].maxBitrate = 2500000;
+        sender.setParameters(p).catch(() => {});
+      }
+    } catch { /* optional */ }
+  }
+
+  function connect() {
+    if (stopped || !peer || peer.destroyed) return;
+    badge('соединяюсь…', 'wait');
+    if (call) { try { call.close(); } catch { /* ignore */ } }
+    call = peer.call(HOST_ID, stream, { metadata: { slot } });
+    const mine = call;
+    const pc = () => mine.peerConnection;
+    const watch = setInterval(() => {
+      if (stopped || mine !== call) { clearInterval(watch); return; }
+      const state = pc() && pc().iceConnectionState;
+      if (state === 'connected' || state === 'completed') {
+        if (!mine.live) { mine.live = true; tune(mine); }
+        badge('в эфире', 'on');
+        say('Готово: камера подключена к игре. Возвращайся к компьютеру и встань перед телефоном.', 'ok');
+      } else if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+        clearInterval(watch);
+        badge('связь потеряна', 'off');
+        say('Связь с игрой потеряна, подключаюсь снова…', 'err');
+        setTimeout(connect, 1500);
+      }
+    }, 500);
+    mine.on('close', () => { if (mine === call && !stopped) { clearInterval(watch); badge('связь потеряна', 'off'); setTimeout(connect, 1500); } });
+    mine.on('error', () => {});
+  }
+
+  async function start() {
+    $('go').disabled = true;
+    say('Включаю камеру…');
+    try {
+      await openCamera();
+    } catch (err) {
+      say(err && err.name === 'NotAllowedError' ? 'Доступ к камере запрещён: разреши его в настройках браузера для этой страницы и нажми снова.' : `Камера не открылась: ${err && err.message || err}`, 'err');
+      $('go').disabled = false;
+      return;
+    }
+    holdScreen();
+    $('flip').hidden = false;
+    $('go').hidden = true;
+    say('Соединяюсь с игрой…');
+    peer = new Peer(undefined, Object.assign({
+      debug: 0,
+      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }] },
+    }, globalThis.IRONECHO_NET || {}));
+    peer.on('open', connect);
+    peer.on('error', (err) => {
+      if (err.type === 'peer-unavailable') { badge('ищу игру…', 'wait'); say('Игра с таким кодом не найдена. Открыта ли страница игры на компьютере с вкладкой «Вторая камера»? Пробую снова…', 'err'); setTimeout(connect, 2000); }
+      else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') { badge('нет сети', 'off'); say('Нет связи с сетью. Проверь интернет на телефоне.', 'err'); }
+    });
+    peer.on('disconnected', () => { try { peer.reconnect(); } catch { /* ignore */ } });
+  }
+
+  $('go').addEventListener('click', start);
+  $('flip').addEventListener('click', async () => {
+    facing = facing === 'user' ? 'environment' : 'user';
+    try { await openCamera(); connect(); } catch (err) { facing = facing === 'user' ? 'environment' : 'user'; say(`Не получилось сменить камеру: ${err && err.message || err}`, 'err'); }
+  });
+  window.addEventListener('pagehide', () => { stopped = true; try { if (peer) peer.destroy(); } catch { /* ignore */ } });
+})();
+</script>
+</body>
+</html>

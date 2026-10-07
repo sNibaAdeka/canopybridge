@@ -17,10 +17,14 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.2.0"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.3.0"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
+# the full game (everything the browser page runs), in bundling order
+GAME_BUNDLE = ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "camlink", "fusion", "pose", "main"]
+# where the Windows app sends a phone to pair as a second camera (the phone needs an https page; the app's own server is http)
+PUBLIC_SITE = os.environ.get("IRONECHO_PUBLIC_URL", "https://iron-echo-boxing.vercel.app").rstrip("/")
 
 # name in the page -> (source in Build/Web/assets, max size, JPEG quality)
 TEXTURES = {
@@ -179,6 +183,12 @@ CAMERA_MENU = """<div class="opt" data-group="control"><span>Управлени�
     <div class="opt" data-group="tracking"><span>Точность камеры</span><div class="seg">
       <button type="button" data-value="full">ОБЫЧНАЯ<small>быстрее</small></button>
       <button type="button" data-value="heavy">ВЫСОКАЯ<small>точнее, ~30 МБ</small></button>
+    </div></div>
+    <div class="opt" data-group="camera2" hidden><span>Вторая камера</span><div class="seg">
+      <button type="button" data-value="off">НЕТ<small>одна камера</small></button>
+      <button type="button" data-value="phone">+ ТЕЛЕФОН<small>точнее удары</small></button>
+      <button type="button" data-value="phone-fast">+ ТЕЛЕФОН<small>меньше задержка</small></button>
+      <button type="button" data-value="phones">2 ТЕЛЕФОНА<small>без веб-камеры</small></button>
     </div></div>"""
 
 
@@ -221,7 +231,7 @@ def build_site(project: Path, here: Path, out_root: Path) -> None:
         data = {p.name: f"data:{mime[p.suffix]};base64," + base64.b64encode(p.read_bytes()).decode("ascii")
                 for p in sorted(cam_assets.iterdir()) if p.suffix in mime}
         assets_script = "<script>globalThis.IRONECHO_ASSETS = " + json.dumps(data) + ";</script>"
-        game_cam = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "pose", "main"])
+        game_cam = bundle(src, GAME_BUNDLE)
         single = full_document(page(template, core_dir, game_cam, assets_script=assets_script, camera_menu=CAMERA_MENU))
         (out_root / "IronEcho-Camera.html").write_text(single, encoding="utf-8")
         # public single page (one HTML that a host can import from a URL): the same game plus a link to the Windows app
@@ -247,11 +257,12 @@ THREE_ADDONS = ["loaders/GLTFLoader.js", "utils/BufferGeometryUtils.js", "libs/m
                 "geometries/RoundedBoxGeometry.js"]
 # SIMD build only (every Chrome/Edge/Firefox/Safari since 2021-2023); the no-SIMD twin would add 9 MB
 MEDIAPIPE_FILES = ["vision_bundle.mjs", "wasm/vision_wasm_internal.js", "wasm/vision_wasm_internal.wasm"]
-STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", '
+STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", "qrcode": "./vendor/qrcode/qrcode.mjs", '
+                   f'"phonePage": "{PUBLIC_SITE}/phone/", '
                    '"poseModel": "./vendor/pose_landmarker_full.task", "poseModelHeavy": "./vendor/pose_landmarker_heavy.task", '
                    '"peerjs": "./vendor/peerjs/peerjs.min.js", "glb": "plain"};</script>')
 # the single public page (the website's /play) keeps three.js / MediaPipe on their CDNs but serves PeerJS itself
-PUBLIC_DEPS = '<script>globalThis.IRONECHO_DEPS = {"peerjs": "./peerjs.min.js"};</script>'
+PUBLIC_DEPS = '<script>globalThis.IRONECHO_DEPS = {"peerjs": "./peerjs.min.js", "qrcode": "./qrcode.mjs", "phonePage": "../phone/"};</script>'
 
 
 def local_fonts(cache: Path, dst: Path) -> str:
@@ -328,7 +339,7 @@ def build_standalone(project: Path, here: Path, out_root: Path) -> Path | None:
         print("  [standalone] qrcode-generator missing in IRONECHO_WEBDEPS: the phone pairing shows the link only")
     fonts = local_fonts(out_root / "fonts", vendor / "fonts")
     template = (here / "site" / "index.template.html").read_text(encoding="utf-8")
-    game = bundle(src, ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "pose", "main"])
+    game = bundle(src, GAME_BUNDLE)
     doc = full_document(page(template, out_root / "core", game, assets_script=STANDALONE_DEPS, camera_menu=CAMERA_MENU,
                              fonts=fonts, importmap=LOCAL_IMPORTMAP))
     (out / "index.html").write_text(doc, encoding="utf-8")

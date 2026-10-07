@@ -101,6 +101,7 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
 VERCEL_JSON = {
     "headers": [
         {"source": "/play/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}]},
+        {"source": "/phone/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}, {"key": "Cache-Control", "value": "no-cache"}]},
         {"source": "/download/(.*)", "headers": [{"key": "Content-Disposition", "value": "attachment"}]},
         {"source": "/(.*)", "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}]},
     ],
@@ -133,6 +134,10 @@ def build_release(project: Path, here: Path, out_root: Path) -> Path:
     (out / "play").mkdir()
     shutil.copy2(game, out / "play" / "index.html")
     shutil.copy2(public / "play" / "vendor" / "peerjs" / "peerjs.min.js", out / "play" / "peerjs.min.js")  # online duel
+    shutil.copy2(public / "play" / "vendor" / "qrcode" / "qrcode.mjs", out / "play" / "qrcode.mjs")  # QR code of the phone camera
+    phone = (here / "site" / "phone.template.html").read_text(encoding="utf-8").replace("@@PEERJS@@", "../play/peerjs.min.js")
+    (out / "phone").mkdir()
+    (out / "phone" / "index.html").write_text(phone, encoding="utf-8")  # the phone's side of the second camera
     shutil.copytree(public / "media", out / "media")
     shutil.copytree(public / "download", out / "download")
     (out / "vercel.json").write_text(json.dumps(VERCEL_JSON, indent=2) + "\n", encoding="utf-8")

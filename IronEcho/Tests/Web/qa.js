@@ -269,9 +269,11 @@ async function soak(browser) {
     }));
     await page.click('#rematch');
   }
-  const [a, , c] = samples;
+  // the first bout may create one-off resources lazily (an effect texture at the first knockdown): a leak is growth from
+  // one bout to the next, so the second and third are compared
+  const [, b, c] = samples;
   check('soak: three bouts in a row leak no scene objects, geometries or textures',
-    c.objects === a.objects && c.textures === a.textures && c.geometries <= a.geometries + 2, JSON.stringify(samples));
+    c.objects === b.objects && c.textures === b.textures && c.geometries <= b.geometries + 2, JSON.stringify(samples));
   await page.close();
 }
 

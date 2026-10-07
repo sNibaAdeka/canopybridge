@@ -129,7 +129,8 @@
   }
   .brand span { color: var(--red); }
   .lede { color: var(--dim); margin: 8px 0 18px; max-width: 46ch; }
-  .opt { margin: 14px 0 0; }
+  .opt { margin: 12px 0 0; }
+  @media (max-height: 800px) { .lede { margin-bottom: 12px; } .seg button { padding: 8px; } }
   .opt > span { display: block; font: 700 12px/1 var(--display); letter-spacing: 0.16em; color: var(--faint); margin-bottom: 7px; text-transform: uppercase; }
   .seg { display: flex; flex-wrap: wrap; gap: 6px; }
   .seg button { flex: 1 1 0; min-width: 0; padding: 10px 8px; border-radius: 5px; border: 1px solid var(--line); background: rgba(255,255,255,0.03);

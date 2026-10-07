@@ -1,4 +1,4 @@
-# Сайт IRON ECHO 1.0
+# Сайт IRON ECHO 1.3
 
 Опубликован: https://iron-echo-boxing.vercel.app (Vercel, проект `iron-echo-boxing`, root directory ниже).
 
@@ -8,7 +8,8 @@ directory `IronEcho/Tools/Build/Web/release`, без команды сборки
 | Путь | Что |
 |---|---|
 | `/` | главная: видео боя, «Играть в браузере», «Скачать для Windows», управление |
-| `/play/` | вся игра одной страницей (камера ПК работает; телефон-камера — только в приложении) |
+| `/play/` | вся игра одной страницей (камера ПК; вторая камера — телефон по QR, см. `/phone/`) |
+| `/phone/` | страница телефона: включает камеру и шлёт видео в игру по WebRTC (открывается по QR из игры) |
 | `/download/IronEcho-Windows.zip` | приложение для Windows (`IronEcho.exe`, офлайн, телефон как камера) |
 | `vercel.json`, `_headers`, `netlify.toml` | заголовки (камера разрешена на `/play`, zip — скачиванием) |
 

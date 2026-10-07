@@ -15,7 +15,7 @@ const NAMES = ['FORGE 07', 'EMBER 13'];
 const PHASE_LABEL = { WaitingForPlayer: 'ПРИГОТОВЬСЯ', Paused: 'ПАУЗА' };
 const $ = (s) => document.querySelector(s);
 
-const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full' }; // Easy first: new players lose ~94% on Normal
+const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off' }; // Easy first: new players lose ~94% on Normal
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
 } catch { /* storage unavailable: defaults */ }
@@ -232,14 +232,19 @@ function startBout(versus) {
   app.hud.show(true);
   const camSource = settings.control === 'phone' ? 'phone' : 'webcam';
   const useCamera = (settings.control === 'camera' || settings.control === 'phone') && typeof CameraInput !== 'undefined';
-  if (app.cameraInput && (!useCamera || app.cameraInput.source !== camSource || app.cameraInput.model !== settings.tracking)) {
+  // second camera (web only): a phone next to the webcam, or two phones instead of it; 'fast' waits less for the phone's video
+  const second = settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage ? settings.camera2.replace('-fast', '') : 'off';
+  const secondWait = settings.camera2.endsWith('-fast') ? 0.06 : 0.18;
+  const cameraKey = `${camSource}|${second}|${secondWait}`;
+  if (app.cameraInput && (!useCamera || app.cameraInput.key !== cameraKey || app.cameraInput.model !== settings.tracking)) {
     app.cameraInput.stop();
     app.cameraInput = null;
   }
   $('#help').hidden = useCamera;
   $('#pad').hidden = useCamera || !('ontouchstart' in window || navigator.maxTouchPoints > 0);
   if (useCamera && !app.cameraInput) {
-    app.cameraInput = new CameraInput(camSource, { model: settings.tracking });
+    app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait });
+    app.cameraInput.key = cameraKey;
     app.cameraInput.start().catch((err) => {
       console.error(err);
       app.cameraInput.stop();
@@ -798,6 +803,12 @@ function wireMenu() {
   if (settings.control === 'phone' && (!phoneBtn || phoneBtn.hidden)) settings.control = 'keys';
   pick('control', 'control');
   pick('tracking', 'tracking');
+  pick('camera2', 'camera2');
+  // the second camera needs the phone page next to the game (the public site and the Windows app have it) and a webcam game
+  const cam2 = document.querySelector('[data-group="camera2"]');
+  const syncCam2 = () => { if (cam2) cam2.hidden = !(settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage); };
+  for (const b of document.querySelectorAll('[data-group="control"] button')) b.addEventListener('click', syncCam2);
+  syncCam2();
   $('#start').addEventListener('click', async () => {
     if ($('#start').disabled) return;
     app.sound.start();

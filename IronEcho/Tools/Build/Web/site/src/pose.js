@@ -398,6 +398,80 @@ export class PoseProcessor {
   }
 }
 
+// One camera stream (the computer's webcam is handled inline by CameraInput; the phones' WebRTC streams come through here):
+// a <video>, its own landmarker, an overlay with the skeleton, and a callback with the world landmarks and the time the
+// frame reached us (the best clock we have for a remote stream; PoseFusion finds the constant part of the delay itself).
+class PoseTap {
+  constructor(host, els, onWorld) {
+    this.host = host;
+    this.els = els; // { video, overlay, badge: (q) => void }
+    this.onWorld = onWorld;
+    this.active = false;
+    this.inferMs = 0;
+    this.frames = 0;
+    this.total = 0; // frames processed since the stream attached
+    this.fpsAt = performance.now();
+    this.fps = 0;
+    this.lastVideoTime = -1;
+    this.lastQualityAt = 0;
+    this.lastFrameAt = 0;
+  }
+
+  async attach(stream) {
+    const v = this.els.video;
+    v.srcObject = stream;
+    v.muted = true;
+    v.playsInline = true;
+    try { await v.play(); } catch { /* the first frame event starts it */ }
+    if (!this.landmarker) this.landmarker = await this.host._makeLandmarker();
+    if (this.active) return;
+    this.active = true;
+    const loop = (now, meta) => {
+      if (!this.active) return;
+      this._process(meta);
+      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(loop);
+      else requestAnimationFrame(loop);
+    };
+    loop();
+  }
+
+  stop() {
+    this.active = false;
+    const v = this.els.video;
+    if (v.srcObject) v.srcObject = null;
+  }
+
+  _process(meta) {
+    const v = this.els.video;
+    if (v.currentTime === this.lastVideoTime || !v.videoWidth) return;
+    this.lastVideoTime = v.currentTime;
+    const o = this.els.overlay;
+    if (o.width !== v.videoWidth || o.height !== v.videoHeight) { o.width = v.videoWidth; o.height = v.videoHeight; }
+    const now = performance.now();
+    const res = this.landmarker.detectForVideo(v, now);
+    const infer = performance.now() - now;
+    this.inferMs = this.inferMs ? this.inferMs * 0.9 + infer * 0.1 : infer;
+    this.frames++;
+    this.total++;
+    if (now - this.fpsAt > 1000) { this.fps = (this.frames * 1000) / (now - this.fpsAt); this.frames = 0; this.fpsAt = now; }
+    this.lastFrameAt = now;
+    const ctx = o.getContext('2d');
+    ctx.clearRect(0, 0, o.width, o.height);
+    const lm = res.landmarks && res.landmarks[0];
+    if (lm) {
+      if (!this.du) this.du = this.host.drawing(ctx);
+      this.du.drawConnectors(lm, this.host.connections, { color: '#3f7dff', lineWidth: 3 });
+      this.du.drawLandmarks(lm, { color: '#ffffff', radius: 2 });
+    }
+    if (now - this.lastQualityAt >= 400) {
+      this.lastQualityAt = now;
+      this.els.badge(this.host._qualityOf(res, this.inferMs), this);
+    }
+    const stamp = meta && Number.isFinite(meta.receiveTime) ? meta.receiveTime : (meta && Number.isFinite(meta.captureTime) ? meta.captureTime : now);
+    this.onWorld(stamp / 1000, res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null);
+  }
+}
+
 // source: 'webcam' (getUserMedia on this computer) or 'phone' (a phone on the same Wi-Fi streams its camera to the
 // Windows app's local server; the app shows a QR code to pair it).
 export class CameraInput {
@@ -410,6 +484,14 @@ export class CameraInput {
     this.active = false;
     this.lastVideoTime = -1;
     this.phoneSeq = 0;
+    // second camera: 'off' | 'phone' (the computer's webcam + one phone) | 'phones' (two phones, no webcam)
+    this.second = opts.second === 'phone' || opts.second === 'phones' ? opts.second : 'off';
+    this.waitBudget = opts.wait;
+    this.link = null;
+    this.fusion = null;
+    this.fusionInfo = null;
+    this.taps = {};
+    this.streams = {};
     this._ui();
     this.proc = new PoseProcessor((title, progress, note) => this._say(title, progress, note));
   }
@@ -450,6 +532,9 @@ export class CameraInput {
     this.box.hidden = false;
     if (this.source === 'phone') {
       await this._pairPhone();
+    } else if (this.second === 'phones') {
+      this.video.hidden = false;
+      await this._openLink();
     } else {
       this._say('Включаю камеру…', 5, 'Разреши доступ к камере. Встань в 2–3 м, чтобы в кадре были голова, руки и бёдра.');
       // 640x480 is enough (the network sees ~256 px); what matters is the frame rate: ask for 60, take what the camera gives
@@ -458,31 +543,30 @@ export class CameraInput {
       await this.video.play();
       this.overlay.width = this.video.videoWidth || 640;
       this.overlay.height = this.video.videoHeight || 480;
+      if (this.second === 'phone') {
+        try {
+          await this._openLink();
+        } catch (err) { // no internet for the introduction: play on with the webcam alone
+          this.second = 'off';
+          this._say('Телефон не подключить', 10, `${err.message}. Играем с одной камерой.`);
+          await new Promise((r) => setTimeout(r, 2200));
+        }
+      }
     }
     const names = { full: 'обычная', heavy: 'высокая точность, ~30 МБ', lite: 'лёгкая' };
     this._say('Загружаю модель позы…', 30, `MediaPipe PoseLandmarker: ${names[this.model]}, один раз.`);
     const vision = await import(/* @vite-ignore */ `${MP_BASE}/vision_bundle.mjs`);
-    const fileset = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
-    // a lower presence / tracking bar keeps the skeleton through fast punches and motion blur (the processor
-    // still drops frames whose key points are not visible)
-    const options = (model, delegate) => ({ baseOptions: { modelAssetPath: MODELS[model], delegate }, runningMode: 'VIDEO', numPoses: 1,
-      minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.4 });
-    const create = async (model) => {
-      try {
-        return await vision.PoseLandmarker.createFromOptions(fileset, options(model, 'GPU'));
-      } catch {
-        return vision.PoseLandmarker.createFromOptions(fileset, options(model, 'CPU'));
-      }
-    };
+    this.vision = vision;
+    this.fileset = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
     try {
-      this.landmarker = await create(this.model);
+      this.landmarker = await this._makeLandmarker(this.model);
     } catch (err) {
       if (this.model === 'full') throw err;
       this._say('Модель не загрузилась', 30, 'Беру обычную модель.');
       this.model = 'full';
-      this.landmarker = await create('full');
+      this.landmarker = await this._makeLandmarker('full');
     }
-    this.drawing = new vision.DrawingUtils(this.overlay.getContext('2d'));
+    this.drawingUtils = new vision.DrawingUtils(this.overlay.getContext('2d'));
     this.connections = vision.PoseLandmarker.POSE_CONNECTIONS;
     this.active = true;
     this._say(STEPS.neutral, 0, 'Калибровка: 3 коротких шага.');
@@ -490,6 +574,11 @@ export class CameraInput {
       this._phoneLoop();
       return;
     }
+    if (this.second !== 'off') {
+      this._startFusion();
+      for (const slot of [1, 2]) if (this.streams[slot]) this._attachPhone(slot);
+    }
+    if (this.second === 'phones') return; // the phone streams drive the processing
     const loop = (now, meta) => {
       if (!this.active) return;
       // the moment the camera captured the frame (not the moment we got to it): steadier speeds for the punch detector
@@ -500,13 +589,171 @@ export class CameraInput {
     loop();
   }
 
+  // a lower presence / tracking bar keeps the skeleton through fast punches and motion blur (the processor still drops
+  // frames whose key points are not visible)
+  async _makeLandmarker(model = this.model) {
+    const options = (delegate) => ({ baseOptions: { modelAssetPath: MODELS[model], delegate }, runningMode: 'VIDEO', numPoses: 1,
+      minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.4 });
+    try {
+      return await this.vision.PoseLandmarker.createFromOptions(this.fileset, options('GPU'));
+    } catch {
+      return this.vision.PoseLandmarker.createFromOptions(this.fileset, options('CPU'));
+    }
+  }
+
+  // DrawingUtils bound to a canvas context (one per overlay)
+  drawing(ctx) {
+    return ctx === this.overlay.getContext('2d') ? this.drawingUtils : new this.vision.DrawingUtils(ctx);
+  }
+
   stop() {
     this.active = false;
     this.stopped = true;
     const s = this.video.srcObject;
     if (s) s.getTracks().forEach((tr) => tr.stop());
+    for (const tap of Object.values(this.taps)) tap.stop();
+    if (this.link) this.link.close();
+    clearInterval(this.panelTimer);
+    if (this.panel) this.panel.remove();
+    if (this.box2) this.box2.remove();
     this.box.hidden = true;
     if (this.pairBox) this.pairBox.remove();
+  }
+
+  // ---- phones over WebRTC (public site and Windows app; needs the internet only for the introduction)
+  _startFusion() {
+    const opts = this.waitBudget ? { waitBudget: this.waitBudget } : {};
+    this.fusion = new PoseFusion((t, world, info) => {
+      this.fusionInfo = info;
+      this.proc.process(world, t);
+    }, opts);
+  }
+
+  async _openLink() {
+    this._say('Готовлю подключение телефона…', 5, '');
+    this.link = new PhoneLink();
+    this.link.on('stream', ({ slot, stream }) => {
+      this.streams[slot] = stream;
+      if (this.landmarker && this.active) this._attachPhone(slot);
+      this._refreshPanel();
+    });
+    this.link.on('lost', ({ slot }) => {
+      delete this.streams[slot];
+      if (this.taps[slot]) { this.taps[slot].stop(); delete this.taps[slot]; }
+      this._refreshPanel();
+    });
+    this.link.on('error', (text) => { if (this.panel) this.panel.querySelector('.pp-note').textContent = text; });
+    await this.link.open();
+    await this._panel();
+  }
+
+  _attachPhone(slot) {
+    const isMain = this.second === 'phones' && slot === 1;
+    let tap = this.taps[slot];
+    if (!tap) {
+      const els = isMain
+        ? { video: this.video, overlay: this.overlay, badge: (q) => this._badge(q) }
+        : this._phoneBox(slot);
+      const push = (t, world) => (slot === 1 && this.second === 'phones' ? this.fusion.pushA(t, world) : this.fusion.pushB(t, world));
+      tap = new PoseTap(this, els, push);
+      this.taps[slot] = tap;
+    }
+    tap.attach(this.streams[slot]).catch((err) => console.error('phone stream', err));
+  }
+
+  // a small preview of a phone camera under the main one
+  _phoneBox(slot) {
+    if (!this.box2) {
+      const box = document.createElement('div');
+      box.id = 'cam2';
+      box.innerHTML = '<video playsinline muted></video><canvas></canvas><div class="cam-q"><i></i><span></span></div>';
+      document.querySelector('#stage').appendChild(box);
+      this.box2 = box;
+    }
+    const box = this.box2;
+    box.hidden = false;
+    const q = box.querySelector('.cam-q');
+    return {
+      video: box.querySelector('video'),
+      overlay: box.querySelector('canvas'),
+      badge: (res, tap) => {
+        q.className = `cam-q ${res.level}`;
+        q.querySelector('span').textContent = `Телефон ${slot}: ${res.tip} · ${Math.round(tap.fps)} к/с`;
+      },
+    };
+  }
+
+  async _panel() {
+    const need = this.second === 'phones' ? [1, 2] : [1];
+    const style = document.createElement('style');
+    style.textContent = `#cam2{position:absolute;right:16px;top:calc(env(safe-area-inset-top,0px) + 92px + min(30vw,300px) * .75 + 12px);width:min(30vw,300px);aspect-ratio:4/3;
+      border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#000;z-index:5;pointer-events:none}
+      #cam2 video,#cam2 canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+      #cam2 .cam-q{position:absolute;left:0;right:0;bottom:0;padding:3px 6px;background:rgba(10,11,14,.78);font:600 11px/1.3 Inter,system-ui,sans-serif;color:#e8ecf2}
+      #cam2 .cam-q i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#888}
+      #cam2 .cam-q.good i{background:#3ddc84}#cam2 .cam-q.warn i{background:#ffb020}#cam2 .cam-q.bad i{background:#ff4b3e}
+      #cam-link{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 80px);transform:translateX(-50%);z-index:7;width:min(94vw,760px);
+        background:rgba(10,11,14,.95);border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:16px 18px;color:#e8ecf2;font:500 14px/1.45 Inter,system-ui,sans-serif}
+      #cam-link b{font:800 24px/1.1 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.05em}
+      #cam-link .pp-row{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0}
+      #cam-link .pp-ph{display:flex;gap:12px;align-items:center;min-width:0;flex:1 1 280px}
+      #cam-link .pp-qr{flex:none;background:#fff;padding:6px;border-radius:6px;line-height:0;width:132px;height:132px}
+      #cam-link .pp-qr img{width:120px;height:120px;image-rendering:pixelated}
+      #cam-link .pp-st{font-weight:700;color:#8fb3ff}#cam-link .pp-st.on{color:#3ddc84}
+      #cam-link small{display:block;color:#9aa3ae;word-break:break-all}
+      #cam-link button{margin-top:6px;background:#1d2530;color:#e8ecf2;border:1px solid rgba(255,255,255,.18);border-radius:6px;padding:7px 14px;font:700 13px Inter,system-ui,sans-serif;cursor:pointer;pointer-events:auto}`;
+    document.head.appendChild(style);
+    const panel = document.createElement('div');
+    panel.id = 'cam-link';
+    const title = this.second === 'phones' ? 'Два телефона вместо веб-камеры' : 'Второй телефон как камера';
+    panel.innerHTML = `<b>${title}</b>
+      <div class="pp-row">${need.map((slot) => `<div class="pp-ph" data-slot="${slot}"><div class="pp-qr"></div>
+        <div><div>${this.second === 'phones' ? (slot === 1 ? 'Телефон 1 (главная камера)' : 'Телефон 2 (сбоку)') : 'Телефон (поставь сбоку, под углом 45–90° к веб-камере)'}</div>
+        <div class="pp-st">ждём…</div><small></small></div></div>`).join('')}</div>
+      <div class="pp-note">Наведи камеру телефона на QR-код (или открой ссылку) и разреши камеру. Телефоны ставь в 2–3 м, чтобы было видно тебя от головы до бёдер. Синхронизация и угол подберутся сами, пока ты двигаешься.</div>
+      <button type="button" class="pp-close">Играть дальше</button>`;
+    document.querySelector('#stage').appendChild(panel);
+    this.panel = panel;
+    panel.querySelector('.pp-close').addEventListener('click', () => { panel.hidden = true; });
+    let qrmod = null;
+    try { qrmod = await import(/* @vite-ignore */ DEPS.qrcode || './vendor/qrcode/qrcode.mjs'); } catch { /* the link text is enough */ }
+    for (const slot of need) {
+      const url = this.link.url(slot);
+      const row = panel.querySelector(`[data-slot="${slot}"]`);
+      if (!url) { row.querySelector('small').textContent = 'В этой версии страницы нет сопряжения телефона: открой сайт iron-echo-boxing.vercel.app/play'; row.querySelector('.pp-qr').remove(); continue; }
+      row.querySelector('small').textContent = url;
+      if (qrmod) {
+        try {
+          const qr = qrmod.default(0, 'M');
+          qr.addData(url);
+          qr.make();
+          const img = document.createElement('img');
+          img.src = qr.createDataURL(5, 2);
+          img.alt = url;
+          row.querySelector('.pp-qr').appendChild(img);
+        } catch { row.querySelector('.pp-qr').remove(); }
+      } else row.querySelector('.pp-qr').remove();
+    }
+    this.panelTimer = setInterval(() => this._refreshPanel(), 700);
+    this._refreshPanel();
+  }
+
+  _refreshPanel() {
+    if (!this.panel) return;
+    const need = this.second === 'phones' ? [1, 2] : [1];
+    let all = true;
+    for (const slot of need) {
+      const st = this.panel.querySelector(`[data-slot="${slot}"] .pp-st`);
+      const tap = this.taps[slot];
+      const on = !!this.streams[slot];
+      all = all && on;
+      st.classList.toggle('on', on);
+      st.textContent = !on ? 'ждём подключения…' : tap && tap.fps > 1 ? `подключён · ${Math.round(tap.fps)} к/с` : 'подключён · загружаю модель…';
+    }
+    if (all && !this.panelDone) {
+      this.panelDone = true;
+      setTimeout(() => { if (this.panel) this.panel.hidden = true; }, 2500);
+    }
   }
 
   // ---- phone as the camera (Windows app only: its local server relays the phone's frames)
@@ -588,8 +835,8 @@ export class CameraInput {
       const ctx = this.overlay.getContext('2d');
       ctx.drawImage(bmp, 0, 0);
       if (res.landmarks && res.landmarks[0]) {
-        this.drawing.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
-        this.drawing.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
+        this.drawingUtils.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
+        this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
       }
       bmp.close();
       this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, now / 1000);
@@ -602,6 +849,10 @@ export class CameraInput {
     const now = performance.now();
     if (now - this.lastQualityAt < 400) return;
     this.lastQualityAt = now;
+    this._badge(this._qualityOf(res, this.inferMs));
+  }
+
+  _qualityOf(res, inferMs) {
     let level = 'good';
     let tip = 'Отслеживание в норме';
     const lm = res.landmarks && res.landmarks[0];
@@ -623,8 +874,20 @@ export class CameraInput {
       else if (height < 0.42) { level = 'warn'; tip = 'Подойди ближе: ты слишком мелкий в кадре'; }
       else if (xs.length && (Math.min(...xs) < 0.04 || Math.max(...xs) > 0.96)) { level = 'warn'; tip = 'Встань по центру кадра'; }
       else if (mean < 0.7) { level = 'warn'; tip = 'Видимость средняя: добавь света'; }
-      else if (this.inferMs > 45) { level = 'warn'; tip = `Трекер тормозит (${Math.round(this.inferMs)} мс): выбери «Обычная» точность`; }
+      else if (inferMs > 45) { level = 'warn'; tip = `Трекер тормозит (${Math.round(inferMs)} мс): выбери «Обычная» точность`; }
       else if (!this.proc.legsVisible && this.proc.cal) { tip = 'Ноги не видны: удары ногами выключены (отойди на 3 м)'; }
+    }
+    return { level, tip };
+  }
+
+  _badge(q) {
+    let { level, tip } = q;
+    const f = this.fusionInfo;
+    if (this.fusion && this.second !== 'off') {
+      if (!Object.keys(this.streams).length) { if (level === 'good') { level = 'warn'; tip = 'Телефон не подключён: работает одна камера'; } }
+      else if (f && f.mode === 'ab' && level === 'good') tip = `2 камеры: синхронизация ${Math.round(f.offsetMs)} мс, согласие ${f.rmsCm.toFixed(1)} см`;
+      else if (f && f.rmsCm !== null && !f.usable) { level = 'warn'; tip = `Камеры не сходятся (${f.rmsCm.toFixed(0)} см): в обоих кадрах должен быть ты один, без зеркала`; }
+      else if (f && f.mode === 'a' && level === 'good' && Object.keys(this.streams).length) tip = 'Подбираю угол второй камеры: подвигайся';
     }
     this.quality = { level, tip };
     this.qbox.className = `cam-q ${level}`;
@@ -640,10 +903,12 @@ export class CameraInput {
     const ctx = this.overlay.getContext('2d');
     ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
     if (res.landmarks && res.landmarks[0]) {
-      this.drawing.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
-      this.drawing.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
+      this.drawingUtils.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
+      this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
     }
-    this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, (captureTime ?? now) / 1000);
+    const world = res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null;
+    if (this.fusion) this.fusion.pushA((captureTime ?? now) / 1000, world);
+    else this.proc.process(world, (captureTime ?? now) / 1000);
   }
 
   poll() { return this.proc.poll(); }
