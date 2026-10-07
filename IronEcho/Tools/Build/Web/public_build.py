@@ -135,6 +135,7 @@ def build_release(project: Path, here: Path, out_root: Path) -> Path:
     shutil.copy2(game, out / "play" / "index.html")
     shutil.copy2(public / "play" / "vendor" / "peerjs" / "peerjs.min.js", out / "play" / "peerjs.min.js")  # online duel
     shutil.copy2(public / "play" / "vendor" / "qrcode" / "qrcode.mjs", out / "play" / "qrcode.mjs")  # QR code of the phone camera
+    shutil.copy2(public / "play" / "vendor" / "mediapipe" / "vision_bundle_worker.js", out / "play" / "vision_bundle_worker.js")  # pose Web Worker
     phone = (here / "site" / "phone.template.html").read_text(encoding="utf-8").replace("@@PEERJS@@", "../play/peerjs.min.js")
     (out / "phone").mkdir()
     (out / "phone" / "index.html").write_text(phone, encoding="utf-8")  # the phone's side of the second camera

@@ -163,6 +163,9 @@ async function camera(browser) {
   const page = await open(browser);
   await page.click('[data-group="control"] button[data-value="camera"]');
   await page.click('#start');
+  // the camera is still loading (permission, model): the rules must wait for the player, not run the countdown on the keyboard
+  const early = await page.evaluate(() => { const app = globalThis.IRONECHO_APP; const r = app.debugAdvance(5, () => app.currentInput()); return { phase: r.phase, status: app.currentInput().status, active: !!(app.cameraInput && app.cameraInput.active) }; });
+  check('camera: the fight does not start while the camera is still loading', early.phase === 'WaitingForPlayer' && early.status === 6 && !early.active, `${early.phase}, status ${early.status}`);
   await page.waitForFunction(() => globalThis.IRONECHO_APP.cameraInput && globalThis.IRONECHO_APP.cameraInput.active, null, { timeout: 300000 });
   const r = await page.evaluate(async () => {
     const app = globalThis.IRONECHO_APP; const cam = app.cameraInput;

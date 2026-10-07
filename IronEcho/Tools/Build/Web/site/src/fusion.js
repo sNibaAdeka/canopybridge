@@ -31,10 +31,11 @@ const FUSION_CFG = {
   alignVisibility: 0.6,
   alignDecay: 0.9985,     // per sample: the estimate follows a phone that was moved (half-life ~7 s at 30 fps)
   alignMinSamples: 150,
-  alignMaxRms: 0.12,      // m: a worse fit than this means "not the same body": camera B is ignored
+  alignMaxRms: 0.20,      // m: a fit worse than this means "not the same body" (real MediaPipe depth noise is large): camera B is ignored
+  alignMinRms: 0.16,      // m: ... and it is trusted again only below this (hysteresis)
   timeLandmarks: [0, 15, 16, 27, 28],
   timeWindow: 5.0,        // s of A history compared
-  timeRange: 0.45,        // s, searched shift +-
+  timeRange: 0.9,         // s, searched shift +- (a phone's video reaches the page 0.2-0.5 s after the capture)
   timeStep: 0.01,
   timeEvery: 1.0,         // s between estimates
   timeMinMotion: 0.06,    // m: rms movement of the compared landmarks needed to trust an estimate
@@ -191,7 +192,8 @@ export class PoseFusion {
       this.rms = this.rms === null ? rms : this.rms * 0.95 + rms * 0.05;
       this.info.rmsCm = this.rms * 100;
     }
-    this.usable = !!this.R && this.rms !== null && this.rms < C.alignMaxRms;
+    const limit = this.usable ? C.alignMaxRms : C.alignMinRms; // hysteresis: no flicker between fused and single-camera
+    this.usable = !!this.R && this.rms !== null && this.rms < limit;
     this.info.usable = this.usable;
   }
 

@@ -6,6 +6,8 @@ const MP_VERSION = '0.10.18';
 // The offline builds (Netlify /play, Windows app) ship MediaPipe and the model next to the page: IRONECHO_DEPS.
 const DEPS = globalThis.IRONECHO_DEPS || {};
 const MP_BASE = DEPS.mediapipe || `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
+// the CommonJS build of tasks-vision for the pose Web Worker (a classic worker cannot load the ES module build)
+const WORKER_BUNDLE = DEPS.mediapipeWorker || `${MP_BASE}/vision_bundle.cjs`;
 const MODEL_BASE = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker';
 // full = the default; heavy = a bigger network (3x slower, clearly steadier hands and legs); lite = for weak machines.
 const MODELS = {
@@ -423,7 +425,7 @@ class PoseTap {
     v.muted = true;
     v.playsInline = true;
     try { await v.play(); } catch { /* the first frame event starts it */ }
-    if (!this.landmarker) this.landmarker = await this.host._makeLandmarker();
+    if (!this.detector) this.detector = await this.host._makeDetector();
     if (this.active) return;
     this.active = true;
     const loop = (now, meta) => {
@@ -439,17 +441,25 @@ class PoseTap {
     this.active = false;
     const v = this.els.video;
     if (v.srcObject) v.srcObject = null;
+    if (this.detector && !this.shared) this.detector.stop();
+    this.detector = null;
   }
 
   _process(meta) {
     const v = this.els.video;
     if (v.currentTime === this.lastVideoTime || !v.videoWidth) return;
-    this.lastVideoTime = v.currentTime;
+    const now = performance.now();
+    const stamp = meta && Number.isFinite(meta.receiveTime) ? meta.receiveTime : (meta && Number.isFinite(meta.captureTime) ? meta.captureTime : now);
+    const accepted = this.detector.submit(v, stamp, (res, infer, tc) => this._onResult(res, infer, tc));
+    if (accepted) this.lastVideoTime = v.currentTime;
+  }
+
+  _onResult(res, infer, stamp) {
+    if (!this.active) return;
     const o = this.els.overlay;
+    const v = this.els.video;
     if (o.width !== v.videoWidth || o.height !== v.videoHeight) { o.width = v.videoWidth; o.height = v.videoHeight; }
     const now = performance.now();
-    const res = this.landmarker.detectForVideo(v, now);
-    const infer = performance.now() - now;
     this.inferMs = this.inferMs ? this.inferMs * 0.9 + infer * 0.1 : infer;
     this.frames++;
     this.total++;
@@ -467,7 +477,6 @@ class PoseTap {
       this.lastQualityAt = now;
       this.els.badge(this.host._qualityOf(res, this.inferMs), this);
     }
-    const stamp = meta && Number.isFinite(meta.receiveTime) ? meta.receiveTime : (meta && Number.isFinite(meta.captureTime) ? meta.captureTime : now);
     this.onWorld(stamp / 1000, res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null);
   }
 }
@@ -490,6 +499,9 @@ export class CameraInput {
     this.link = null;
     this.fusion = null;
     this.fusionInfo = null;
+    // With a second camera the fight does not start (and calibration does not begin) until both cameras are found and matched,
+    // or the player chooses to play with one: started earlier, the first seconds would be played on a half-set-up rig.
+    this.hold = this.second !== 'off';
     this.taps = {};
     this.streams = {};
     this._ui();
@@ -557,14 +569,13 @@ export class CameraInput {
     this._say('Загружаю модель позы…', 30, `MediaPipe PoseLandmarker: ${names[this.model]}, один раз.`);
     const vision = await import(/* @vite-ignore */ `${MP_BASE}/vision_bundle.mjs`);
     this.vision = vision;
-    this.fileset = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
     try {
-      this.landmarker = await this._makeLandmarker(this.model);
+      this.detector = await this._makeDetector(this.model);
     } catch (err) {
       if (this.model === 'full') throw err;
       this._say('Модель не загрузилась', 30, 'Беру обычную модель.');
       this.model = 'full';
-      this.landmarker = await this._makeLandmarker('full');
+      this.detector = await this._makeDetector('full');
     }
     this.drawingUtils = new vision.DrawingUtils(this.overlay.getContext('2d'));
     this.connections = vision.PoseLandmarker.POSE_CONNECTIONS;
@@ -591,6 +602,20 @@ export class CameraInput {
 
   // a lower presence / tracking bar keeps the skeleton through fast punches and motion blur (the processor still drops
   // frames whose key points are not visible)
+  // One pose detector (a Web Worker with its own PoseLandmarker; the main thread only if a worker cannot run): see poseworker.js
+  async _makeDetector(model = this.model) {
+    const abs = (u) => new URL(u, location.href).href;
+    const det = new PoseDetector();
+    await det.init({
+      bundle: abs(WORKER_BUNDLE), wasm: abs(`${MP_BASE}/wasm`), model: abs(MODELS[model]),
+      makeLocal: async () => {
+        if (!this.fileset) this.fileset = await this.vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+        return this._makeLandmarker(model);
+      },
+    });
+    return det;
+  }
+
   async _makeLandmarker(model = this.model) {
     const options = (delegate) => ({ baseOptions: { modelAssetPath: MODELS[model], delegate }, runningMode: 'VIDEO', numPoses: 1,
       minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.4 });
@@ -612,6 +637,7 @@ export class CameraInput {
     const s = this.video.srcObject;
     if (s) s.getTracks().forEach((tr) => tr.stop());
     for (const tap of Object.values(this.taps)) tap.stop();
+    if (this.detector) { this.detector.stop(); this.detector = null; }
     if (this.link) this.link.close();
     clearInterval(this.panelTimer);
     if (this.panel) this.panel.remove();
@@ -625,8 +651,10 @@ export class CameraInput {
     const opts = this.waitBudget ? { waitBudget: this.waitBudget } : {};
     this.fusion = new PoseFusion((t, world, info) => {
       this.fusionInfo = info;
+      if (this.hold) { if (info.usable) this._release(); else return; }
       this.proc.process(world, t);
     }, opts);
+    if (this.hold) this._holdMessage();
   }
 
   async _openLink() {
@@ -634,7 +662,7 @@ export class CameraInput {
     this.link = new PhoneLink();
     this.link.on('stream', ({ slot, stream }) => {
       this.streams[slot] = stream;
-      if (this.landmarker && this.active) this._attachPhone(slot);
+      if (this.detector && this.active) this._attachPhone(slot);
       this._refreshPanel();
     });
     this.link.on('lost', ({ slot }) => {
@@ -656,6 +684,7 @@ export class CameraInput {
         : this._phoneBox(slot);
       const push = (t, world) => (slot === 1 && this.second === 'phones' ? this.fusion.pushA(t, world) : this.fusion.pushB(t, world));
       tap = new PoseTap(this, els, push);
+      if (isMain) { tap.detector = this.detector; tap.shared = true; } // the main camera uses the page's own detector
       this.taps[slot] = tap;
     }
     tap.attach(this.streams[slot]).catch((err) => console.error('phone stream', err));
@@ -708,13 +737,13 @@ export class CameraInput {
     const title = this.second === 'phones' ? 'Два телефона вместо веб-камеры' : 'Второй телефон как камера';
     panel.innerHTML = `<b>${title}</b>
       <div class="pp-row">${need.map((slot) => `<div class="pp-ph" data-slot="${slot}"><div class="pp-qr"></div>
-        <div><div>${this.second === 'phones' ? (slot === 1 ? 'Телефон 1 (главная камера)' : 'Телефон 2 (сбоку)') : 'Телефон (поставь сбоку, под углом 45–90° к веб-камере)'}</div>
+        <div><div>${this.second === 'phones' ? (slot === 1 ? 'Телефон 1 (главная камера)' : 'Телефон 2 (сбоку)') : 'Телефон (поставь под углом около 45° к веб-камере, не строго сбоку)'}</div>
         <div class="pp-st">ждём…</div><small></small></div></div>`).join('')}</div>
       <div class="pp-note">Наведи камеру телефона на QR-код (или открой ссылку) и разреши камеру. Телефоны ставь в 2–3 м, чтобы было видно тебя от головы до бёдер. Синхронизация и угол подберутся сами, пока ты двигаешься.</div>
-      <button type="button" class="pp-close">Играть дальше</button>`;
+      <button type="button" class="pp-close">Играть без второй камеры</button>`;
     document.querySelector('#stage').appendChild(panel);
     this.panel = panel;
-    panel.querySelector('.pp-close').addEventListener('click', () => { panel.hidden = true; });
+    panel.querySelector('.pp-close').addEventListener('click', () => { panel.hidden = true; this.panelDone = false; this._release(); });
     let qrmod = null;
     try { qrmod = await import(/* @vite-ignore */ DEPS.qrcode || './vendor/qrcode/qrcode.mjs'); } catch { /* the link text is enough */ }
     for (const slot of need) {
@@ -739,6 +768,7 @@ export class CameraInput {
   }
 
   _refreshPanel() {
+    this._holdMessage();
     if (!this.panel) return;
     const need = this.second === 'phones' ? [1, 2] : [1];
     let all = true;
@@ -750,7 +780,8 @@ export class CameraInput {
       st.classList.toggle('on', on);
       st.textContent = !on ? 'ждём подключения…' : tap && tap.fps > 1 ? `подключён · ${Math.round(tap.fps)} к/с` : 'подключён · загружаю модель…';
     }
-    if (all && !this.panelDone) {
+    this.panel.querySelector('.pp-close').textContent = this.hold ? 'Играть без второй камеры' : 'Скрыть';
+    if (all && !this.hold && this.panelDone === undefined) {
       this.panelDone = true;
       setTimeout(() => { if (this.panel) this.panel.hidden = true; }, 2500);
     }
@@ -830,16 +861,15 @@ export class CameraInput {
         this.overlay.width = bmp.width;
         this.overlay.height = bmp.height;
       }
-      const res = this.landmarker.detectForVideo(bmp, now);
-      this._assess(res, performance.now() - now);
-      const ctx = this.overlay.getContext('2d');
-      ctx.drawImage(bmp, 0, 0);
-      if (res.landmarks && res.landmarks[0]) {
-        this.drawingUtils.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
-        this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
-      }
-      bmp.close();
-      this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, now / 1000);
+      this.overlay.getContext('2d').drawImage(bmp, 0, 0);
+      this.detector.submit(bmp, now, (res, infer, tc) => { // the frame is handed over (and closed) by the detector
+        this._assess(res, infer);
+        if (res.landmarks && res.landmarks[0]) {
+          this.drawingUtils.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
+          this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
+        }
+        this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, tc / 1000);
+      });
     }
   }
 
@@ -896,10 +926,16 @@ export class CameraInput {
 
   _process(captureTime) {
     if (this.video.currentTime === this.lastVideoTime) return;
-    this.lastVideoTime = this.video.currentTime;
-    const now = performance.now();
-    const res = this.landmarker.detectForVideo(this.video, now);
-    this._assess(res, performance.now() - now);
+    const tc = captureTime ?? performance.now();
+    // the detector works in a Web Worker; when it is still busy with the previous frame this one is skipped (real time: never queue)
+    const accepted = this.detector.submit(this.video, tc, (res, infer, stamp) => this._onResult(res, infer, stamp));
+    if (accepted) this.lastVideoTime = this.video.currentTime;
+  }
+
+  _onResult(res, infer, stamp) {
+    if (!this.active) return;
+    this._assess(res, infer);
+    this._noteFrame();
     const ctx = this.overlay.getContext('2d');
     ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
     if (res.landmarks && res.landmarks[0]) {
@@ -907,9 +943,55 @@ export class CameraInput {
       this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
     }
     const world = res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null;
-    if (this.fusion) this.fusion.pushA((captureTime ?? now) / 1000, world);
-    else this.proc.process(world, (captureTime ?? now) / 1000);
+    if (this.fusion) this.fusion.pushA(stamp / 1000, world);
+    else this.proc.process(world, stamp / 1000);
   }
 
-  poll() { return this.proc.poll(); }
+  // frames per second of this camera's detector (for the F3 overlay)
+  _noteFrame() {
+    const now = performance.now();
+    this.fpsFrames = (this.fpsFrames || 0) + 1;
+    if (!this.fpsAt) this.fpsAt = now;
+    if (now - this.fpsAt > 1000) { this.fps = (this.fpsFrames * 1000) / (now - this.fpsAt); this.fpsFrames = 0; this.fpsAt = now; }
+  }
+
+  // numbers for the F3 overlay
+  stats() {
+    const f = this.fusion ? this.fusion.info : null;
+    return {
+      mode: this.detector ? `${this.detector.mode}/${this.detector.delegate}` : '-', model: this.model,
+      fps: this.fps || 0, inferMs: this.inferMs,
+      taps: Object.fromEntries(Object.entries(this.taps).map(([k, t]) => [k, { fps: t.fps, inferMs: t.inferMs, mode: t.detector ? `${t.detector.mode}/${t.detector.delegate}` : '-' }])),
+      fusion: f ? { mode: f.mode, offsetMs: f.offsetMs, rmsCm: f.rmsCm, usable: f.usable } : null, hold: this.hold,
+    };
+  }
+
+  poll() {
+    if (this.hold) return { status: 6, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, confidence: 0 }; // 6: calibrating
+    return this.proc.poll();
+  }
+
+  _release() {
+    if (!this.hold) return;
+    this.hold = false;
+    this._say(STEPS.neutral, 0, 'Калибровка: 3 коротких шага.');
+    if (this.panel) setTimeout(() => { if (this.panel && this.panelDone !== false) this.panel.hidden = true; }, 1500);
+  }
+
+  // what the screen says while the fight waits for the cameras
+  _holdMessage() {
+    if (!this.hold) return;
+    const f = this.fusion;
+    const phones = Object.keys(this.streams).length;
+    const need = this.second === 'phones' ? 2 : 1;
+    if (phones < need) {
+      this._say('Жду телефон', 0, this.second === 'phones' ? `Подключено ${phones} из 2. Отсканируй QR-коды (панель сверху). Бой начнётся, когда обе камеры заработают.`
+        : 'Отсканируй QR-код (панель сверху). Бой начнётся, когда заработает вторая камера. Или нажми «Играть без телефона».');
+    } else {
+      const done = f ? Math.min(100, (100 * f.alignN) / f.cfg.alignMinSamples) : 0;
+      this._say('Подбираю угол камер', done, f && f.info.rmsCm !== null && !f.info.usable && f.alignN >= f.cfg.alignMinSamples
+        ? `Камеры пока не сходятся (${f.info.rmsCm.toFixed(0)} см). Встань целиком в кадр ОБЕИХ камер; телефон поставь под углом ~45°, не строго сбоку.`
+        : 'Встань целиком в кадр обеих камер и чуть подвигай руками.');
+    }
+  }
 }

@@ -17,12 +17,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.3.2"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.3.3"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
 # the full game (everything the browser page runs), in bundling order
-GAME_BUNDLE = ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "camlink", "fusion", "pose", "main"]
+GAME_BUNDLE = ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "camlink", "fusion", "poseworker", "pose", "main"]
 # where the Windows app sends a phone to pair as a second camera (the phone needs an https page; the app's own server is http)
 PUBLIC_SITE = os.environ.get("IRONECHO_PUBLIC_URL", "https://iron-echo-boxing.vercel.app").rstrip("/")
 
@@ -257,12 +257,14 @@ THREE_ADDONS = ["loaders/GLTFLoader.js", "utils/BufferGeometryUtils.js", "libs/m
                 "geometries/RoundedBoxGeometry.js"]
 # SIMD build only (every Chrome/Edge/Firefox/Safari since 2021-2023); the no-SIMD twin would add 9 MB
 MEDIAPIPE_FILES = ["vision_bundle.mjs", "wasm/vision_wasm_internal.js", "wasm/vision_wasm_internal.wasm"]
-STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", "qrcode": "./vendor/qrcode/qrcode.mjs", '
+STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", "mediapipeWorker": "./vendor/mediapipe/vision_bundle_worker.js", '
+                   '"qrcode": "./vendor/qrcode/qrcode.mjs", '
                    f'"phonePage": "{PUBLIC_SITE}/phone/", '
                    '"poseModel": "./vendor/pose_landmarker_full.task", "poseModelHeavy": "./vendor/pose_landmarker_heavy.task", '
                    '"peerjs": "./vendor/peerjs/peerjs.min.js", "glb": "plain"};</script>')
 # the single public page (the website's /play) keeps three.js / MediaPipe on their CDNs but serves PeerJS itself
-PUBLIC_DEPS = '<script>globalThis.IRONECHO_DEPS = {"peerjs": "./peerjs.min.js", "qrcode": "./qrcode.mjs", "phonePage": "../phone/"};</script>'
+PUBLIC_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"peerjs": "./peerjs.min.js", "qrcode": "./qrcode.mjs", "phonePage": "../phone/", '
+               '"mediapipeWorker": "./vision_bundle_worker.js"};</script>')
 
 
 def local_fonts(cache: Path, dst: Path) -> str:
@@ -319,6 +321,8 @@ def build_standalone(project: Path, here: Path, out_root: Path) -> Path | None:
     for f in MEDIAPIPE_FILES:
         (vendor / "mediapipe" / f).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(mp / f, vendor / "mediapipe" / f)
+    # the pose Web Worker is a classic worker and loads the CommonJS build; served as .js because workers insist on a JavaScript MIME type
+    shutil.copy2(mp / "vision_bundle.cjs", vendor / "mediapipe" / "vision_bundle_worker.js")
     shutil.copy2(model, vendor / "pose_landmarker_full.task")
     peerjs = deps_dir / "peerjs" / "dist" / "peerjs.min.js"  # online duel: WebRTC rooms (MIT)
     if peerjs.exists():

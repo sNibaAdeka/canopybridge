@@ -103,6 +103,9 @@ async function startCamera(g, second) {
     const link = await startCamera(game, 'phone');
     check('the game shows a pairing link with a room code and slot 1', /\/phone\/\?cam=[A-Z2-9]{6}&slot=1$/.test(link.trim()), link.trim());
     check('the pairing panel has a QR code', await game.isVisible('#cam-link .pp-qr img'));
+    // with a second camera chosen the fight waits (calibration has not begun) until the phone is found and matched
+    const held = await game.evaluate(() => { const app = globalThis.IRONECHO_APP; const r = app.debugAdvance(4, () => app.currentInput()); return { phase: r.phase, status: app.currentInput().status, hold: app.cameraInput.hold }; });
+    check('the fight waits for the second camera (no countdown, calibration not started)', held.hold === true && held.status === 6 && held.phase === 'WaitingForPlayer', JSON.stringify(held));
     const phone1 = await phonePage(browser, link.trim());
     check('the phone page reports it is on air', true, (await phone1.textContent('#st')).replace(/\s+/g, ' ').slice(0, 80));
     await game.waitForFunction(() => { const c = globalThis.IRONECHO_APP.cameraInput; return c && c.taps[1] && c.taps[1].total >= 4; }, null, { timeout: 240000 })
@@ -113,6 +116,12 @@ async function startCamera(g, second) {
     st = await camState(game);
     check('both streams feed the fusion', st.fusion && st.fusion.a >= 4 && st.fusion.b >= 4 && st.fusion.aliveB, JSON.stringify(st.fusion));
     check('the phone preview box exists', await game.isVisible('#cam2'));
+    const modes = await game.evaluate(() => { const c = globalThis.IRONECHO_APP.cameraInput; return { main: c.detector && c.detector.mode, phone: c.taps[1] && c.taps[1].detector && c.taps[1].detector.mode, delegate: c.detector && c.detector.delegate }; });
+    check('pose detection runs in Web Workers (off the render thread), one per camera', modes.main === 'worker' && modes.phone === 'worker', JSON.stringify(modes));
+    // nobody stands in front of the fake cameras, so the two views never match: the fight stays held until the player skips the phone
+    check('the fight is still held (the cameras have not matched)', await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.hold === true));
+    await game.evaluate(() => { document.querySelector('#cam-link .pp-close').click(); });
+    check('"play without the second camera" releases the fight', await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.hold === false));
     // the phone leaves
     await phone1.close();
     await game.waitForFunction(() => Object.keys(globalThis.IRONECHO_APP.cameraInput.streams).length === 0, null, { timeout: 60000 });

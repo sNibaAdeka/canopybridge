@@ -243,6 +243,7 @@ function startBout(versus) {
   }
   $('#help').hidden = useCamera;
   $('#pad').hidden = useCamera || !('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  app.cameraWanted = useCamera; // until the camera is up (permission, model, second phone) the fight must wait, not run on the keyboard
   if (useCamera && !app.cameraInput) {
     app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait });
     app.cameraInput.key = cameraKey;
@@ -250,6 +251,7 @@ function startBout(versus) {
       console.error(err);
       app.cameraInput.stop();
       app.cameraInput = null;
+      app.cameraWanted = false;
       app.hud.banner('КАМЕРА НЕДОСТУПНА', String(err && err.message ? err.message : err).slice(0, 90) + ' — играю с клавиатуры', 4, 'warn');
     });
   }
@@ -597,7 +599,7 @@ function versusSample() {
     if (app.versus) { t[9] = (t[9] | app.versus.ctl) >>> 0; app.versus.ctl = 0; }
     return t;
   }
-  const i = app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll();
+  const i = cameraPending() ? CAMERA_PENDING : (app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll());
   const live = app.state === 'playing' || app.state === 'results';
   const f = live ? i : { status: 7, lean: 0, block: 0, punchMask: 0 };
   const ctl = app.versus ? app.versus.ctl : 0;
@@ -791,10 +793,16 @@ function updateCamera(dt, snap) {
 }
 
 // ---------------------------------------------------------------- loop
+// Camera control chosen but the camera not up yet: report "calibrating" (6), so the rules wait for the player instead of
+// starting the countdown on a keyboard nobody is touching.
+const CAMERA_PENDING = { status: 6, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, confidence: 0 };
+const cameraPending = () => !!app.cameraWanted && !(app.cameraInput && app.cameraInput.active);
 function currentInput() {
   if (app.state !== 'playing') return { status: 7, lean: 0, block: 0, punchMask: 0 };
+  if (cameraPending()) return CAMERA_PENDING;
   return app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll();
 }
+app.currentInput = currentInput;
 
 // One simulation + animation step (no rendering).
 function step(dt, input, now) {
@@ -853,10 +861,44 @@ function step(dt, input, now) {
   }
 }
 
+// F3: numbers for a bug report - frame rate of the game, and per camera the detector's rate, time per detection and whether it runs
+// in a Web Worker; with two cameras also the fusion state.
+const perfView = { on: false, el: null, frames: 0, at: performance.now(), fps: 0, worst: 0, lastDt: 0 };
+function perfOverlay(now, raw) {
+  const pv = perfView;
+  pv.frames++;
+  pv.worst = Math.max(pv.worst, raw * 1000);
+  if (!pv.on) return;
+  if (now - pv.at < 500) return;
+  pv.fps = (pv.frames * 1000) / (now - pv.at);
+  const worst = pv.worst;
+  pv.frames = 0;
+  pv.at = now;
+  pv.worst = 0;
+  if (!pv.el) {
+    pv.el = document.createElement('pre');
+    pv.el.style.cssText = 'position:absolute;left:8px;bottom:8px;margin:0;padding:6px 9px;border-radius:5px;background:rgba(0,0,0,.72);color:#9ef0b0;font:600 11px/1.35 ui-monospace,Consolas,monospace;z-index:20;pointer-events:none;white-space:pre';
+    document.querySelector('#stage').appendChild(pv.el);
+  }
+  const lines = [`игра: ${pv.fps.toFixed(0)} к/с, худший кадр ${worst.toFixed(0)} мс, масштаб ${Math.round(resScale * 100)}%`];
+  const c = app.cameraInput;
+  if (c && c.stats) {
+    const st = c.stats();
+    lines.push(`камера 1: ${st.fps.toFixed(0)} к/с, распознавание ${st.inferMs.toFixed(0)} мс, ${st.mode}, модель ${st.model}`);
+    for (const [k, t] of Object.entries(st.taps)) lines.push(`телефон ${k}: ${t.fps.toFixed(0)} к/с, ${t.inferMs.toFixed(0)} мс, ${t.mode}`);
+    if (st.fusion) lines.push(`слияние: ${st.fusion.mode}${st.fusion.usable ? '' : ' (не сошлись)'}, сдвиг ${st.fusion.offsetMs.toFixed(0)} мс, согласие ${st.fusion.rmsCm === null ? '-' : st.fusion.rmsCm.toFixed(1) + ' см'}${st.hold ? ', БОЙ ЖДЁТ КАМЕРЫ' : ''}`);
+  }
+  pv.el.textContent = lines.join('\n');
+}
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'F3') { e.preventDefault(); perfView.on = !perfView.on; if (perfView.el) perfView.el.hidden = !perfView.on; }
+});
+
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   const raw = (now - last) / 1000;
+  perfOverlay(now, raw);
   const dt = Math.min(0.1, raw);
   last = now;
   if (!app.loaded || app.frozen) return;
