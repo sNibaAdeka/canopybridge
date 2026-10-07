@@ -43,8 +43,10 @@ const ZETA = { yaw: 0.62, twist: 0.58, lean: 0.7, body_x: 0.66, lateral: 0.75 };
 const HAND_OMEGA = 30;
 const PUNCH_OMEGA = 70;
 
-const GUARD = { lead: [0.30, 0.10, 1.48], rear: [0.22, -0.09, 1.47] };
-const BLOCK = { lead: [0.22, 0.075, 1.67], rear: [0.21, -0.075, 1.67] }; // gloves together in front of the face
+// Glove targets are in the body frame, and the lead shoulder sits forward (the stance is turned): keep every target at least
+// ~0.28 m from its shoulder, otherwise the rig pins it to the minimum reach and the arm swings wildly on small body motion.
+const GUARD = { lead: [0.44, 0.09, 1.50], rear: [0.22, -0.09, 1.47] };
+const BLOCK = { lead: [0.36, 0.07, 1.68], rear: [0.29, -0.07, 1.68] }; // gloves together in front of the face
 // Boxing stance on the canvas (armature space): lead (left) foot forward, rear foot back and out.
 const STANCE = { lead: [0.25, 0.17], rear: [-0.23, -0.16] };
 const ANKLE_Z = 0.10;
@@ -67,6 +69,7 @@ export class FighterAnimator {
     this.stagger = 0;     // 1 right after a heavy hit, decays: pushes the feet back
     this.legHit = 0;      // 1 right after a low kick, decays slowly: the limp
     this.kickPose = null; // current kick: { side, zone, lift, ext }
+    this.kickS = null;    // the kick pose being drawn (decays after an interrupted kick)
     this.pivot = 0;       // rear-foot pivot of the cross (smoothed)
     this.heel = [0, 0];   // heel lift lead/rear (smoothed)
     this.feet = { lead: { w: null, swing: null, rest: 0 }, rear: { w: null, swing: null, rest: 0 } };
@@ -208,7 +211,7 @@ export class FighterAnimator {
       const low = f.zone === 2;
       let lift = 0;
       let ext = 0;
-      if (f.stageName === 'Windup') { lift = smooth(Math.min(1, a / 0.68)); ext = smooth(clamp((a - 0.72) / 0.28, 0, 1)); }
+      if (f.stageName === 'Windup') { lift = smooth(Math.min(1, a / 0.6)); ext = smooth(clamp((a - 0.52) / 0.48, 0, 1)); }
       else if (f.stageName === 'Active') { lift = 1; ext = 1; }
       else { lift = 1 - smooth(a); ext = 1 - smooth(Math.min(1, a * 2.4)); }
       kickPose = { side: rear ? 'rear' : 'lead', zone: f.zone, lift, ext };
@@ -474,10 +477,18 @@ export class FighterAnimator {
     const feet = this._feet(dt, P, tg, live);
     const swingL = this.feet.lead.swing ? 0 : 1;
     const swingR = this.feet.rear.swing ? 0 : 1;
+    P.guard_follow = this.kickS ? this.kickS.lift : 0;
     P.lead_foot = [feet.lead.x, feet.lead.y, feet.lead.z, this.heel[0] * swingL];
     P.rear_foot = [feet.rear.x, feet.rear.y, feet.rear.z, this.heel[1] * swingR];
     P.foot_yaw = [10, lerp(35, 4, this.pivot)];
-    if (tg.kick && live) this._applyKick(P, feet, tg.kick);
+    // a kick cut short (a hit lands on the kicker) lets the leg drop in ~0.1 s instead of snapping to the floor in one frame
+    if (tg.kick) this.kickS = { ...tg.kick };
+    else if (this.kickS) {
+      this.kickS.lift *= Math.exp(-dt * 16);
+      this.kickS.ext *= Math.exp(-dt * 26);
+      if (this.kickS.lift < 0.01) this.kickS = null;
+    }
+    if (this.kickS && live) this._applyKick(P, feet, this.kickS);
     this.rig.applyPose(computePose(P));
     // visor LEDs flare while the bot loads a punch: a readable "now!" for a human 2 m from the screen
     this.glow = (this.glow || 0) + ((this.telegraph > 0 ? 1 : 0) - (this.glow || 0)) * Math.min(1, dt * 18);

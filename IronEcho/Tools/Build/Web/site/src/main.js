@@ -206,6 +206,7 @@ function startBout(versus) {
   const online = versus && versus.seed !== undefined ? versus : null; // (click handlers pass an Event: not a match)
   if (app.versus && !online) { app.versus.ctl |= 4; return; } // a rematch in an online duel goes through the lockstep
   if (app.builtQuality !== settings.quality) applyQuality(); // changed while the arena was still loading
+  app.vis = null; // a new bout: the fighters start where the rules put them, no slide from the old positions
   const mode = settings.mode === 'training' ? 1 : 0;
   app.training = !online && mode === 1;
   const roundSeconds = online ? online.roundSeconds : settings.mode === 'short' ? 45 : 0;
@@ -644,6 +645,34 @@ function updateStage(snap) {
     f.aimSide = rx * f.faceY - ry * f.faceX;
   }
 }
+// The rules move a fighter instantly by a knock-back (or back to the engage distance after a knockdown); drawn as is, the
+// robot teleports. Ordinary walking and lunging stay exact; whatever exceeds the possible speed of a step is drawn as a
+// short slide (the excess is kept as an offset that dies out in ~0.1 s). Only the picture is touched, not the rules.
+const JUMP_SPEED = 2.4; // m/s: faster than any walk, step-in or auto-close
+function smoothJumps(snap, dt) {
+  const vis = app.vis || (app.vis = {});
+  for (const key of ['player', 'opponent']) {
+    const f = snap[key];
+    const v = vis[key] || (vis[key] = { x: f.x, y: f.y, ox: 0, oy: 0 });
+    const dx = f.x - v.x;
+    const dy = f.y - v.y;
+    const dist = Math.hypot(dx, dy);
+    const allowed = JUMP_SPEED * Math.max(dt, 1 / 120) + 0.004;
+    if (dist > allowed) {
+      const excess = (dist - allowed) / dist;
+      v.ox -= dx * excess;
+      v.oy -= dy * excess;
+    }
+    v.x = f.x;
+    v.y = f.y;
+    const decay = Math.exp(-Math.max(dt, 1 / 120) / 0.075);
+    v.ox *= decay;
+    v.oy *= decay;
+    f.x += v.ox;
+    f.y += v.oy;
+  }
+}
+
 function placeFighters(snap) {
   const { player, opponent } = app.holders;
   player.face.position.copy(stagePoint(snap.player.position));
@@ -666,6 +695,15 @@ function updateCamera(dt, snap) {
     const ang = -2.2 + 1.6 * a;
     pos = new THREE.Vector3(Math.cos(ang) * 4.2, 1.7 + 0.5 * (1 - a), -Math.sin(ang) * 4.2);
     look = new THREE.Vector3(0, 1.25, 0);
+    if (app.intro < 0.9) { // the last second of the flyover eases into the fight view instead of cutting to it
+      const w = Math.max(0, Math.min(1, 1 - Math.max(0, app.intro) / 0.9));
+      const e = w * w * (3 - 2 * w);
+      const downP = mine.stateName === 'KnockedDown' || mine.stateName === 'KnockedOut';
+      const n = stageSide();
+      const midP = (px + ox) / 2;
+      pos.lerp(downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.9, 1.8).addScaledVector(n, 3.25), e);
+      look.lerp(stagePoint(midP + 0.1, 0.96).addScaledVector(n, -0.1), e);
+    }
   } else if (m.phaseName === 'MatchOver') {
     const t = performance.now() / 1000;
     const w = stagePoint(m.hasWinner ? (m.winner === app.viewSlot ? px : ox) : (px + ox) / 2);
@@ -702,6 +740,7 @@ function step(dt, input, now) {
   if (app.state !== 'menu') {
     if (app.versus) netStep(dt); else app.core.frame(dt, input);
     const snap = app.core.snapshot();
+    smoothJumps(snap, dt);
     if (app.versus) versusUi(snap);
     const ev = app.core.drainEvents();
     for (const e of ev.combat) onCombat(e, snap);

@@ -1,6 +1,6 @@
 // IRON ECHO release QA for the browser game (the same build is /play on the website and the Windows app).
 //
-//   node Tests/Web/qa.js [--only flows,ui,ring,camera,offline,soak]
+//   node Tests/Web/qa.js [--only flows,ui,ring,camera,offline,animation,soak]
 //
 // Needs Playwright with Chromium (NODE_PATH pointing at a node_modules that has `playwright`) and a built
 // Build/Web/standalone (Tools/Build/Web/build_web.py site). IRONECHO_STANDALONE overrides the folder;
@@ -256,6 +256,79 @@ async function offline(browser) {
   await page.close();
 }
 
+// Animation continuity: a scripted 30 s bout (punches, blocks, steps, kicks, hits taken) with every 1/60 s step measured:
+// no robot may teleport (knock-back), no limb may roll through 180 degrees about its length in one frame, no elbow, knee or
+// foot may jump half a metre between frames. (Rendering is skipped: the bones are posed by the animator, not by drawing.)
+async function animation(browser) {
+  const page = await open(browser, { width: 640, height: 360 });
+  await page.click('[data-group="level"] button[data-value="1"]');
+  await page.click('#start');
+  const m = await page.evaluate(() => {
+    const app = globalThis.IRONECHO_APP;
+    app.renderer.render = () => {};
+    const names = ['lowerarm_l', 'lowerarm_r', 'calf_l', 'calf_r', 'foot_l', 'foot_r'];
+    const rollNames = ['upperarm_l', 'lowerarm_l', 'upperarm_r', 'lowerarm_r', 'thigh_l', 'calf_l', 'thigh_r', 'calf_r'];
+    const V3 = app.camera.position.constructor;
+    const Q4 = app.camera.quaternion.constructor;
+    const v = new V3();
+    const q = new Q4();
+    const prev = {};
+    const out = { steps: 0, rootPops: 0, rolls: 0, limbJumps: 0, bigLimbJumps: 0, worstRoll: 0, worstJump: 0, worstRoot: 0 };
+    const script = (k) => {
+      const t = k / 60;
+      const s = { status: 7, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, moveForward: 0, moveSide: 0 };
+      const ph = Math.floor(t / 1.5) % 6;
+      if (ph === 0 && k % 22 === 0) s.punchMask = (k / 22) % 2 ? 2 : 1;
+      if (ph === 1) s.block = 1;
+      if (ph === 2) { s.moveForward = 1; s.moveSide = 0.5; }
+      if (ph === 3 && k % 40 === 0) s.kickMask = [1, 2, 4, 8][(k / 40) % 4];
+      if (ph === 4) { s.moveForward = -1; s.lean = Math.sin(t * 6) * 0.8; }
+      if (ph === 5) { if (k % 18 === 0) s.punchMask = [1, 2, 4, 8][(k / 18) % 4]; s.moveSide = -0.6; }
+      return s;
+    };
+    for (let k = 0; k < 1800; k++) {
+      const info = app.debugAdvance(1 / 60, () => script(k));
+      app.scene.updateMatrixWorld(true);
+      for (const key of ['player', 'opponent']) {
+        const rig = app.rigs[key];
+        rig.root.getWorldPosition(v);
+        const root = v.clone();
+        const cur = { root, pos: {}, rot: {} };
+        for (const n of names) { rig.bones[n].getWorldPosition(v); cur.pos[n] = v.clone().sub(root); }
+        for (const n of rollNames) { rig.bones[n].getWorldQuaternion(q); cur.rot[n] = q.clone(); }
+        const p = prev[key];
+        if (p) {
+          const dr = cur.root.distanceTo(p.root);
+          out.worstRoot = Math.max(out.worstRoot, dr);
+          if (dr > 0.10) out.rootPops++;
+          let bad = false;
+          let big = false;
+          for (const n of names) { const d = cur.pos[n].distanceTo(p.pos[n]); out.worstJump = Math.max(out.worstJump, d); if (d > 0.22) bad = true; if (d > 0.5) big = true; }
+          if (bad) out.limbJumps++;
+          if (big) out.bigLimbJumps++;
+          let roll = false;
+          for (const n of rollNames) {
+            const ang = 2 * Math.acos(Math.min(1, Math.abs(cur.rot[n].dot(p.rot[n])))) * 180 / Math.PI;
+            out.worstRoll = Math.max(out.worstRoll, ang);
+            if (ang > 120) roll = true;
+          }
+          if (roll) out.rolls++;
+        }
+        prev[key] = cur;
+      }
+      out.steps++;
+      if (info.phase === 'MatchOver') break;
+    }
+    return out;
+  });
+  check('animation: no robot teleports (knock-back is drawn as a slide)', m.rootPops === 0, `${m.steps} steps, worst root step ${m.worstRoot.toFixed(3)} m`);
+  check('animation: no limb rolls through 180 degrees in one frame', m.rolls === 0, `worst ${m.worstRoll.toFixed(0)} deg`);
+  check('animation: no elbow, knee or foot jumps half a metre in one frame', m.bigLimbJumps === 0, `worst ${m.worstJump.toFixed(2)} m; ${m.limbJumps} steps above 0.22 m`);
+  check('animation: very few limb jumps over 0.22 m', m.limbJumps <= 12, `${m.limbJumps}`);
+  check('animation: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
+  await page.close();
+}
+
 async function soak(browser) {
   const page = await open(browser, { width: 640, height: 360 });
   await page.click('#start');
@@ -289,6 +362,7 @@ const PORT = 8790 + Math.floor(Math.random() * 100);
     if (want('ring')) await ring(browser);
     if (want('camera')) await camera(browser);
     if (want('offline')) await offline(browser);
+    if (want('animation')) await animation(browser);
     if (want('soak')) await soak(browser);
   } finally {
     await browser.close();

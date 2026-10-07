@@ -32,6 +32,7 @@ export const RIG_BONES = {
 };
 
 // Guard stance defaults of robot.pose() plus the extra channels the game animates.
+const STANCE_TURN = -22 + -8; // yaw + twist of the default stance (POSE_DEFAULTS), degrees
 export const POSE_DEFAULTS = {
   lead_hand: [0.30, 0.10, 1.50], rear_hand: [0.22, -0.09, 1.49], crouch: 0.06, yaw: -22, lean: 8, twist: -8,
   nod: 10, lateral: 0, lead_foot: [0.24, 0.17], rear_foot: [-0.22, -0.15], foot_yaw: [10, 35], elbow_out: 0.25,
@@ -73,27 +74,60 @@ for (const b of Object.keys(RIG_BONES)) {
 const restY = (b) => new THREE.Vector3().setFromMatrixColumn(REST[b], 1);
 const boneLen = (b) => vTail(b).distanceTo(vHead(b));
 
-function twoBone(root, target, a, b, pole) {
+function twoBone(root, target, a, b, pole, poleUp = null, blendUp = 0) {
   const d = target.clone().sub(root);
   const dist = Math.max(1e-4, Math.min(d.length(), (a + b) * 0.999));
   d.normalize();
   const tgt = root.clone().add(d.clone().multiplyScalar(dist));
   const cosA = (a * a + dist * dist - b * b) / (2 * a * dist);
   const ang = Math.acos(Math.max(-1, Math.min(1, cosA)));
-  const n = pole.clone().sub(d.clone().multiplyScalar(pole.dot(d)));
+  const proj = (v) => v.clone().sub(d.clone().multiplyScalar(v.dot(d)));
+  let n = proj(pole.clone().normalize());
+  if (poleUp && blendUp > 0) {
+    // A hand above the shoulder (a block, a high guard) leaves the downward pole running along the limb's axis: the elbow has
+    // no defined side and flips. There the elbow direction turns, by angle in the plane across the limb, toward `poleUp`
+    // (forward and down, as in a real high guard); `blendUp` is 0 for ordinary hand heights, so those poses are untouched.
+    const n1 = proj(poleUp.clone().normalize());
+    if (n.length() < 1e-4) n = n1;
+    else if (n1.length() > 1e-4) {
+      const e1 = n.clone().normalize();
+      const e2 = d.clone().cross(e1);
+      const theta = Math.atan2(n1.dot(e2), n1.dot(e1)) * blendUp;
+      n = e1.multiplyScalar(Math.cos(theta)).add(e2.multiplyScalar(Math.sin(theta)));
+    }
+  }
   if (n.length() < 1e-6) n.set(0, 0, -1);
   n.normalize();
   const mid = root.clone().add(d.clone().multiplyScalar(Math.cos(ang)).add(n.multiplyScalar(Math.sin(ang))).multiplyScalar(a));
-  return [mid, tgt];
+  return [mid, tgt, n];
 }
 
-function chainFrames(p0, p1, p2, prevY) {
+// The glove target is given in the body's frame, but the shoulder swings with lean, twist and yaw: a glove that ends up
+// right at the shoulder leaves the two-bone chain without a direction (the elbow flips) and folds the 0.7 m arm into a V.
+// Keep the wrist at a boxer's minimum distance from the shoulder (a guard is ~0.25 m away) and, very close to it,
+// fade the direction to a sensible one (forward, a little toward the centre line).
+const ARM_MIN_REACH = 0.25;
+const ARM_DEAD_ZONE = 0.10;
+function armTarget(shoulder, target, side) {
+  const d = target.clone().sub(shoulder);
+  const len = d.length();
+  const prefer = V(0.8, -side * 0.3, 0.15).normalize();
+  let dir;
+  if (len >= ARM_DEAD_ZONE) dir = d.divideScalar(len);
+  else {
+    const w = len / ARM_DEAD_ZONE;
+    dir = (len > 1e-6 ? d.divideScalar(len).multiplyScalar(w) : V(0, 0, 0)).add(prefer.multiplyScalar(1 - w)).normalize();
+  }
+  return shoulder.clone().add(dir.multiplyScalar(Math.max(len, ARM_MIN_REACH)));
+}
+
+// The hinge axis `y` of a two-bone limb follows from the geometry (across the plane of the bend) and is continuous. It used to
+// be z1 x z2, flipped whenever it pointed against the rest pose's axis: every time the elbow plane turned through 90 degrees
+// the whole arm rolled 180 degrees about its length in a single frame.
+function chainFrames(p0, p1, p2, yAxis) {
   const z1 = p1.clone().sub(p0).normalize();
   const z2 = p2.clone().sub(p1).normalize();
-  let y = z1.clone().cross(z2);
-  if (y.length() < 1e-3) y = prevY.clone();
-  y.normalize();
-  if (y.dot(prevY) < 0) y.negate();
+  const y = yAxis.clone().normalize();
   const f1 = new THREE.Matrix4().makeBasis(y.clone().cross(z1), y, z1).setPosition(p0);
   const f2 = new THREE.Matrix4().makeBasis(y.clone().cross(z2), y, z2).setPosition(p1);
   return [f1, f2];
@@ -122,8 +156,16 @@ export function computePose(p) {
     const a = boneLen(`upperarm_${side}`);
     const b = boneLen(`lowerarm_${side}`);
     const pole = V(-0.35, s * p.elbow_out, -1.0).lerp(V(0.0, s * 0.2, -1.0), Math.max(0, Math.min(1, ext)));
-    const [elbow, wrist] = twoBone(sh, V(target[0], target[1], target[2]), a, b, pole);
-    const [fUp, fLo] = chainFrames(sh, elbow, wrist, restY(`upperarm_${side}`));
+    // While kicking (guard_follow 0..1) a hand that is not punching goes with the turning torso, like a real boxer's guard does:
+    // left where it was, the shoulder swings through the glove target and the arm flips over the shoulder.
+    let goal = V(target[0], target[1], target[2]);
+    const follow = (p.guard_follow || 0) * (1 - Math.max(0, Math.min(1, ext)));
+    if (follow > 0) goal = goal.clone().lerp(goal.clone().applyMatrix4(RZ(p.yaw + p.twist - STANCE_TURN)), follow);
+    const reach = armTarget(sh, goal, s);
+    const up = reach.clone().sub(sh).normalize().z; // how far above the shoulder the glove is, 0..1
+    const hUp = Math.max(0, Math.min(1, (up - 0.25) / 0.35));
+    const [elbow, wrist, bend] = twoBone(sh, reach, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp));
+    const [fUp, fLo] = chainFrames(sh, elbow, wrist, wrist.clone().sub(sh).normalize().cross(bend).negate());
     D[`upperarm_${side}`] = mul(fUp, REST_INV[`upperarm_${side}`]);
     D[`lowerarm_${side}`] = mul(fLo, REST_INV[`lowerarm_${side}`]);
     const fHand = fLo.clone().setPosition(wrist);
@@ -140,8 +182,9 @@ export function computePose(p) {
     // foot = [x, y, ankle z (0.10 on the canvas, more while swinging), heel lift (toe stays down)]
     const heel = foot.length > 3 ? foot[3] : 0;
     const az = foot.length > 2 ? foot[2] : 0.10;
-    const [knee, ankle] = twoBone(hp, V(foot[0], foot[1], az + heel), a, b, fdir.clone());
-    const [fTh, fCa] = chainFrames(hp, knee, ankle, restY(`thigh_${side}`));
+    const [knee, ankle, bendL] = twoBone(hp, V(foot[0], foot[1], az + heel), a, b, fdir.clone());
+    // a knee bends forward, the opposite way to an elbow: its hinge axis is the other sign of the same geometric axis
+    const [fTh, fCa] = chainFrames(hp, knee, ankle, ankle.clone().sub(hp).normalize().cross(bendL));
     D[`thigh_${side}`] = mul(fTh, REST_INV[`thigh_${side}`]);
     D[`calf_${side}`] = mul(fCa, REST_INV[`calf_${side}`]);
     const toe = ankle.clone().add(fdir.clone().multiplyScalar(0.17)).add(V(0, 0, -0.07 - heel + Math.max(0, az - 0.10) * 0.6));
