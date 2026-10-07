@@ -15,7 +15,7 @@ const NAMES = ['FORGE 07', 'EMBER 13'];
 const PHASE_LABEL = { WaitingForPlayer: 'ПРИГОТОВЬСЯ', Paused: 'ПАУЗА' };
 const $ = (s) => document.querySelector(s);
 
-const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off' }; // Easy first: new players lose ~94% on Normal
+const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off', shareVideo: true }; // Easy first: new players lose ~94% on Normal
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
 } catch { /* storage unavailable: defaults */ }
@@ -457,7 +457,66 @@ function closeLobby() {
   $('#menu').hidden = false;
 }
 
+// The opponent's live camera next to the fight (and ours going to them): a small picture, click to hide it.
+function oppVideoBox() {
+  let box = document.getElementById('opp-cam');
+  if (box) return box;
+  const style = document.createElement('style');
+  style.textContent = `#opp-cam{position:absolute;left:16px;top:calc(env(safe-area-inset-top,0px) + 92px);width:min(24vw,240px);aspect-ratio:4/3;border-radius:6px;overflow:hidden;
+    border:1px solid rgba(255,255,255,.14);background:#000;z-index:5;cursor:pointer}
+    #opp-cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+    #opp-cam span{position:absolute;left:0;right:0;bottom:0;padding:2px 6px;background:rgba(10,11,14,.78);font:700 11px/1.3 Inter,system-ui,sans-serif;letter-spacing:.08em;color:#ffd6cc}`;
+  document.head.appendChild(style);
+  box = document.createElement('div');
+  box.id = 'opp-cam';
+  box.hidden = true;
+  box.innerHTML = '<video playsinline autoplay muted></video><span>СОПЕРНИК</span>';
+  box.addEventListener('click', () => { box.querySelector('video').hidden = !box.querySelector('video').hidden; });
+  document.querySelector('#stage').appendChild(box);
+  return box;
+}
+
+function showOpponentVideo(stream) {
+  const box = oppVideoBox();
+  const v = box.querySelector('video');
+  v.hidden = false;
+  v.srcObject = stream;
+  v.play().catch(() => {});
+  box.hidden = false;
+}
+
+function hideOpponentVideo() {
+  const box = document.getElementById('opp-cam');
+  if (!box) return;
+  box.hidden = true;
+  const v = box.querySelector('video');
+  if (v) v.srcObject = null;
+}
+
+// Our camera's picture: the webcam stream of the camera control (or the stream of a phone used as the camera); QA can supply one.
+function localVideoStream() {
+  if (app.videoSource) return app.videoSource();
+  const c = app.cameraInput;
+  const s = c && c.active && c.video ? c.video.srcObject : null;
+  return s && s.getVideoTracks && s.getVideoTracks().length ? s : null;
+}
+
+// the camera starts a moment after the bout does: send as soon as there is a picture (up to ~40 s), unless the player opted out
+function startSendingVideo(room) {
+  if (!settings.shareVideo) return;
+  let tries = 0;
+  const timer = setInterval(() => {
+    if (!app.versus || app.versus.room !== room || ++tries > 80) { clearInterval(timer); return; }
+    const s = localVideoStream();
+    if (!s) return;
+    clearInterval(timer);
+    room.sendVideo(new MediaStream(s.getVideoTracks()));
+    app.versus.sendingVideo = true;
+  }, 500);
+}
+
 function leaveOnline() {
+  hideOpponentVideo();
   if (netUi.room) { netUi.room.close(); netUi.room = null; }
   if (app.versus) app.versus = null;
   app.viewSlot = 0;
@@ -479,6 +538,7 @@ async function createRoom() {
   const room = new NetRoom();
   netUi.room = room;
   room.on('error', (msg) => lobbyStatus(msg, true)).on('close', onPeerLeft);
+  room.on('video', showOpponentVideo).on('videoEnd', hideOpponentVideo);
   room.on('open', async () => {
     lobbyStatus('Соперник подключился. Проверяю связь…');
     const rtt = await room.measure();
@@ -516,6 +576,7 @@ async function joinRoom(rawCode) {
   const room = new NetRoom();
   netUi.room = room;
   room.on('error', (msg) => { lobbyStatus(msg, true); $('#on-join').disabled = false; }).on('close', onPeerLeft);
+  room.on('video', showOpponentVideo).on('videoEnd', hideOpponentVideo);
   room.on('open', () => lobbyStatus('Соединился. Жду старта от хозяина комнаты…'));
   room.on('message', (msg) => { if (msg.t === 'start') beginVersus(room, 1, msg); });
   lobbyStatus('Ищу комнату…');
@@ -573,6 +634,7 @@ async function beginVersus(room, slot, start) {
   $('#online').hidden = true;
   startBout({ seed: start.seed, roundSeconds: start.roundSeconds });
   app.versus.started = true;
+  startSendingVideo(room);
 }
 
 function netStep(dt) {
@@ -594,7 +656,7 @@ function versusUi(snap) {
   badge.hidden = false;
   const stalled = v.lock.stalled;
   if (stalled > 600 && !v.gaveUp) { v.gaveUp = true; onPeerLeft(); } // ten seconds without the other side's frames: gone
-  badge.textContent = stalled > 20 ? 'ЖДЁМ СОПЕРНИКА…' : `ОНЛАЙН · ${Math.round(v.room.rtt)} мс · задержка ввода ${Math.round((v.lock.delay / 60) * 1000)} мс`;
+  badge.textContent = stalled > 20 ? 'ЖДЁМ СОПЕРНИКА…' : `ОНЛАЙН · ${Math.round(v.room.rtt)} мс · задержка ввода ${Math.round((v.lock.delay / 60) * 1000)} мс${v.sendingVideo ? ' · соперник видит твою камеру' : ''}`;
   badge.style.color = stalled > 20 ? '#ff7a6b' : '#9aa3ae';
   $('#pause').hidden = snap.match.phaseName !== 'Paused';
   if (!$('#pause').hidden) {
@@ -878,6 +940,8 @@ function wireMenu() {
   $('#rematch').addEventListener('click', () => startBout());
   $('#to-online').addEventListener('click', openLobby);
   $('#on-back').addEventListener('click', closeLobby);
+  $('#on-video').checked = settings.shareVideo !== false;
+  $('#on-video').addEventListener('change', () => { settings.shareVideo = $('#on-video').checked; saveSettings(); });
   $('#on-create').addEventListener('click', createRoom);
   $('#on-join').addEventListener('click', () => joinRoom($('#on-input').value));
   $('#on-input').addEventListener('keydown', (e) => { if (e.code === 'Enter') { e.preventDefault(); e.stopPropagation(); joinRoom($('#on-input').value); } });

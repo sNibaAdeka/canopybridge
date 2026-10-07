@@ -158,6 +158,8 @@
   #online .on-row .ghost { flex: 0 0 38%; margin-top: 0; }
   #online .on-status { margin: 14px 0 0; min-height: 2.6em; color: var(--dim); font-size: 13px; }
   #online .on-status.bad { color: #ff7a6b; }
+  #online .on-video { display: flex; gap: 8px; align-items: center; margin: 12px 0 0; color: var(--dim); font-size: 13px; cursor: pointer; }
+  #online .on-video input { width: 16px; height: 16px; accent-color: var(--blue); }
   .linkish { background: none; border: 0; padding: 0; color: var(--dim); text-decoration: underline; cursor: pointer; font-size: 12px; }
   .fine b { color: var(--dim); font-weight: 600; }
   #loading .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; margin-top: 16px; }
@@ -290,6 +292,7 @@
     <div class="on-code" id="on-code" hidden><span>Код комнаты</span><b id="on-code-text">······</b>
       <button class="ghost" id="on-copy" type="button">СКОПИРОВАТЬ ССЫЛКУ</button><small id="on-link"></small></div>
     <div class="on-row"><input id="on-input" maxlength="6" placeholder="КОД" autocomplete="off" spellcheck="false"><button class="ghost" id="on-join" type="button">ВОЙТИ</button></div>
+    <label class="on-video"><input type="checkbox" id="on-video" checked> Показывать моё видео сопернику (если играешь с камерой)</label>
     <p class="on-status" id="on-status">Один создаёт комнату и присылает ссылку или код, второй открывает ссылку или вводит код.</p>
     <button class="ghost" id="on-back" type="button">НАЗАД В МЕНЮ</button>
   </div>

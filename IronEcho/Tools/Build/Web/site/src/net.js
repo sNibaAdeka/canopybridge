@@ -55,6 +55,51 @@ export class NetRoom {
   on(name, fn) { this.handlers[name] = fn; return this; }
   _emit(name, arg) { if (this.handlers[name]) this.handlers[name](arg); }
 
+  // Live video of the players (a camera picture the opponent sees next to the fight). Rides on the same PeerJS connection as the
+  // inputs, as a separate WebRTC media stream: the lockstep never waits for it. Sending is optional, receiving is automatic.
+  _listenCalls(peer) {
+    peer.on('call', (call) => {
+      if (!call.metadata || call.metadata.kind !== 'video') { try { call.close(); } catch { /* ignore */ } return; }
+      call.answer(); // we send nothing back on this call (our own video goes out on our call)
+      let seen = null;
+      call.on('stream', (stream) => { if (seen === stream.id) return; seen = stream.id; this._emit('video', stream); });
+      call.on('close', () => this._emit('videoEnd'));
+      call.on('error', () => this._emit('videoEnd'));
+    });
+  }
+
+  sendVideo(stream) {
+    if (!this.peer || !this.conn || !this.conn.peer || !stream) return false;
+    this.stopVideo();
+    const call = this.peer.call(this.conn.peer, stream, { metadata: { kind: 'video' } });
+    this.outCall = call;
+    // a thin picture, not the fight's bandwidth: the video must never be what makes the ping jump
+    const tune = setInterval(() => {
+      const pc = call.peerConnection;
+      if (!pc || this.outCall !== call) { if (this.outCall !== call) clearInterval(tune); return; }
+      const state = pc.iceConnectionState;
+      if (state !== 'connected' && state !== 'completed') return;
+      clearInterval(tune);
+      try {
+        for (const sender of pc.getSenders()) {
+          if (!sender.track || sender.track.kind !== 'video') continue;
+          const p = sender.getParameters();
+          if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+          p.encodings[0].maxBitrate = 450000;
+          p.encodings[0].maxFramerate = 24;
+          p.degradationPreference = 'maintain-framerate';
+          sender.setParameters(p).catch(() => {});
+        }
+      } catch { /* optional */ }
+    }, 400);
+    setTimeout(() => clearInterval(tune), 20000);
+    return true;
+  }
+
+  stopVideo() {
+    if (this.outCall) { const c = this.outCall; this.outCall = null; try { c.close(); } catch { /* ignore */ } }
+  }
+
   async host() {
     const Peer = await netLoadPeerJS();
     this.role = 'host';
@@ -74,6 +119,7 @@ export class NetRoom {
       }
       this.peer = peer;
       this.code = code;
+      this._listenCalls(peer);
       peer.on('connection', (conn) => {
         if (this.conn) { conn.on('open', () => { conn.send({ t: 'full' }); conn.close(); }); return; } // one opponent only
         this._attach(conn);
@@ -98,6 +144,7 @@ export class NetRoom {
       setTimeout(() => reject(new Error('нет связи с сетевым посредником (проверь интернет)')), 15000);
     });
     this.peer = peer;
+    this._listenCalls(peer);
     peer.on('error', (err) => {
       if (err.type === 'peer-unavailable') this._emit('error', 'комната не найдена: проверь код');
       else this._emit('error', `сеть: ${err.type || err.message || err}`);
@@ -153,6 +200,7 @@ export class NetRoom {
 
   close() {
     this.closed = true;
+    this.stopVideo();
     try { if (this.conn) this.conn.close(); } catch { /* ignore */ }
     try { if (this.peer) this.peer.destroy(); } catch { /* ignore */ }
   }

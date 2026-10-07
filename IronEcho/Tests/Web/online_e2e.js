@@ -1,5 +1,6 @@
 // Online duel, end to end with two real browser pages and a local PeerJS broker (no internet needed):
-// room code -> join by link -> lockstep bout -> both machines hold the same state -> pause / rematch -> disconnect.
+// room code -> join by link -> each player's camera picture reaches the other -> lockstep bout -> both machines hold the same state
+// -> pause / rematch -> disconnect.
 //
 //   IRONECHO_STANDALONE=Build/Web/standalone NODE_PATH=<node_modules with playwright, peer> node Tests/Web/online_e2e.js
 const { chromium } = require('playwright');
@@ -66,7 +67,8 @@ const queue = (p, slot, input) => p.evaluate(([s, i]) => { globalThis.__qa.next[
   if (!fs.existsSync(path.join(ROOT, 'index.html'))) throw new Error(`no build at ${ROOT}`);
   const broker = PeerServer({ port: BROKER, host: '127.0.0.1', path: '/', allow_discovery: false });
   const server = serve();
-  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
+    '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   try {
     const host = await open(browser, `http://127.0.0.1:${PORT}/`);
     await host.click('#to-online');
@@ -90,6 +92,15 @@ const queue = (p, slot, input) => p.evaluate(([s, i]) => { globalThis.__qa.next[
     for (const p of [host, guest]) await p.evaluate(SCRIPT);
     check('the guest joins by link and both start the duel (host slot 0, guest slot 1)', (await snap(host)).slot === 0 && (await snap(guest)).slot === 1);
 
+    // each player's camera picture reaches the other one (the fake camera stands in for a webcam), next to the fight
+    for (const p of [host, guest]) {
+      await p.evaluate(async () => { const stream = await navigator.mediaDevices.getUserMedia({ video: true }); globalThis.IRONECHO_APP.videoSource = () => stream; });
+    }
+    for (const [name, p] of [['host', host], ['guest', guest]]) {
+      await p.waitForFunction(() => { const v = document.querySelector('#opp-cam video'); return v && !document.querySelector('#opp-cam').hidden && v.videoWidth > 0; }, null, { timeout: 60000 })
+        .then(() => check(`the ${name} sees the opponent's live camera picture`, true), () => check(`the ${name} sees the opponent's live camera picture`, false));
+    }
+
     // both ready -> countdown -> fight
     for (let k = 0; k < 120; k++) {
       await pump([host, guest], 0.25);
@@ -99,6 +110,8 @@ const queue = (p, slot, input) => p.evaluate(([s, i]) => { globalThis.__qa.next[
     let a = await snap(host);
     let b = await snap(guest);
     check('both machines reach the fight', a.phase === 'Fighting' && b.phase === 'Fighting' && a.mode === 2 && b.mode === 2, `${a.phase}/${b.phase}`);
+
+    check('the badge tells that the opponent sees your camera', await host.evaluate(() => document.querySelector('#net-state').textContent.includes('видит твою камеру')));
 
     // the host throws a jab and a kick, the guest a cross and a body shot
     await queue(host, 0, [7, 1, 0, 0, 0, 1, 0, 0, 0, 0]);
