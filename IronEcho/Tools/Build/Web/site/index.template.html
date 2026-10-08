@@ -160,6 +160,8 @@
   #online .on-status.bad { color: #ff7a6b; }
   #online .on-video { display: flex; gap: 8px; align-items: center; margin: 12px 0 0; color: var(--dim); font-size: 13px; cursor: pointer; }
   #online .on-video input { width: 16px; height: 16px; accent-color: var(--blue); }
+  .duo { display: flex; gap: 8px; } .duo .ghost { flex: 1 1 0; min-width: 0; }
+  @media (max-height: 800px) { .go { margin-top: 14px; } }
   #profile .nick-row { display: flex; gap: 6px; }
   #profile input { flex: 1 1 0; min-width: 0; padding: 9px 10px; border-radius: 5px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--ink);
     font: 700 15px/1.2 var(--text); letter-spacing: 0.02em; }
@@ -254,9 +256,6 @@
    <div class="menu-main">
     <h1 class="brand">IRON <span>ECHO</span></h1>
     <p class="lede">Бокс роботов. Читай замах соперника, закрывайся, уклоняйся и бей в тот миг, когда он раскрылся.</p>
-    <div class="opt" id="profile"><span>Ник · рейтинг боёв с ботом</span>
-      <div class="nick-row"><input id="nick" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Введи ник — бои пойдут в рейтинг"><button class="ghost" id="nick-ok" type="button">ОК</button></div>
-      <small class="note" id="nick-note"></small></div>
     <div class="opt" data-group="level"><span>Соперник</span><div class="seg">
       <button type="button" data-value="0">ЛЁГКИЙ<small>для первого боя</small></button>
       <button type="button" data-value="1">НОРМАЛЬНЫЙ<small>читает серии</small></button>
@@ -273,8 +272,7 @@
     </div></div>
     @@CAMERA_MENU@@
     <button class="go" id="start" type="button">В РИНГ</button>
-    <button class="ghost" id="to-online" type="button">ОНЛАЙН-ДУЭЛЬ · ДВА ИГРОКА</button>
-    <button class="ghost" id="to-rating" type="button">РЕЙТИНГ · ТАБЛИЦА ЛИДЕРОВ</button>
+    <div class="duo"><button class="ghost" id="to-online" type="button" title="Два игрока, два экрана">ОНЛАЙН-ДУЭЛЬ</button><button class="ghost" id="to-rating" type="button" title="Таблица лидеров по боям с ботом">РЕЙТИНГ</button></div>
     <p class="fine" id="menu-load" hidden></p>
     <div id="cam-offer" hidden>
       <button class="ghost" id="cam-dl" type="button">ВЕРСИЯ С КАМЕРОЙ — СКАЧАТЬ</button>
@@ -282,6 +280,9 @@
     </div>
    </div>
    <div class="menu-side">
+    <div class="opt" id="profile" style="margin-top:0"><span>Ник · рейтинг боёв с ботом</span>
+      <div class="nick-row"><input id="nick" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Введи ник — бои пойдут в рейтинг"><button class="ghost" id="nick-ok" type="button">ОК</button></div>
+      <small class="note" id="nick-note"></small></div>
     @@DOWNLOAD_MENU@@
     <h3 class="side-h">Как драться</h3>
     <ul class="tips">
