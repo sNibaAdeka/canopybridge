@@ -111,6 +111,7 @@ const queue = (p, slot, input) => p.evaluate(([s, i]) => { globalThis.__qa.next[
     let b = await snap(guest);
     check('both machines reach the fight', a.phase === 'Fighting' && b.phase === 'Fighting' && a.mode === 2 && b.mode === 2, `${a.phase}/${b.phase}`);
 
+    check('the duel runs on the rollback engine with a 2-4 frame own-input delay', await host.evaluate(() => { const l = globalThis.IRONECHO_APP.versus.lock; return typeof l.rollbacks === 'number' && l.delay >= 2 && l.delay <= 4; }) && await guest.evaluate(() => typeof globalThis.IRONECHO_APP.versus.lock.rollbacks === 'number'));
     check('the badge tells that the opponent sees your camera', await host.evaluate(() => document.querySelector('#net-state').textContent.includes('видит твою камеру')));
 
     // the host throws a jab and a kick, the guest a cross and a body shot

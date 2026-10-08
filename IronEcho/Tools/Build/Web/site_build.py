@@ -17,14 +17,16 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.3.3"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.4.0"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
 # the full game (everything the browser page runs), in bundling order
-GAME_BUNDLE = ["meshopt", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "camlink", "fusion", "poseworker", "pose", "main"]
+GAME_BUNDLE = ["meshopt", "ratingrules", "replay", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "rating", "camlink", "fusion", "poseworker", "pose", "main"]
 # where the Windows app sends a phone to pair as a second camera (the phone needs an https page; the app's own server is http)
 PUBLIC_SITE = os.environ.get("IRONECHO_PUBLIC_URL", "https://iron-echo-boxing.vercel.app").rstrip("/")
+# the rating server (api/ratings on the public site); the Windows app and the downloadable pages rate through it too
+RATING_API = os.environ.get("IRONECHO_RATING_API", f"{PUBLIC_SITE}/api/ratings")
 
 # name in the page -> (source in Build/Web/assets, max size, JPEG quality)
 TEXTURES = {
@@ -259,12 +261,12 @@ THREE_ADDONS = ["loaders/GLTFLoader.js", "utils/BufferGeometryUtils.js", "libs/m
 MEDIAPIPE_FILES = ["vision_bundle.mjs", "wasm/vision_wasm_internal.js", "wasm/vision_wasm_internal.wasm"]
 STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", "mediapipeWorker": "./vendor/mediapipe/vision_bundle_worker.js", '
                    '"qrcode": "./vendor/qrcode/qrcode.mjs", '
-                   f'"phonePage": "{PUBLIC_SITE}/phone/", '
+                   f'"phonePage": "{PUBLIC_SITE}/phone/", "ratingApi": "{RATING_API}", '
                    '"poseModel": "./vendor/pose_landmarker_full.task", "poseModelHeavy": "./vendor/pose_landmarker_heavy.task", '
                    '"peerjs": "./vendor/peerjs/peerjs.min.js", "glb": "plain"};</script>')
 # the single public page (the website's /play) keeps three.js / MediaPipe on their CDNs but serves PeerJS itself
 PUBLIC_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"peerjs": "./peerjs.min.js", "qrcode": "./qrcode.mjs", "phonePage": "../phone/", '
-               '"mediapipeWorker": "./vision_bundle_worker.js"};</script>')
+               f'"ratingApi": "{RATING_API}", "mediapipeWorker": "./vision_bundle_worker.js"}};</script>')
 
 
 def local_fonts(cache: Path, dst: Path) -> str:

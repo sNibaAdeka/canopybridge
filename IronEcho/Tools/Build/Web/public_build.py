@@ -99,6 +99,7 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
 # the public GitHub repository. Lighter than Build/Web/public: /play is the single-file game (Build/Web/IronEcho-Public.html,
 # assets inlined; three.js/MediaPipe from their CDNs), the Windows app is in /download.
 VERCEL_JSON = {
+    "functions": {"api/ratings.mjs": {"maxDuration": 30, "memory": 1024}},  # replays a whole bout on the rules core: about a second
     "headers": [
         {"source": "/play/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}]},
         {"source": "/phone/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}, {"key": "Cache-Control", "value": "no-cache"}]},
@@ -107,6 +108,31 @@ VERCEL_JSON = {
     ],
 }
 RELEASE_DOWNLOAD_URL = "/download/IronEcho-Windows.zip"
+
+
+def build_rating_server(here: Path, out_root: Path, out: Path, game: Path) -> None:
+    """release/api + release/lib: the rating server (a Vercel function). The very files the tests run, with the page's own modules
+    (core, replay, rating rules) next to them and the WebAssembly core as text, so that the server replays bouts on the exact core the
+    page was built with."""
+    import base64
+    import json
+
+    wasm = out_root / "core" / "ironecho_core.wasm"
+    b64 = base64.b64encode(wasm.read_bytes()).decode("ascii")
+    if b64 not in game.read_text(encoding="utf-8"):
+        raise SystemExit("the page was built with another core than Build/Web/core/ironecho_core.wasm: rebuild (build_web.py core, then site)")
+    api, lib = out / "api", out / "lib"
+    api.mkdir()
+    lib.mkdir()
+    for name in ("ratings.mjs", "rating_api.mjs", "rating_store.mjs"):
+        text = (here / "api" / name).read_text(encoding="utf-8").replace("'../site/src/", "'../lib/")
+        (api / name).write_text(text, encoding="utf-8")
+    (api / "core_build.mjs").write_text(f'export const CORE_WASM_B64 = "{b64}";\n', encoding="utf-8")
+    shutil.copy2(here / "api" / "rating_schema.sql", out / "rating_schema.sql")
+    for name in ("core.js", "replay.js", "ratingrules.js", "rating.js"):
+        shutil.copy2(here / "site" / "src" / name, lib / name)
+    # the page modules are ES modules: the function's package says so
+    (out / "package.json").write_text(json.dumps({"name": "iron-echo-site", "private": True, "type": "module", "engines": {"node": "22.x"}}, indent=2) + "\n", encoding="utf-8")
 
 
 def build_release(project: Path, here: Path, out_root: Path) -> Path:
@@ -142,6 +168,7 @@ def build_release(project: Path, here: Path, out_root: Path) -> Path:
     shutil.copytree(public / "media", out / "media")
     shutil.copytree(public / "download", out / "download")
     (out / "vercel.json").write_text(json.dumps(VERCEL_JSON, indent=2) + "\n", encoding="utf-8")
+    build_rating_server(here, out_root, out, game)
     (out / "_headers").write_text(HEADERS, encoding="utf-8")
     shutil.copy2(here / "public" / "netlify.toml", out / "netlify.toml")
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())

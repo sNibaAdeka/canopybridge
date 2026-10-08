@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
+#include <type_traits>
 #include <vector>
 
 using namespace IronEchoCore;
@@ -686,6 +688,80 @@ IE_TEST(Versus_TwoRunsOfTheSameInputsAreBitIdentical)
 	const uint64_t C = PlayVersus(12, SecondsToTicks(40.0));
 	IE_EXPECT(A == B);
 	IE_EXPECT(A != C);
+}
+
+// Rollback netcode (web): the browser keeps byte copies of the whole Match and, when a guess about the other human was wrong,
+// puts an old copy back and replays. That is only sound if a copy is the whole truth and a replay of the same inputs lands in
+// exactly the same place. Several rewinds at different ticks, with a different guess in between, must not leave a trace.
+IE_TEST(Versus_RewindFromAByteCopyAndReplayIsBitIdentical)
+{
+	static_assert(std::is_trivially_copyable<Match>::value, "rollback copies Match bytewise");
+	for (const uint64_t Seed : {21ull, 22ull})
+	{
+		MatchSetup Setup = ShortSetup(MatchMode::Versus, Seed);
+		const int32_t Ticks = SecondsToTicks(30.0);
+		std::vector<FighterIntent> InA;
+		std::vector<FighterIntent> InB;
+		Pcg32 RngA(Seed * 3 + 1);
+		Pcg32 RngB(Seed * 5 + 2);
+		auto Move = [](Pcg32& Rng) {
+			FighterIntent I;
+			if (Rng.Chance(0.02f)) { I.AddPunch(Rng.Chance(0.5f) ? Hand::Left : Hand::Right); }
+			if (Rng.Chance(0.006f)) { I.AddPunch(Rng.Chance(0.5f) ? Hand::Left : Hand::Right, 1.0f, PunchZone::Body); }
+			if (Rng.Chance(0.004f)) { I.AddPunch(Rng.Chance(0.5f) ? Hand::Left : Hand::Right, 1.0f, PunchZone::Leg, AttackKind::Kick); }
+			I.bBlock = Rng.Chance(0.05f);
+			I.MoveForward = Rng.Chance(0.5f) ? (Rng.Chance(0.5f) ? 1.0f : -1.0f) : 0.0f;
+			I.MoveSide = Rng.Chance(0.3f) ? (Rng.Chance(0.5f) ? 1.0f : -1.0f) : 0.0f;
+			return I;
+		};
+		for (int32_t T = 0; T < Ticks; ++T)
+		{
+			InA.push_back(Move(RngA));
+			InB.push_back(Move(RngB));
+		}
+		auto Digest = [](const Match& M) {
+			uint64_t Hash = 14695981039346656037ULL;
+			const MatchSnapshot& S = M.Snapshot();
+			Hash = Fnv(Hash, &S.Phase, sizeof(S.Phase));
+			Hash = Fnv(Hash, &S.SimTick, sizeof(S.SimTick));
+			for (FighterSlot Slot : {FighterSlot::Player, FighterSlot::Opponent})
+			{
+				const FighterSnapshot& F = M.Sim().Get(Slot).Snapshot();
+				Hash = Fnv(Hash, &F.Health, sizeof(F.Health));
+				Hash = Fnv(Hash, &F.Location, sizeof(F.Location));
+				Hash = Fnv(Hash, &F.Stamina, sizeof(F.Stamina));
+				Hash = Fnv(Hash, &F.PunchesThrown, sizeof(F.PunchesThrown));
+				Hash = Fnv(Hash, &F.PunchesLanded, sizeof(F.PunchesLanded));
+			}
+			return Hash;
+		};
+		auto Play = [&](VersusRun& R, int32_t From, int32_t To, bool bWrongGuess) {
+			for (int32_t T = From; T < To; ++T)
+			{
+				R.Step(bWrongGuess ? FighterIntent{} : InA[T], InB[T]);
+			}
+		};
+
+		VersusRun Straight(Setup);
+		Play(Straight, 0, Ticks, false);
+		const uint64_t Expected = Digest(Straight.M);
+
+		VersusRun Rolled(Setup);
+		unsigned char Saved[sizeof(Match)];
+		int32_t T = 0;
+		for (const int32_t Rewind : {3, 7, 60, 400, 1300})
+		{
+			// play ahead on a wrong guess about the first human, then put the copy back and replay with the truth
+			std::memcpy(Saved, static_cast<const void*>(&Rolled.M), sizeof(Match));
+			const int32_t Back = T;
+			Play(Rolled, T, std::min(T + Rewind, Ticks), true);
+			std::memcpy(static_cast<void*>(&Rolled.M), Saved, sizeof(Match));
+			Play(Rolled, Back, std::min(Back + Rewind, Ticks), false);
+			T = std::min(Back + Rewind, Ticks);
+		}
+		Play(Rolled, T, Ticks, false);
+		IE_EXPECT(Digest(Rolled.M) == Expected);
+	}
 }
 
 IE_TEST(Versus_FullBoutEndsWithAResultAndInvariantsHold)

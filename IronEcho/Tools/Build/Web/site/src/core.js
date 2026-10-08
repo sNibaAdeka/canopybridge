@@ -2,6 +2,8 @@
 // Tools/Build/Web/build_web.py (proved bit-identical to the native build). If the host forbids WebAssembly, the
 // wasm2js build of the very same module (globalThis.IronEchoCoreJS, inlined by the page) runs instead.
 
+import { quantizeFrame, frameArgs } from './replay.js';
+
 export const STATUS_LIVE = 7;
 export const STATUS_NO_PERSON = 3;
 export const STATUS_CALIBRATING = 6;
@@ -60,14 +62,21 @@ export class Core {
   init({ mode = 0, level = 1, seed = 1, rounds = 0, roundSeconds = 0 } = {}) {
     this.ex.ie_init(mode, level, seed, rounds, roundSeconds);
     this.ex.ie_clear_events();
+    this.recorder = null; // a BoutRecorder (replay.js) set after init records every call below for the rating server
   }
 
   // input: { status, lean, leanForward, block, punchMask, confidence, moveForward, moveSide }
   // punchMask bits: 1 jab, 2 cross, 4 jab to the body, 8 cross to the body.
   // kickMask bits: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick.
+  // Every call is quantised first (replay.js: dt in 1/8192 s, analogue inputs in 1/1000), so that a recording replays to the very same bout.
   frame(dt, input) {
-    return this.ex.ie_frame(dt, input.status, input.confidence ?? 1, input.lean ?? 0, input.leanForward ?? 0,
-      input.block ?? 0, input.punchMask ?? 0, 1.0, input.moveForward ?? 0, input.moveSide ?? 0, input.kickMask ?? 0);
+    const q = quantizeFrame(dt, input);
+    if (this.recorder) this.recorder.push(0, q);
+    return this.rawFrame(frameArgs(q));
+  }
+
+  rawFrame(a) {
+    return this.ex.ie_frame(a.dt, a.status, a.confidence, a.lean, a.leanForward, a.block, a.punchMask, 1.0, a.moveForward, a.moveSide, a.kickMask);
   }
 
   ringHalfSize() { return this.ex.ie_ring_half_size ? this.ex.ie_ring_half_size() : 2.95; }
@@ -80,11 +89,17 @@ export class Core {
     return this.ex.ie_versus_step(2);
   }
 
+  // Rollback: whole-state snapshots in numbered slots (online duel). false when this core build has no rollback exports.
+  get canRollback() { return typeof this.ex.ie_save === 'function'; }
+  saveSlots() { return this.ex.ie_save_slots(); }
+  save(slot) { return this.ex.ie_save(slot) === 1; }
+  load(slot) { return this.ex.ie_load(slot) === 1; }
+
   // The state block as 32-bit words (for the desync hash).
   stateWords() { return new Uint32Array(this.ex.memory.buffer, this.ex.ie_state(), this.ex.ie_state_size() * 2); }
 
-  pause() { this.ex.ie_pause(); }
-  resume() { this.ex.ie_resume(); }
+  pause() { if (this.recorder) this.recorder.push(1, null); this.ex.ie_pause(); }
+  resume() { if (this.recorder) this.recorder.push(2, null); this.ex.ie_resume(); }
   rematch() { this.ex.ie_rematch(); }
   alpha() { return this.ex.ie_alpha(); }
 

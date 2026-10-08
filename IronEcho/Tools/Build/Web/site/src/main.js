@@ -209,9 +209,12 @@ function startBout(versus) {
   app.vis = null; // a new bout: the fighters start where the rules put them, no slide from the old positions
   const mode = settings.mode === 'training' ? 1 : 0;
   app.training = !online && mode === 1;
+  ratingAbandon(); // the previous bout was left half way: that is a loss
   const roundSeconds = online ? online.roundSeconds : settings.mode === 'short' ? 45 : 0;
-  if (online) app.core.init({ mode: 2, level: 1, seed: online.seed, rounds: 0, roundSeconds });
-  else app.core.init({ mode, level: settings.level, seed: (Date.now() % 100000) + 1, rounds: 0, roundSeconds });
+  const seed = online ? online.seed : (Date.now() % 100000) + 1;
+  if (online) app.core.init({ mode: 2, level: 1, seed, rounds: 0, roundSeconds });
+  else app.core.init({ mode, level: settings.level, seed, rounds: 0, roundSeconds });
+  ratingBegin(online, mode, seed, roundSeconds);
   app.anim.opponent.isBot = !online; // a human opponent winds up like a human
   app.hud.setNames(online ? (app.viewSlot === 0 ? `${NAMES[0]} · ТЫ` : NAMES[0]) : NAMES[0],
     online ? (app.viewSlot === 1 ? `${NAMES[1]} · ТЫ` : NAMES[1]) : (app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][settings.level]}`));
@@ -274,7 +277,7 @@ function togglePause() {
     app.core.pause();
     app.core.frame(1 / 100, IDLE_INPUT); // >= one 120 Hz tick: the core takes the request now
     const snap = app.core.snapshot();
-    const ev = app.core.drainEvents();
+    const ev = app.versus && app.versus.lock.takeEvents ? app.versus.lock.takeEvents() : app.core.drainEvents();
     for (const e of ev.combat) onCombat(e, snap);
     for (const e of ev.match) onMatch(e, snap);
     app.state = 'paused';
@@ -309,6 +312,7 @@ function toggleFullscreen() {
 }
 
 function toMenu() {
+  ratingAbandon();
   if (app.versus) leaveOnline();
   app.state = 'menu';
   $('#pause').hidden = true;
@@ -415,6 +419,7 @@ function onMatch(e, snap) {
     app.hud.banner(String(e.countdownSeconds), snap.match.round > 0 ? `РАУНД ${snap.match.round}` : '', 0.9);
     app.sound.count();
   } else if (type === 'RoundStarted') {
+    ratingStarted();
     app.sound.bell(1);
     app.hud.banner('БОКС!', '', 0.9, 'good');
   } else if (type === 'RoundEnded') {
@@ -429,11 +434,191 @@ function onMatch(e, snap) {
     app.anim.player.outcome = m.hasWinner ? (m.winner === 0 ? 'win' : 'lose') : '';
     app.anim.opponent.outcome = m.hasWinner ? (m.winner === 1 ? 'win' : 'lose') : '';
     app.resultTimer = 2.6;
+    ratingFinish();
   } else if (type === 'Paused' && e.reason === 2) {
     app.hud.banner('ТРЕКИНГ ПОТЕРЯН', app.versus ? 'один из вас выпал из кадра' : 'встань в кадр', 2.0, 'warn');
   } else if (type === 'PhaseChanged' && app.versus && e.phaseName === 'WaitingForPlayer' && app.core.enums.phase[e.previousPhase] !== 'WaitingForPlayer') {
     versusRematchVisuals(); // the lockstep took a rematch on both machines
   }
+}
+
+// ---------------------------------------------------------------- rating
+// Solo bouts against the bot count in a table shared by everybody (server: api/ratings). The page only records the bout; the server plays the
+// recording again on its own copy of the rules core and rates what really happened.
+const ratingStorage = (() => {
+  try { localStorage.setItem('ironecho.probe', '1'); localStorage.removeItem('ironecho.probe'); return localStorage; } catch { /* private mode */ }
+  const m = new Map();
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+})();
+const rating = new RatingClient({ api: (globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.ratingApi) || '', storage: ratingStorage,
+  coreId: ratingCoreId(globalThis.IRONECHO_CORE_WASM_B64) });
+app.rating = rating;
+const LEVEL_NAME = ['лёгкого', 'нормального', 'сложного'];
+const ratingLadder = () => (app.cameraInput && app.cameraInput.active ? 'camera' : 'keys');
+
+function ratingNote(text, cls = '') {
+  const el = $('#nick-note');
+  el.textContent = text;
+  el.className = `note ${cls}`;
+}
+
+function ratingBegin(online, mode, seed, roundSeconds) {
+  app.rated = null;
+  $('#res-rating').textContent = '';
+  if (online || mode !== 0 || !rating.enabled || !rating.nick) return;
+  app.core.recorder = new BoutRecorder({ v: 1, core: rating.coreId, level: settings.level, seed, roundSeconds, mode: settings.mode });
+  app.rated = { level: settings.level, begun: false, sent: false };
+}
+
+// The first bell: from now on leaving the bout is a loss. The marker in the storage settles it even if the tab is closed.
+function ratingStarted() {
+  const r = app.rated;
+  if (!r || r.begun) return;
+  r.begun = true;
+  rating.pendingStart(r.level, ratingLadder());
+}
+
+function ratingAbandon() {
+  const r = app.rated;
+  app.rated = null;
+  if (app.core) app.core.recorder = null;
+  if (!r || !r.begun || r.sent) return;
+  r.sent = true;
+  rating.forfeit(r.level, ratingLadder()).then((a) => {
+    if (a && a.ok) ratingNote(`Бой оставлен — поражение: рейтинг ${a.rating} (${a.delta >= 0 ? '+' : ''}${a.delta}).`, 'bad');
+  });
+}
+
+function ratingMessage(a) {
+  if (a.ok) {
+    const sign = a.delta > 0 ? 'up' : a.delta < 0 ? 'down' : '';
+    const word = { win: 'ПОБЕДА', loss: 'ПОРАЖЕНИЕ', draw: 'НИЧЬЯ' }[a.result] || '';
+    const el = document.createDocumentFragment();
+    const add = (tag, text, cls) => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; el.append(e); el.append(' '); };
+    add('span', 'Рейтинг');
+    add('b', `${a.rating}${a.provisional ? '?' : ''}`);
+    add('span', `${a.delta > 0 ? '+' : ''}${a.delta}`, sign);
+    if (a.rank) add('span', `· место ${a.rank} из ${a.total}`);
+    if (a.provisional) add('span', '· предварительный: нужно 10 боёв');
+    return { node: el, word };
+  }
+  const text = {
+    network: a.queued ? 'Нет связи: бой отправится при следующем запуске.' : 'Нет связи с сервером рейтинга.',
+    old_version: 'Рейтинг не засчитан: версия игры устарела — обнови страницу (Ctrl+F5) или скачай новую.',
+    too_fast: 'Рейтинг не засчитан: бои чаще раза в 15 секунд не считаются.',
+    duplicate: 'Этот бой уже засчитан.',
+    not_configured: 'Рейтинг сейчас недоступен (сервер не настроен).',
+    unknown_player: 'Профиль не узнан сервером: введи ник заново.',
+    too_short: 'Рейтинг не засчитан: бой слишком короткий.',
+  }[a.error] || `Рейтинг не засчитан (${a.error || 'ошибка'}).`;
+  return { node: document.createTextNode(text), word: '' };
+}
+
+function ratingFinish() {
+  const r = app.rated;
+  if (!r || r.sent || !app.core.recorder) return;
+  r.sent = true;
+  const box = $('#res-rating');
+  box.textContent = 'Рейтинг: сервер проверяет бой…';
+  rating.submitBout(app.core.recorder, ratingLadder()).then((a) => {
+    app.lastRating = a;
+    const m = ratingMessage(a);
+    box.textContent = '';
+    box.append(m.node);
+    refreshProfile();
+  });
+  app.core.recorder = null;
+}
+
+function wireRating() {
+  const on = rating.enabled;
+  $('#profile').hidden = !on;
+  $('#to-rating').hidden = !on;
+  if (!on) return;
+  $('#nick').value = rating.nick;
+  const claim = async () => {
+    const wanted = $('#nick').value;
+    if (!cleanNick(wanted)) { ratingNote('Ник: 3–16 символов — буквы, цифры, пробел, _ . -', 'bad'); return; }
+    ratingNote('Проверяю ник…');
+    const r = await rating.claim(wanted);
+    if (r.ok) { ratingNote(r.created ? 'Ник твой. Бои с ботом идут в рейтинг.' : 'Ник сохранён.', 'good'); $('#nick').value = r.nick; refreshProfile(); }
+    else ratingNote({ taken: 'Этот ник уже занят другим игроком.', invalid_nick: 'Ник: 3–16 символов — буквы, цифры, пробел, _ . -',
+      network: 'Нет связи с сервером рейтинга.', not_configured: 'Рейтинг сейчас недоступен.', bad_secret: 'Профиль не совпал с сервером: введи код профиля заново.' }[r.error] || `Не получилось (${r.error}).`, 'bad');
+  };
+  $('#nick-ok').addEventListener('click', claim);
+  $('#nick').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); claim(); } });
+  $('#nick').addEventListener('input', () => { $('#profile').classList.remove('flash'); });
+  $('#to-rating').addEventListener('click', openRating);
+  $('#rt-back').addEventListener('click', () => { $('#rating').hidden = true; $('#menu').hidden = false; });
+  for (const b of document.querySelectorAll('[data-group="ladder"] button')) {
+    b.addEventListener('click', () => { settings.ladder = b.dataset.value; saveSettings(); renderRating(); });
+  }
+  $('#rt-copy').addEventListener('click', async () => {
+    const code = rating.exportCode();
+    if (!code) { $('#rt-note').textContent = 'Сначала введи ник.'; return; }
+    try { await navigator.clipboard.writeText(code); $('#rt-note').textContent = 'Код скопирован: храни его, как пароль.'; } catch { $('#rt-note').textContent = code; }
+  });
+  $('#rt-import').addEventListener('click', () => {
+    const code = window.prompt('Вставь код профиля (с другого устройства или из прошлой установки):');
+    if (code === null) return;
+    if (rating.importCode(code)) { $('#nick').value = rating.nick; $('#rt-note').textContent = `Профиль «${rating.nick}» восстановлен.`; refreshProfile(); renderRating(); }
+    else $('#rt-note').textContent = 'Код не подошёл.';
+  });
+  rating.flush().then(async (answers) => {
+    await refreshProfile();
+    const a = answers.find((x) => x && x.ok);
+    if (a) ratingNote(a.method === 'forfeit' ? `Прошлый бой был оставлен — поражение: рейтинг ${a.rating} (${a.delta}).` : `Отправлен прошлый бой: рейтинг ${a.rating} (${a.delta >= 0 ? '+' : ''}${a.delta}).`, a.delta < 0 ? 'bad' : 'good');
+  });
+  refreshProfile();
+}
+
+// "Рейтинг 1042 · место 17 из 230" under the nickname field.
+async function refreshProfile() {
+  if (!rating.enabled) return;
+  if (!rating.nick) { if (!$('#nick-note').textContent) ratingNote('Без ника бои не попадают в рейтинг.'); return; }
+  const ladder = settings.control === 'camera' || settings.control === 'phone' ? 'camera' : 'keys';
+  try {
+    const b = await rating.board(ladder, 1);
+    if (b.ok && b.me && b.me.games) ratingNote(`${rating.nick} · рейтинг ${b.me.rating}${b.me.provisional ? '?' : ''} · место ${b.me.rank} из ${b.total} (${ladder === 'camera' ? 'камера' : 'клавиатура'})`, 'good');
+    else if (b.ok && (!$('#nick-note').textContent || $('#nick-note').classList.contains('bad'))) ratingNote(`${rating.nick} · ещё нет рейтинговых боёв`, ''); // keeps "Ник твой" on screen
+  } catch { /* offline: the note stays */ }
+}
+
+function openRating() {
+  $('#menu').hidden = true;
+  $('#rating').hidden = false;
+  if (!settings.ladder) settings.ladder = settings.control === 'camera' || settings.control === 'phone' ? 'camera' : 'keys';
+  renderRating();
+}
+
+async function renderRating() {
+  const ladder = settings.ladder === 'camera' ? 'camera' : 'keys';
+  for (const b of document.querySelectorAll('[data-group="ladder"] button')) b.classList.toggle('sel', b.dataset.value === ladder);
+  const box = $('#rt-table');
+  box.textContent = '';
+  const msg = (t) => { const d = document.createElement('div'); d.className = 'empty'; d.textContent = t; box.append(d); };
+  msg('Загружаю таблицу…');
+  let b;
+  try { b = await rating.board(ladder, 50); } catch { box.textContent = ''; msg('Нет связи с сервером рейтинга.'); return; }
+  box.textContent = '';
+  if (!b.ok) { msg(b.error === 'not_configured' ? 'Рейтинг сейчас недоступен.' : 'Таблица не загрузилась.'); return; }
+  if (!b.rows.length) msg('Пока никого. Проведи первый бой — и ты на первом месте.');
+  else {
+    const table = document.createElement('table');
+    const head = table.createTHead().insertRow();
+    for (const h of ['#', 'Ник', 'Рейтинг', 'Бои', 'В–П–Н']) { const th = document.createElement('th'); th.textContent = h; head.append(th); }
+    const body = table.createTBody();
+    for (const r of b.rows) {
+      const tr = body.insertRow();
+      if (b.me && r.nick === b.me.nick) tr.className = 'me';
+      for (const v of [r.rank, r.nick, `${r.rating}${r.provisional ? '?' : ''}`, r.games, `${r.wins}–${r.losses}–${r.draws}`]) tr.insertCell().textContent = String(v);
+    }
+    box.append(table);
+  }
+  const me = $('#rt-me');
+  if (b.me && b.me.games) me.textContent = `Ты: ${b.me.nick} · рейтинг ${b.me.rating}${b.me.provisional ? '? (предварительный)' : ''} · место ${b.me.rank} из ${b.total} · ${b.me.games} боёв (${b.me.wins}–${b.me.losses}–${b.me.draws}), нокаутов ${b.me.kos}`;
+  else if (rating.nick) me.textContent = `Ты: ${rating.nick} · в этой таблице ещё нет боёв.`;
+  else me.textContent = 'Введи ник в меню — и твои бои попадут в таблицу.';
 }
 
 // ---------------------------------------------------------------- online duel
@@ -544,8 +729,7 @@ async function createRoom() {
   room.on('open', async () => {
     lobbyStatus('Соперник подключился. Проверяю связь…');
     const rtt = await room.measure();
-    const delay = netChooseDelay(rtt);
-    const start = { t: 'start', seed: (Date.now() % 100000) + 1, delay, roundSeconds: settings.mode === 'short' ? 45 : 0 };
+    const start = { t: 'start', seed: (Date.now() % 100000) + 1, delay: netChooseRollbackDelay(rtt), rb: 1, roundSeconds: settings.mode === 'short' ? 45 : 0 };
     room.send(start);
     lobbyStatus(`Связь: ${Math.round(rtt)} мс. Начинаем!`);
     beginVersus(room, 0, start);
@@ -610,7 +794,8 @@ function versusSample() {
 
 async function beginVersus(room, slot, start) {
   // the lockstep object exists at once, so the other side's first frames are kept while the arena loads
-  const lock = new NetLockstep({ core: null, room, slot, delay: start.delay, sample: versusSample,
+  const Engine = start.rb ? NetRollback : NetLockstep; // rb: input delay of 2-4 frames + rollback (see net.js); otherwise the fixed-delay lockstep
+  const lock = new Engine({ core: null, room, slot, delay: start.delay, sample: versusSample,
     onDesync: (f) => {
       app.hud.banner('СБОЙ СЕТИ', 'бой разошёлся у вас двоих — вернись в меню и начни заново', 8, 'bad');
       if (app.versus) app.versus.broken = true;
@@ -636,6 +821,7 @@ async function beginVersus(room, slot, start) {
   $('#online').hidden = true;
   startBout({ seed: start.seed, roundSeconds: start.roundSeconds });
   app.versus.started = true;
+  room.startPings();
   startSendingVideo(room);
 }
 
@@ -658,7 +844,7 @@ function versusUi(snap) {
   badge.hidden = false;
   const stalled = v.lock.stalled;
   if (stalled > 600 && !v.gaveUp) { v.gaveUp = true; onPeerLeft(); } // ten seconds without the other side's frames: gone
-  badge.textContent = stalled > 20 ? 'ЖДЁМ СОПЕРНИКА…' : `ОНЛАЙН · ${Math.round(v.room.rtt)} мс · задержка ввода ${Math.round((v.lock.delay / 60) * 1000)} мс${v.sendingVideo ? ' · соперник видит твою камеру' : ''}`;
+  badge.textContent = stalled > 20 ? 'ЖДЁМ СОПЕРНИКА…' : `ОНЛАЙН · ${Math.round(v.room.rtt)} мс · отклик ${Math.round((v.lock.delay / 60) * 1000)} мс${v.sendingVideo ? ' · соперник видит твою камеру' : ''}`;
   badge.style.color = stalled > 20 ? '#ff7a6b' : '#9aa3ae';
   $('#pause').hidden = snap.match.phaseName !== 'Paused';
   if (!$('#pause').hidden) {
@@ -953,6 +1139,14 @@ function wireMenu() {
   for (const b of document.querySelectorAll('[data-group="control"] button')) b.addEventListener('click', syncCam2);
   syncCam2();
   $('#start').addEventListener('click', async () => {
+    // once per page load: the table needs a name (automated browsers are not asked, unless a test forces it)
+    if (rating.enabled && !rating.nick && settings.mode !== 'training' && !app.nickAsked && (!navigator.webdriver || globalThis.IRONECHO_FORCE_NICK_PROMPT)) {
+      app.nickAsked = true;
+      $('#profile').classList.add('flash');
+      ratingNote('Введи ник и нажми ОК — бой попадёт в рейтинг. Или нажми «В РИНГ» ещё раз: играть без рейтинга.', 'bad');
+      $('#nick').focus();
+      return;
+    }
     if ($('#start').disabled) return;
     app.sound.start();
     if (!app.loaded) {
@@ -1046,6 +1240,7 @@ async function offerCameraDownload() {
 }
 
 wireMenu();
+wireRating();
 offerCameraDownload();
 // a link with ?room=CODE opens the lobby and joins that room
 {

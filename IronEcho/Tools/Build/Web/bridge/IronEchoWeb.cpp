@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <type_traits>
 
 #if defined(__wasm__)
 #define IE_EXPORT(Name) extern "C" __attribute__((export_name(#Name)))
@@ -68,6 +69,21 @@ namespace
 	CombatEventBuffer CombatEvents;
 	MatchEventBuffer MatchEvents;
 	FighterIntent CarriedPunches;
+
+	// Rollback (online duel): whole-state snapshots of the match and both intent mappers. The rules hold no heap pointers, so
+	// a byte copy is an exact copy (checked below); restoring one and replaying the same inputs reproduces the same state.
+	constexpr int32_t kSaveSlots = 32;
+	struct SavedState
+	{
+		alignas(Match) unsigned char MatchBytes[sizeof(Match)];
+		IntentMapper MapperA;
+		IntentMapper MapperB;
+		bool bReady = false;
+		bool bValid = false;
+	};
+	static_assert(std::is_trivially_copyable<Match>::value, "Match must be byte-copyable for rollback");
+	static_assert(std::is_trivially_copyable<IntentMapper>::value, "IntentMapper must be byte-copyable for rollback");
+	SavedState Saved[kSaveSlots];
 	double Accumulator = 0.0;
 	int32_t Level = 1;
 	bool bLastReady = false;
@@ -327,6 +343,10 @@ IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int3
 		Setup.Rules.RoundTicks = SecondsToTicks(RoundSeconds);
 	}
 	Game = new (MatchStorage) Match(Setup);
+	for (SavedState& S : Saved)
+	{
+		S.bValid = false;
+	}
 	Mapper.Reset();
 	MapperOpponent.Reset();
 	CombatEvents.Clear();
@@ -496,6 +516,42 @@ IE_EXPORT(ie_versus_step) int32_t ie_versus_step(int32_t Ticks)
 	}
 	WriteState();
 	return Ticks;
+}
+
+// Rollback: ie_save(slot) keeps the whole match state, ie_load(slot) puts it back (and rewrites the exported state block).
+// Events are not part of the state: JS drains them after every step.
+IE_EXPORT(ie_save_slots) int32_t ie_save_slots() { return kSaveSlots; }
+
+IE_EXPORT(ie_save) int32_t ie_save(int32_t Slot)
+{
+	if (Game == nullptr || Slot < 0 || Slot >= kSaveSlots)
+	{
+		return 0;
+	}
+	SavedState& S = Saved[Slot];
+	__builtin_memcpy(S.MatchBytes, static_cast<const void*>(Game), sizeof(Match));
+	S.MapperA = Mapper;
+	S.MapperB = MapperOpponent;
+	S.bReady = bLastReady;
+	S.bValid = true;
+	return 1;
+}
+
+IE_EXPORT(ie_load) int32_t ie_load(int32_t Slot)
+{
+	if (Game == nullptr || Slot < 0 || Slot >= kSaveSlots || !Saved[Slot].bValid)
+	{
+		return 0;
+	}
+	const SavedState& S = Saved[Slot];
+	__builtin_memcpy(static_cast<void*>(Game), S.MatchBytes, sizeof(Match));
+	Mapper = S.MapperA;
+	MapperOpponent = S.MapperB;
+	bLastReady = S.bReady;
+	CombatEvents.Clear();
+	MatchEvents.Clear();
+	WriteState();
+	return 1;
 }
 
 // Fraction of the next tick already accumulated (0..1): lets the renderer interpolate.
