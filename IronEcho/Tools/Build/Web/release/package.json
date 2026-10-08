@@ -1,0 +1,8 @@
+{
+  "name": "iron-echo-site",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  }
+}

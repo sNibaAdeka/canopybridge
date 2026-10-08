@@ -1,0 +1,154 @@
+// IRON ECHO rules core in the page: the same C++ IronEchoRules the game uses, compiled to WebAssembly by
+// Tools/Build/Web/build_web.py (proved bit-identical to the native build). If the host forbids WebAssembly, the
+// wasm2js build of the very same module (globalThis.IronEchoCoreJS, inlined by the page) runs instead.
+
+import { quantizeFrame, frameArgs } from './replay.js';
+
+export const STATUS_LIVE = 7;
+export const STATUS_NO_PERSON = 3;
+export const STATUS_CALIBRATING = 6;
+
+function readCString(buffer, ptr) {
+  const bytes = new Uint8Array(buffer, ptr);
+  let end = 0;
+  while (bytes[end] !== 0) end++;
+  return new TextDecoder().decode(bytes.subarray(0, end));
+}
+
+function indexOf(names) {
+  const map = {};
+  names.forEach((n, i) => { map[n] = i; });
+  return map;
+}
+
+export async function loadCore() {
+  let ex = null;
+  let kind = '';
+  const b64 = globalThis.IRONECHO_CORE_WASM_B64;
+  if (b64 && typeof WebAssembly === 'object') {
+    try {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const { instance } = await WebAssembly.instantiate(bytes, {});
+      ex = instance.exports;
+      kind = 'WebAssembly';
+    } catch (err) {
+      console.warn('[core] WebAssembly unavailable here, using the JS build of the same core:', err);
+    }
+  }
+  if (!ex && globalThis.IronEchoCoreJS) {
+    ex = globalThis.IronEchoCoreJS;
+    kind = 'JS (wasm2js)';
+  }
+  if (!ex) throw new Error('IRON ECHO core is missing from the page');
+  if (ex._initialize) ex._initialize();
+  return new Core(ex, kind);
+}
+
+export class Core {
+  constructor(ex, kind) {
+    this.ex = ex;
+    this.kind = kind;
+    this.layout = JSON.parse(readCString(ex.memory.buffer, ex.ie_layout()));
+    this.enums = this.layout.enums;
+    this.matchIdx = indexOf(this.layout.match);
+    this.fighterIdx = indexOf(this.layout.fighter);
+    this.combatIdx = indexOf(this.layout.combatEvent);
+    this.matchEvIdx = indexOf(this.layout.matchEvent);
+    this.tickRate = this.layout.tickRate;
+    this.matchCount = this.layout.match.length;
+    this.fighterCount = this.layout.fighter.length;
+  }
+
+  init({ mode = 0, level = 1, seed = 1, rounds = 0, roundSeconds = 0 } = {}) {
+    this.ex.ie_init(mode, level, seed, rounds, roundSeconds);
+    this.ex.ie_clear_events();
+    this.recorder = null; // a BoutRecorder (replay.js) set after init records every call below for the rating server
+  }
+
+  // input: { status, lean, leanForward, block, punchMask, confidence, moveForward, moveSide }
+  // punchMask bits: 1 jab, 2 cross, 4 jab to the body, 8 cross to the body.
+  // kickMask bits: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick.
+  // Every call is quantised first (replay.js: dt in 1/8192 s, analogue inputs in 1/1000), so that a recording replays to the very same bout.
+  frame(dt, input) {
+    const q = quantizeFrame(dt, input);
+    if (this.recorder) this.recorder.push(0, q);
+    return this.rawFrame(frameArgs(q));
+  }
+
+  rawFrame(a) {
+    return this.ex.ie_frame(a.dt, a.status, a.confidence, a.lean, a.leanForward, a.block, a.punchMask, 1.0, a.moveForward, a.moveSide, a.kickMask);
+  }
+
+  ringHalfSize() { return this.ex.ie_ring_half_size ? this.ex.ie_ring_half_size() : 2.95; }
+
+  // Versus (online duel): one lockstep frame = two exact 120 Hz ticks with both players' inputs
+  // [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl].
+  versusStep(a, b) {
+    const v = new Float64Array(this.ex.memory.buffer, this.ex.ie_versus_input(), 20);
+    for (let i = 0; i < 10; i++) { v[i] = a[i] ?? 0; v[10 + i] = b[i] ?? 0; }
+    return this.ex.ie_versus_step(2);
+  }
+
+  // Rollback: whole-state snapshots in numbered slots (online duel). false when this core build has no rollback exports.
+  get canRollback() { return typeof this.ex.ie_save === 'function'; }
+  saveSlots() { return this.ex.ie_save_slots(); }
+  save(slot) { return this.ex.ie_save(slot) === 1; }
+  load(slot) { return this.ex.ie_load(slot) === 1; }
+
+  // The state block as 32-bit words (for the desync hash).
+  stateWords() { return new Uint32Array(this.ex.memory.buffer, this.ex.ie_state(), this.ex.ie_state_size() * 2); }
+
+  pause() { if (this.recorder) this.recorder.push(1, null); this.ex.ie_pause(); }
+  resume() { if (this.recorder) this.recorder.push(2, null); this.ex.ie_resume(); }
+  rematch() { this.ex.ie_rematch(); }
+  alpha() { return this.ex.ie_alpha(); }
+
+  _fighter(view, offset) {
+    const f = {};
+    this.layout.fighter.forEach((name, i) => { f[name] = view[offset + i]; });
+    f.stateName = this.enums.state[f.state] || '?';
+    f.stageName = this.enums.stage[f.stage] || '?';
+    return f;
+  }
+
+  snapshot() {
+    const view = new Float64Array(this.ex.memory.buffer, this.ex.ie_state(), this.ex.ie_state_size());
+    const m = {};
+    this.layout.match.forEach((name, i) => { m[name] = view[i]; });
+    m.phaseName = this.enums.phase[m.phase] || '?';
+    m.resumePhaseName = this.enums.phase[m.resumePhase] || '?';
+    return {
+      match: m,
+      player: this._fighter(view, this.matchCount),
+      opponent: this._fighter(view, this.matchCount + this.fighterCount),
+    };
+  }
+
+  // Combat and match events produced since the last call (consumed).
+  drainEvents() {
+    const ex = this.ex;
+    const cs = ex.ie_combat_event_size();
+    const cn = ex.ie_combat_event_count();
+    const cv = new Float64Array(ex.memory.buffer, ex.ie_combat_events(), cn * cs);
+    const combat = [];
+    for (let k = 0; k < cn; k++) {
+      const e = {};
+      this.layout.combatEvent.forEach((name, i) => { e[name] = cv[k * cs + i]; });
+      e.typeName = this.enums.combatEvent[e.type] || '?';
+      combat.push(e);
+    }
+    const ms = ex.ie_match_event_size();
+    const mn = ex.ie_match_event_count();
+    const mv = new Float64Array(ex.memory.buffer, ex.ie_match_events(), mn * ms);
+    const match = [];
+    for (let k = 0; k < mn; k++) {
+      const e = {};
+      this.layout.matchEvent.forEach((name, i) => { e[name] = mv[k * ms + i]; });
+      e.typeName = this.enums.matchEvent[e.type] || '?';
+      e.phaseName = this.enums.phase[e.phase] || '?';
+      match.push(e);
+    }
+    ex.ie_clear_events();
+    return { combat, match };
+  }
+}

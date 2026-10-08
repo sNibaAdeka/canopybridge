@@ -40,6 +40,9 @@ IRONECHO_SYNTHETIC=Build/Web/check/synthetic_session.json node Tests/Web/qa.js  
 клиент `RatingClient` против настоящего серверного кода с хранилищем в памяти) и страница: `IRONECHO_STANDALONE=Build/Web/standalone NODE_PATH=<playwright> node Tests/Web/rating_e2e.js`
 (ник, занятый ник, рейтинговый бой, таблица, выход из боя = поражение, закрытая вкладка = поражение при следующем запуске; запросы страницы к `/api/ratings`
 перехватываются и обслуживаются тем же серверным кодом). База и сеть в этих тестах не участвуют.
+Хранилище: `node Tests/Web/rating_store_test.mjs` — один и тот же набор условий для `MemoryStore` и для `SupabaseStore`, который говорит с самодельной заменой REST-интерфейса Supabase
+(`postgrest_standin.mjs`: фильтры, сортировка, встроенный select, Prefer/Range, 409 при нарушении уникальности). Это модель PostgREST, а не он сам: настоящий проект Supabase прогоняется отдельно.
+Собранный сайт: `node Tests/Web/release_api_smoke.mjs` (после `build_web.py release`) — функция `release/api/ratings.mjs` вызывается так, как её вызывает Vercel, с ядром из релиза; бой записан, проигран, оценён.
 
 Непрерывность анимации (`node Tests/Web/qa.js --only=animation`): 30-секундный бой со скриптом (удары, блоки, шаги, пинки, пропущенные удары),
 каждый шаг 1/60 с замеряется по костям обоих роботов: корень не телепортируется (<0,10 м за кадр), конечности не переворачиваются на 180° за кадр,

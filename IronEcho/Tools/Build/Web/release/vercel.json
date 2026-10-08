@@ -1,4 +1,10 @@
 {
+  "functions": {
+    "api/ratings.mjs": {
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  },
   "headers": [
     {
       "source": "/play/(.*)",
