@@ -26,6 +26,10 @@ namespace IronEchoCore
 		float MaxStamina = 100.0f;
 		AttackSpec Attacks[2]; // indexed by HandIndex(): [0] left straight (jab), [1] right straight (cross)
 		AttackSpec Kicks[2];   // [0] lead leg (front kick / teep), [1] rear leg (round kick) (1.4)
+		// Close range (1.6): an elbow to the head and a knee to the body. Short reach (they only land when the fighters are
+		// close, inside the punches' sweet spot), fast and heavy; the elbow can be slipped and blocked, the knee only blocked.
+		AttackSpec Elbows[2];  // [0] lead arm, [1] rear arm
+		AttackSpec Knees[2];   // [0] lead leg, [1] rear leg
 
 		float StaminaRegenPerSecond = 14.0f;
 		int32_t StaminaRegenDelayTicks = SecondsToTicks(0.5);
@@ -100,6 +104,7 @@ namespace IronEchoCore
 		int32_t LegSlowMaxTicks = SecondsToTicks(4.0);
 		float LegSlowFactor = 0.55f;         // movement speed multiplier while slowed
 		int32_t KickWhiffPenaltyTicks = SecondsToTicks(0.22);
+		float KneeBodyStaminaDamage = 10.0f; // defender's stamina lost to a full clean knee (1.6)
 
 		// ---- footwork (1.2) ----
 		float StepForwardSpeed = 1.50f;      // m/s
@@ -220,6 +225,8 @@ namespace IronEchoCore
 		float KickChance = 0.12f;
 		float RoundKickShare = 0.55f;
 		float LegKickShare = 0.35f;
+		// Close range (1.6): when the foe is inside elbow reach, the share of planned punches that become an elbow or a knee.
+		float ClinchStrikeChance = 0.35f;
 		// Offence: body shots, more of them against a guard.
 		float BodyShotChance = 0.12f;
 		float BodyVsGuardBonus = 0.30f;

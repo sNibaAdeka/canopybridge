@@ -36,7 +36,7 @@ const STANCE_TURN = -22 + -8; // yaw + twist of the default stance (POSE_DEFAULT
 export const POSE_DEFAULTS = {
   lead_hand: [0.30, 0.10, 1.50], rear_hand: [0.22, -0.09, 1.49], crouch: 0.06, yaw: -22, lean: 8, twist: -8,
   nod: 10, lateral: 0, lead_foot: [0.24, 0.17], rear_foot: [-0.22, -0.15], foot_yaw: [10, 35], elbow_out: 0.25,
-  lead_extended: 0, rear_extended: 0, head_turn: 0, head_tilt: 0, side_bend: 0, body_x: 0,
+  lead_extended: 0, rear_extended: 0, lead_elbow: 0, rear_elbow: 0, head_turn: 0, head_tilt: 0, side_bend: 0, body_x: 0,
 };
 
 const DEG = Math.PI / 180;
@@ -150,12 +150,14 @@ export function computePose(p) {
   for (const b of ['spine_02', 'spine_03', 'clavicle_l', 'clavicle_r', 'neck_01']) D[b] = tChest;
   D.head = tHead;
 
-  const arms = [['l', 1, p.lead_hand, p.lead_extended], ['r', -1, p.rear_hand, p.rear_extended]];
-  for (const [side, s, target, ext] of arms) {
+  const arms = [['l', 1, p.lead_hand, p.lead_extended, p.lead_elbow || 0], ['r', -1, p.rear_hand, p.rear_extended, p.rear_elbow || 0]];
+  for (const [side, s, target, ext, elbowStrike] of arms) {
     const sh = vHead(`upperarm_${side}`).applyMatrix4(tChest);
     const a = boneLen(`upperarm_${side}`);
     const b = boneLen(`lowerarm_${side}`);
-    const pole = V(-0.35, s * p.elbow_out, -1.0).lerp(V(0.0, s * 0.2, -1.0), Math.max(0, Math.min(1, ext)));
+    let pole = V(-0.35, s * p.elbow_out, -1.0).lerp(V(0.0, s * 0.2, -1.0), Math.max(0, Math.min(1, ext)));
+    // elbow strike: the point of the elbow leads, forward and out at chin height (the glove is folded back to the face)
+    if (elbowStrike > 0) pole = pole.lerp(V(0.75, s * 0.55, 0.25), Math.max(0, Math.min(1, elbowStrike)));
     // While kicking (guard_follow 0..1) a hand that is not punching goes with the turning torso, like a real boxer's guard does:
     // left where it was, the shoulder swings through the glove target and the arm flips over the shoulder.
     let goal = V(target[0], target[1], target[2]);

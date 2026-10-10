@@ -47,6 +47,32 @@ namespace IronEchoCore
 		Round.KnockbackMeters = 0.28f;
 		Round.HitStunTicks = SecondsToTicks(0.38);
 
+		// Close range (1.6). Reach 1.18-1.22 m: they land from the clinch (1.00 m) up to a short step in from the working
+		// distance (1.35 m), where the straights are already smothered. Heavier than a cross, faster than a kick.
+		for (int32_t Index = 0; Index < 2; ++Index)
+		{
+			const bool bRear = Index == 1;
+			AttackSpec& Elbow = Config.Elbows[Index];
+			Elbow.WindupTicks = SecondsToTicks(bRear ? 0.14 : 0.12);
+			Elbow.ActiveTicks = SecondsToTicks(0.06);
+			Elbow.RecoveryTicks = SecondsToTicks(bRear ? 0.30 : 0.26);
+			Elbow.Damage = bRear ? 3.6f : 3.0f;
+			Elbow.StaminaCost = bRear ? 11.0f : 9.0f;
+			Elbow.ReachMeters = 1.22f;
+			Elbow.KnockbackMeters = 0.10f;
+			Elbow.HitStunTicks = SecondsToTicks(0.36);
+
+			AttackSpec& Knee = Config.Knees[Index];
+			Knee.WindupTicks = SecondsToTicks(bRear ? 0.18 : 0.15);
+			Knee.ActiveTicks = SecondsToTicks(0.08);
+			Knee.RecoveryTicks = SecondsToTicks(bRear ? 0.40 : 0.34);
+			Knee.Damage = bRear ? 3.8f : 3.2f;
+			Knee.StaminaCost = bRear ? 14.0f : 12.0f;
+			Knee.ReachMeters = 1.18f;
+			Knee.KnockbackMeters = 0.16f;
+			Knee.HitStunTicks = SecondsToTicks(0.34);
+		}
+
 		return Config;
 	}
 
@@ -75,6 +101,14 @@ namespace IronEchoCore
 		Config.Kicks[HandIndex(Hand::Right)].WindupTicks = SecondsToTicks(CrossWindup + 0.22);
 		Config.Kicks[0].StaminaCost *= 0.75f;
 		Config.Kicks[1].StaminaCost *= 0.75f;
+		// Close range: telegraphed too, a little less than the straights (the bot is already in the human's face).
+		for (int32_t Index = 0; Index < 2; ++Index)
+		{
+			Config.Elbows[Index].WindupTicks = SecondsToTicks((Index == 0 ? JabWindup : CrossWindup) - 0.04);
+			Config.Knees[Index].WindupTicks = SecondsToTicks((Index == 0 ? JabWindup : CrossWindup) + 0.06);
+			Config.Elbows[Index].StaminaCost *= 0.75f;
+			Config.Knees[Index].StaminaCost *= 0.75f;
+		}
 		// The telegraphed windup is there for the human, not a choice of the bot: it would keep the bot out of
 		// regeneration (no regen while attacking) and starve it. Cheaper punches and faster regen compensate.
 		Config.Attacks[HandIndex(Hand::Left)].StaminaCost *= 0.75f;
@@ -126,6 +160,7 @@ namespace IronEchoCore
 			Config.BodyVsGuardBonus = 0.10f;
 			Config.KickChance = 0.06f;
 			Config.LegKickShare = 0.20f;
+			Config.ClinchStrikeChance = 0.20f;
 			break;
 		case BotLevel::Normal:
 			break;
@@ -150,6 +185,7 @@ namespace IronEchoCore
 			Config.BodyVsGuardBonus = 0.40f;
 			Config.KickChance = 0.22f;
 			Config.LegKickShare = 0.45f;
+			Config.ClinchStrikeChance = 0.50f;
 			break;
 		}
 		return Config;

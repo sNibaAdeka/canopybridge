@@ -280,13 +280,15 @@ async function animation(browser) {
     const script = (k) => {
       const t = k / 60;
       const s = { status: 7, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, moveForward: 0, moveSide: 0 };
-      const ph = Math.floor(t / 1.5) % 6;
+      const ph = Math.floor(t / 1.5) % 7;
       if (ph === 0 && k % 22 === 0) s.punchMask = (k / 22) % 2 ? 2 : 1;
       if (ph === 1) s.block = 1;
       if (ph === 2) { s.moveForward = 1; s.moveSide = 0.5; }
       if (ph === 3 && k % 40 === 0) s.kickMask = [1, 2, 4, 8][(k / 40) % 4];
       if (ph === 4) { s.moveForward = -1; s.lean = Math.sin(t * 6) * 0.8; }
       if (ph === 5) { if (k % 18 === 0) s.punchMask = [1, 2, 4, 8][(k / 18) % 4]; s.moveSide = -0.6; }
+      // close range (1.6): walk in, then elbows and knees, both sides
+      if (ph === 6) { s.moveForward = 1; if (k % 30 === 0) { const m = [16, 32, 16, 32][(k / 30) % 4]; if ((k / 30) % 4 < 2) s.punchMask = m; else s.kickMask = m; } }
       return s;
     };
     for (let k = 0; k < 1800; k++) {

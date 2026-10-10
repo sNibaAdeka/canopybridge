@@ -8,7 +8,7 @@
 #include "IronEchoTypes.generated.h"
 
 #define IRONECHO_VISUAL_CONTRACT_VERSION 2
-#define IRONECHO_VISUAL_CONTRACT_MINOR 1
+#define IRONECHO_VISUAL_CONTRACT_MINOR 2
 
 IRONECHO_API DECLARE_LOG_CATEGORY_EXTERN(LogIronEcho, Log, All);
 
@@ -262,6 +262,8 @@ struct IRONECHO_API FIronEchoFighterVisualState
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bBodyShot = false;
 	/** The current attack is a leg kick (contract 2.1): AttackHand = Left lead leg (front kick), Right rear leg (round kick). */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bKick = false;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bElbow = false; // close range (contract 2.2): elbow to the head
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bKnee = false;  // close range (contract 2.2): knee to the body
 	/** The current kick goes low (to the legs). */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bLowKick = false;
 	/** Seconds the legs stay slowed after low kicks (limp). */
@@ -376,6 +378,8 @@ struct IRONECHO_API FIronEchoCombatEvent
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bBodyShot = false;
 	/** Contract 2.1: the attack was a kick (bBodyShot = mid kick; with bLowKick = low kick). */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bKick = false;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bElbow = false; // close range (contract 2.2): elbow to the head
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bKnee = false;  // close range (contract 2.2): knee to the body
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bLowKick = false;
 	/** Contract 2: a graze (HitConfirmed): reduced damage, show a lighter reaction. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bGlancing = false;

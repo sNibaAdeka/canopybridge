@@ -233,7 +233,7 @@ namespace IronEchoCore
 			int32_t Recovery = Spec.RecoveryTicks;
 			if (LastOutcome == AttackOutcome::Dodged || LastOutcome == AttackOutcome::Whiffed)
 			{
-				Recovery += Snap.AttackType == AttackKind::Kick ? Config.KickWhiffPenaltyTicks : Config.WhiffPenaltyTicks;
+				Recovery += IsLegStrike(Snap.AttackType) ? Config.KickWhiffPenaltyTicks : Config.WhiffPenaltyTicks;
 			}
 			Snap.Stage = AttackStage::Recovery;
 			Snap.StageTicksTotal = Recovery;
@@ -281,10 +281,10 @@ namespace IronEchoCore
 		case ActionState::Block:
 			return true;
 		case ActionState::Attack:
-			// Combo cancel: another move may interrupt a punch's recovery (the other hand, or a kick). A kick's recovery
-			// cannot be cancelled: the fighter is standing on one leg.
-			return Snap.Stage == AttackStage::Recovery && Snap.AttackType == AttackKind::Punch
-				&& (Snap.AttackHand != InHand || Kind == AttackKind::Kick);
+			// Combo cancel: another move may interrupt the recovery of a hand strike (the other hand, or any other kind of
+			// strike, e.g. jab -> elbow with the same arm). A kick's or a knee's recovery cannot be cancelled: one leg.
+			return Snap.Stage == AttackStage::Recovery && !IsLegStrike(Snap.AttackType)
+				&& (Snap.AttackHand != InHand || Kind != Snap.AttackType);
 		case ActionState::HitStun:
 		case ActionState::BlockStun:
 		case ActionState::KnockedOut:
@@ -311,7 +311,10 @@ namespace IronEchoCore
 		Snap.State = ActionState::Attack;
 		Snap.Stage = AttackStage::Windup;
 		Snap.AttackHand = InHand;
-		Snap.AttackZone = (Kind == AttackKind::Punch && Zone == PunchZone::Leg) ? PunchZone::Body : Zone;
+		// an elbow always goes to the head, a knee always to the body; a punch cannot go to the legs
+		Snap.AttackZone = Kind == AttackKind::Elbow ? PunchZone::Head
+			: Kind == AttackKind::Knee ? PunchZone::Body
+			: (Kind == AttackKind::Punch && Zone == PunchZone::Leg) ? PunchZone::Body : Zone;
 		Snap.AttackType = Kind;
 		Snap.AttackId = NextAttackId++;
 		Snap.bAttackResolved = false;
@@ -328,6 +331,14 @@ namespace IronEchoCore
 		if (Kind == AttackKind::Kick)
 		{
 			++Snap.KicksThrown;
+		}
+		else if (Kind == AttackKind::Elbow)
+		{
+			++Snap.ElbowsThrown;
+		}
+		else if (Kind == AttackKind::Knee)
+		{
+			++Snap.KneesThrown;
 		}
 		SpendStamina(Spec.StaminaCost, Tick, Events);
 		Events.Push(MakeEvent(CombatEventType::AttackStarted, Tick));
@@ -467,6 +478,14 @@ namespace IronEchoCore
 
 	AttackSpec Fighter::SpecFor(Hand InHand, PunchZone Zone, AttackKind Kind) const
 	{
+		if (Kind == AttackKind::Elbow)
+		{
+			return Config.Elbows[HandIndex(InHand)];
+		}
+		if (Kind == AttackKind::Knee)
+		{
+			return Config.Knees[HandIndex(InHand)];
+		}
 		if (Kind == AttackKind::Kick)
 		{
 			AttackSpec Spec = Config.Kicks[HandIndex(InHand)];
@@ -537,6 +556,14 @@ namespace IronEchoCore
 			if (Snap.AttackType == AttackKind::Kick)
 			{
 				++Snap.KicksLanded;
+			}
+			else if (Snap.AttackType == AttackKind::Elbow)
+			{
+				++Snap.ElbowsLanded;
+			}
+			else if (Snap.AttackType == AttackKind::Knee)
+			{
+				++Snap.KneesLanded;
 			}
 			if (bCounter)
 			{

@@ -17,7 +17,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.4.0"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.5.0"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]

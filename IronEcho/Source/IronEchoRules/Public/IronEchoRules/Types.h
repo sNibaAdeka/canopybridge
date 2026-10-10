@@ -80,12 +80,18 @@ namespace IronEchoCore
 		Leg = 2,
 	};
 
-	// A hand strike or a leg strike (1.4). Left/Right of Hand is the lead / rear limb in both cases.
+	// A hand strike or a leg strike (1.4), and the close-range strikes (1.6): an elbow (to the head) and a knee (to the body).
+	// Left/Right of Hand is the lead / rear limb in every case.
 	enum class AttackKind : uint8_t
 	{
 		Punch = 0,
 		Kick = 1,
+		Elbow = 2,
+		Knee = 3,
 	};
+
+	// Strikes thrown with a leg: the fighter stands on one leg (no cancel out of the recovery, hardly any movement).
+	inline constexpr bool IsLegStrike(AttackKind Kind) { return Kind == AttackKind::Kick || Kind == AttackKind::Knee; }
 
 	// Lateral dodge (slip) direction, anatomical: Left = player's own left.
 	enum class DodgeDir : int8_t

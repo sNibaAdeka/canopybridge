@@ -7,11 +7,13 @@ const PUNCH_LEFT = 1;  // jab (lead, left hand)
 const PUNCH_RIGHT = 2; // cross (rear, right hand)
 const BODY_LEFT = 4;   // jab to the body
 const BODY_RIGHT = 8;  // cross to the body
-// kick mask: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick
+const ELBOW_LEFT = 16;  // lead elbow (1.6)
+const ELBOW_RIGHT = 32; // rear elbow
+// kick mask: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick, 16 lead knee, 32 rear knee
 
 export const KEY_HELP = [
   ['W / S', 'шаг вперёд / назад'], ['A / D', 'кружить влево / вправо'], ['J / K', 'джеб / кросс в голову'],
-  ['Shift+J / K', 'в корпус (или N / M)'], ['U / I', 'удар ногой (Shift — по ногам)'], ['Q / E', 'уклон'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
+  ['Shift+J / K', 'в корпус (или N / M)'], ['U / I', 'удар ногой (Shift — по ногам)'], ['Y / O', 'локоть (вблизи)'], ['H / L', 'колено (вблизи)'], ['Q / E', 'уклон'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
 ];
 const MOVE_KEYS = { KeyW: 'fwd', ArrowUp: 'fwd', KeyS: 'back', KeyA: 'left', KeyD: 'right' };
 
@@ -37,9 +39,13 @@ export class ManualInput {
       else if (k === 'KeyK' || k === 'KeyG') { this.mask |= body ? BODY_RIGHT : PUNCH_RIGHT; e.preventDefault(); }
       else if (k === 'KeyU') { this.kickMask |= body ? 4 : 1; e.preventDefault(); }
       else if (k === 'KeyI') { this.kickMask |= body ? 8 : 2; e.preventDefault(); }
+      else if (k === 'KeyY') { this.mask |= ELBOW_LEFT; e.preventDefault(); }
+      else if (k === 'KeyO') { this.mask |= ELBOW_RIGHT; e.preventDefault(); }
+      else if (k === 'KeyH') { this.kickMask |= 16; e.preventDefault(); }
+      else if (k === 'KeyL') { this.kickMask |= 32; e.preventDefault(); }
       else if (k === 'KeyN') { this.mask |= BODY_LEFT; e.preventDefault(); }
       else if (k === 'KeyM') { this.mask |= BODY_RIGHT; e.preventDefault(); }
-      else if (k === 'Space' || k === 'KeyL' || k === 'ArrowDown') { this.blockKeys.add(k); e.preventDefault(); }
+      else if (k === 'Space' || k === 'ArrowDown') { this.blockKeys.add(k); e.preventDefault(); }
       else if (k === 'KeyQ' || k === 'ArrowLeft') { this.leftHeld = true; e.preventDefault(); }
       else if (k === 'KeyE' || k === 'ArrowRight') { this.rightHeld = true; e.preventDefault(); }
       else if (MOVE_KEYS[k]) { this.move.add(MOVE_KEYS[k]); e.preventDefault(); }
@@ -70,6 +76,8 @@ export class ManualInput {
       if (act === 'cross' && on) this.mask |= PUNCH_RIGHT;
       if (act === 'kick' && on) this.kickMask |= 2;
       if (act === 'low' && on) this.kickMask |= 8;
+      if (act === 'elbow' && on) this.mask |= ELBOW_RIGHT;
+      if (act === 'knee' && on) this.kickMask |= 32;
       if (act === 'block') this.touchBlock = on;
       if (act === 'left') this.touchLeft = on;
       if (act === 'right') this.touchRight = on;

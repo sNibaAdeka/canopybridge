@@ -35,9 +35,9 @@ function springZ(x, v, target, omega, zeta, dt) {
 // Smooth pseudo-noise in about [-1, 1]: incommensurate sines, phase from the seed.
 const noise = (t, f, ph) => 0.62 * Math.sin(t * f + ph) + 0.38 * Math.sin(t * f * 2.37 + ph * 1.9 + 1.1);
 
-const SCALARS = ['crouch', 'yaw', 'lean', 'twist', 'nod', 'lateral', 'elbow_out', 'lead_extended', 'rear_extended',
+const SCALARS = ['crouch', 'yaw', 'lean', 'twist', 'nod', 'lateral', 'elbow_out', 'lead_extended', 'rear_extended', 'lead_elbow', 'rear_elbow',
   'head_turn', 'head_tilt', 'side_bend', 'body_x'];
-const OMEGA = { crouch: 13, yaw: 15, lean: 14, twist: 17, nod: 16, lateral: 13, elbow_out: 14, lead_extended: 40,
+const OMEGA = { crouch: 13, yaw: 15, lean: 14, twist: 17, nod: 16, lateral: 13, elbow_out: 14, lead_elbow: 34, rear_elbow: 34, lead_extended: 40,
   rear_extended: 40, head_turn: 16, head_tilt: 14, side_bend: 14, body_x: 11 };
 const ZETA = { yaw: 0.62, twist: 0.58, lean: 0.7, body_x: 0.66, lateral: 0.75 }; // the rest: critically damped
 const HAND_OMEGA = 30;
@@ -205,6 +205,27 @@ export class FighterAnimator {
 
     // kick: the leg chambers (knee up), then extends; the other foot stays planted
     let kickPose = null;
+    if (f.stateName === 'Attack' && f.kind === 3) {
+      // knee (1.6): the knee drives up and through, the hips go in, both gloves pull the opponent's head down onto it
+      const a = f.stageAlpha;
+      const rearLeg = f.hand === 1;
+      let lift = 0;
+      let ext = 0;
+      if (f.stageName === 'Windup') { lift = smooth(Math.min(1, a / 0.7)); ext = smooth(clamp((a - 0.6) / 0.4, 0, 1)); }
+      else if (f.stageName === 'Active') { lift = 1; ext = 1; }
+      else { lift = 1 - smooth(a); ext = 1 - smooth(Math.min(1, a * 2.2)); }
+      kickPose = { side: rearLeg ? 'rear' : 'lead', zone: 1, lift, ext, knee: true };
+      this.telegraph = this.isBot && f.stageName === 'Windup' ? lift : 0;
+      T.body_x = lerp(T.body_x, 0.02, lift) + 0.12 * ext;
+      T.lean = lerp(T.lean, 12, lift) - 14 * ext;                  // over the knee, then the hips snap through
+      T.crouch += 0.02 * lift;
+      T.yaw = lerp(T.yaw, rearLeg ? 14 : -10, lift);
+      T.twist = lerp(T.twist, rearLeg ? 12 : -6, lift);
+      lead = lerp3(lead, [0.46, 0.15, 1.46], lift);
+      rear = lerp3(rear, [0.46, -0.15, 1.46], lift);
+      leadBias = lerp(leadBias, 0, lift);
+      rearBias = lerp(rearBias, 0, lift);
+    }
     if (f.stateName === 'Attack' && f.kind === 1) {
       const a = f.stageAlpha;
       const rear = f.hand === 1;
@@ -232,8 +253,46 @@ export class FighterAnimator {
       rearBias = lerp(rearBias, 0, lift);
     }
 
+    // elbow (1.6): the glove folds back to the face and the elbow swings through at chin height, the body turning behind it
+    if (f.stateName === 'Attack' && f.kind === 2) {
+      const lead1 = f.hand === 0;
+      const a = f.stageAlpha;
+      const L = this.isBot ? 0.55 : 0.2;
+      let e = 0;
+      if (f.stageName === 'Windup') e = a < L ? -0.2 * smooth(a / L) : -0.2 + 1.2 * easeOut((a - L) / (1 - L));
+      else if (f.stageName === 'Active') e = 1;
+      else if (f.stageName === 'Recovery') e = 1 - smooth(a);
+      const pos = clamp(e, 0, 1);
+      const load = clamp(-e / 0.2, 0, 1);
+      const big = this.isBot ? 1.0 : 0.5;
+      this.telegraph = this.isBot ? load : 0;
+      const k = Math.max(pos, load);
+      if (lead1) {
+        const cocked = [0.10, 0.32, 1.44];   // elbow out, glove by the ear
+        const through = [0.20, -0.04, 1.52]; // the glove ends at the other side of the own chin
+        lead = load > 0 ? lerp3(lead, cocked, load) : lerp3(cocked, through, pos);
+        T.lead_elbow = k;
+        T.yaw = lerp(T.yaw, -30, pos) + 14 * load * big;
+        T.twist = lerp(T.twist, -24, pos) + 12 * load * big;
+        leadBias = lerp(leadBias, 0.08, pos);
+      } else {
+        const cocked = [0.04, -0.34, 1.44];
+        const through = [0.22, 0.06, 1.52];
+        rear = load > 0 ? lerp3(rear, cocked, load) : lerp3(cocked, through, pos);
+        T.rear_elbow = k;
+        T.yaw = lerp(T.yaw, 30, pos) - 16 * load * big;
+        T.twist = lerp(T.twist, 34, pos) - 18 * load * big;
+        pivot = pos;
+        heelR = Math.max(heelR, 0.06 * pos);
+      }
+      T.lean = lerp(T.lean, 14, pos);
+      T.body_x = lerp(T.body_x, 0.07, pos);
+      T.crouch += 0.02 * pos;
+      T.head_turn = (lead1 ? 8 : -10) * pos;
+    }
+
     // punch: shaped extension e (< 0 loading, 1 full) from the attack stage and its progress
-    if (f.stateName === 'Attack' && f.kind !== 1) {
+    if (f.stateName === 'Attack' && f.kind === 0) {
       const hand = f.hand; // 0 = left/lead (jab), 1 = right/rear (cross)
       const a = f.stageAlpha;
       const L = this.isBot ? 0.62 : 0.2; // share of the windup spent loading: the bot's telegraph is readable
@@ -420,6 +479,13 @@ export class FighterAnimator {
     const key = `${k.side}_foot`;
     const sgn = k.side === 'lead' ? 1 : -1; // armature +y = the robot's left
     const planted = feet[k.side];
+    if (k.knee) { // the foot stays under and behind the knee: the knee is the striking point
+      const chamber = [0.10, sgn * 0.14, 0.36];
+      const strike = [0.26, sgn * 0.07, 0.50];
+      const at = [0, 1, 2].map((i) => lerp(lerp([planted.x, planted.y, planted.z][i], chamber[i], k.lift), strike[i], k.ext));
+      P[key] = [at[0], at[1], at[2], 0];
+      return;
+    }
     const low = k.zone === 2;
     const round = k.side === 'rear' && !low;
     const chamber = low ? [0.22, sgn * 0.17, 0.26] : round ? [0.18, sgn * 0.42, 0.70] : [0.30, sgn * 0.17, 0.66];

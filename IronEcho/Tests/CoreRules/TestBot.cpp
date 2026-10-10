@@ -287,7 +287,8 @@ IE_TEST(Bot_GoesToTheBodyMoreAgainstAGuard)
 		int All = 0;
 		for (const CombatEvent& E : H.Log)
 		{
-			if (E.Type == CombatEventType::AttackStarted && E.Actor == FighterSlot::Opponent)
+			// punches only: kicks and knees (1.6, always to the body) are other decisions
+			if (E.Type == CombatEventType::AttackStarted && E.Actor == FighterSlot::Opponent && E.Kind == AttackKind::Punch)
 			{
 				++All;
 				Body += E.Zone == PunchZone::Body ? 1 : 0;

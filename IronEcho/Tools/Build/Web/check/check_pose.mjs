@@ -11,7 +11,7 @@ const { PoseProcessor } = await import('data:text/javascript;base64,' + Buffer.f
 const sessions = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 let ok = true;
 for (const s of sessions) {
-  const proc = new PoseProcessor(() => {}, { personalBlock: false, kicks: false }); // the tracker process has neither
+  const proc = new PoseProcessor(() => {}, { personalBlock: false, kicks: false, punchCal: false, close: false }); // the tracker process has none of these
   let maxBlock = 0;
   let maxLean = 0;
   let compared = 0;

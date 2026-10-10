@@ -70,6 +70,10 @@ namespace IronEchoCore
 		int32_t BodyPunchesLanded = 0;
 		int32_t KicksThrown = 0;
 		int32_t KicksLanded = 0;
+		int32_t ElbowsThrown = 0;     // close range (1.6); every strike also counts in PunchesThrown / PunchesLanded
+		int32_t ElbowsLanded = 0;
+		int32_t KneesThrown = 0;
+		int32_t KneesLanded = 0;
 		int32_t GlancingHits = 0;     // this fighter's punches that only grazed
 		// Statistics for the current round / match.
 		float RoundDamageDealt = 0.0f;

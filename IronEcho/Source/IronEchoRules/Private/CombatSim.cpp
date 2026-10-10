@@ -253,7 +253,8 @@ namespace IronEchoCore
 			Applied = Defender.ReceiveHit(Spec, Damage, Tick, Events, A.AttackId, Stun, A.bAttackTired);
 			if (A.AttackZone == PunchZone::Body)
 			{
-				const float Wind = A.AttackType == AttackKind::Kick ? AC.KickBodyStaminaDamage : AC.BodyStaminaDamage;
+				const float Wind = A.AttackType == AttackKind::Kick ? AC.KickBodyStaminaDamage
+					: A.AttackType == AttackKind::Knee ? AC.KneeBodyStaminaDamage : AC.BodyStaminaDamage;
 				Defender.TakeStaminaDamage(Wind * Result.Power, Tick, Events);
 			}
 			else if (A.AttackZone == PunchZone::Leg)
@@ -337,7 +338,7 @@ namespace IronEchoCore
 				switch (S.State)
 				{
 				case ActionState::Guard: Factor = 1.0f; break;
-				case ActionState::Attack: Factor = S.AttackType == AttackKind::Kick ? C.KickMoveFactor : C.AttackMoveFactor; break;
+				case ActionState::Attack: Factor = IsLegStrike(S.AttackType) ? C.KickMoveFactor : C.AttackMoveFactor; break;
 				case ActionState::Block: Factor = C.BlockMoveFactor; break;
 				default: Factor = 0.0f; break; // stunned: the legs belong to the punch that landed
 				}

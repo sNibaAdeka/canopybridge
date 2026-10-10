@@ -43,8 +43,12 @@ class PunchDetector:
     def update(self, t: float, extension: float, forward: float, visibility: float, guard_extension: float) -> Optional[PunchDetection]:
         cfg = self.cfg
         if visibility < cfg.min_visibility or not math.isfinite(extension):
-            self.history.clear()
+            # skip the doubtful frame; forget the motion only after a real gap
+            if self.history and t - self.history[-1][0] > cfg.gap_reset:
+                self.history.clear()
             return None
+        if self.history and t - self.history[-1][0] > cfg.gap_reset:
+            self.history.clear()
         self.history.append((t, extension, forward))
         while self.history and t - self.history[0][0] > max(cfg.progress_window, 0.3):
             self.history.popleft()
@@ -59,11 +63,14 @@ class PunchDetector:
         if len(self.history) < 3 or t - self.fired_at < cfg.min_interval:
             return None
 
-        # Velocity over ~2 frames (more robust to MediaPipe depth jitter than a 1-frame difference).
+        # Velocity against the newest sample at least vel_min_span old (two frames at 30 fps), at most vel_max_span.
         reference = None
-        for sample in self.history:
-            if t - sample[0] <= 0.075 and sample[0] < t:
-                reference = sample
+        for index in range(len(self.history) - 2, -1, -1):
+            age = t - self.history[index][0]
+            if age > cfg.vel_max_span:
+                break
+            reference = self.history[index]
+            if age >= cfg.vel_min_span:
                 break
         if reference is None:
             reference = self.history[-2]
@@ -75,8 +82,11 @@ class PunchDetector:
         window = [s[1] for s in self.history if t - s[0] <= cfg.progress_window]
         progress = extension - min(window)
 
+        # a punch is a rise over consecutive frames; one frame of depth noise jumps and falls back
+        rising = self.history[-1][1] > self.history[-2][1] > self.history[-3][1]
         if (
-            ext_velocity >= cfg.trigger_ext_velocity
+            rising
+            and ext_velocity >= cfg.trigger_ext_velocity
             and fwd_velocity >= cfg.trigger_fwd_velocity
             and extension >= guard_extension + cfg.min_ext_above_guard
             and progress >= cfg.min_progress

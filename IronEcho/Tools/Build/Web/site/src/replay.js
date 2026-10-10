@@ -20,8 +20,8 @@ export function quantizeFrame(dt, input) {
     u,
     dt: u / DT_UNIT,
     status: clampInt(input.status | 0, 0, 7),
-    punch: clampInt((input.punchMask ?? 0) | 0, 0, 15),
-    kick: clampInt((input.kickMask ?? 0) | 0, 0, 15),
+    punch: clampInt((input.punchMask ?? 0) | 0, 0, 63),
+    kick: clampInt((input.kickMask ?? 0) | 0, 0, 63),
     q: [input.confidence ?? 1, input.lean ?? 0, input.leanForward ?? 0, input.block ?? 0, input.moveForward ?? 0, input.moveSide ?? 0].map(q16),
   };
   return f;
@@ -110,7 +110,7 @@ export function replayBout(core, parsed) {
   for (let i = 0; i < parsed.rows; i++) {
     const r = replayRow(parsed, i);
     if (r.op === 0) {
-      if (r.u < 1 || r.u > 2048 || r.status > 7 || r.punch > 15 || r.kick > 15) return { ok: false, error: 'bad frame ' + i };
+      if (r.u < 1 || r.u > 2048 || r.status > 7 || r.punch > 63 || r.kick > 63) return { ok: false, error: 'bad frame ' + i };
       core.rawFrame(frameArgs(r));
     } else if (r.op === 1) core.pause();
     else if (r.op === 2) core.resume();

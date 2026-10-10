@@ -17,7 +17,8 @@ from iron_echo_tracker import synth  # noqa: E402
 
 
 def main() -> None:
-    # the web calibration: neutral -> block -> slip left -> slip right (the tracker process has no block step)
+    # the web calibration: neutral -> block -> slip left -> slip right -> two jabs and two crosses at the screen (1.6)
+    # (the tracker process has neither the block nor the punch step)
     script = synth.Script()
     script.idle(0.0, 2.2)
     script.block(2.2, 1.6)
@@ -26,10 +27,13 @@ def main() -> None:
     script.idle(5.3, 0.4)
     script.slip(5.7, 1.1, 0.20)
     script.idle(6.8, 1.0)
+    for index, side in enumerate((0, 0, 1, 1)):  # the punch calibration step
+        script.punch(7.8 + index * 0.9, side)
+    start = 7.8 + 4 * 0.9 + 0.6
     for index in range(40):
-        script.punch(8.0 + index * 0.9, index % 2)
-    t = 8.0 + 40 * 0.9 + 0.8
-    for index, (side, peak) in enumerate([(0, 0.55), (1, 0.55), (0, 0.30), (1, 0.30)]):  # mid, mid, low, low kicks
+        script.punch(start + index * 0.9, index % 2)
+    t = start + 40 * 0.9 + 0.8
+    for index, (side, peak) in enumerate([(0, 0.75), (1, 0.75), (0, 0.30), (1, 0.30)]):  # mid, mid, low, low kicks
         script.kick(t + index * 1.1, side, peak=peak)
     t += 4 * 1.1 + 0.5
     script.block(t, 1.4)  # a block after calibration: the personal block pose must read it

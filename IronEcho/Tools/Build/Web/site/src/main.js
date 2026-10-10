@@ -350,7 +350,7 @@ function onCombat(e, snap) {
     app.sound.hit(0.7 + 0.3 * power, !!e.counter);
     if (app.training && target === 'opponent') app.bag.hit(power, e.hand === 0 ? 1 : -1);
     else app.anim[target].takeHit(e.hand, e.damage, !!e.counter, e.zone);
-    if (e.kind === 1) app.shake.add(target === me ? 0.25 : 0.12);
+    if (e.kind !== 0) app.shake.add(target === me ? 0.25 : 0.12); // legs, elbows and knees land heavier
     app.hitStop = e.counter ? 0.06 : 0.035;
     app.shake.add(target === me ? 0.45 * power : 0.18 * power);
     if (target === me) app.hud.flash('hit');
@@ -360,11 +360,15 @@ function onCombat(e, snap) {
       else if (e.smothered) app.hud.feed('СЛИШКОМ БЛИЗКО — ОТОЙДИ', 'warn');
       else if (e.kind === 1 && e.zone === 2) app.hud.feed('ПО НОГАМ — ОН ХРОМАЕТ', 'good');
       else if (e.kind === 1) app.hud.feed('УДАР НОГОЙ!', 'good');
+      else if (e.kind === 2) app.hud.feed('ЛОКТЕМ!', 'good');
+      else if (e.kind === 3) app.hud.feed('КОЛЕНОМ В КОРПУС!', 'good');
       else if (e.zone === 1) app.hud.feed('В КОРПУС!', 'good');
       if (e.combo >= 2) app.hud.combo(e.combo);
     } else if (e.counter) app.hud.feed('ПОЙМАЛ НА ВСТРЕЧНОМ', 'bad');
     else if (e.kind === 1 && e.zone === 2) app.hud.feed('ПО НОГАМ: ТЫ ЗАМЕДЛЕН', 'bad');
     else if (e.kind === 1) app.hud.feed('ПРОПУСТИЛ УДАР НОГОЙ', 'bad');
+    else if (e.kind === 2) app.hud.feed('ПРОПУСТИЛ ЛОКОТЬ', 'bad');
+    else if (e.kind === 3) app.hud.feed('ПРОПУСТИЛ КОЛЕНО', 'bad');
     else if (e.zone === 1 && !e.glancing) app.hud.feed('ПРОПУСТИЛ В КОРПУС', 'bad');
     if (power > 1.1) app.sound.crowdSwell(0.6);
     return;

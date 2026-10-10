@@ -135,7 +135,9 @@ class TrackerPipeline:
         confidences = []
         for side in (0, 1):
             extension, forward = arm_measures(pose, calibration, side)
-            hand_vis = float(min(pose.vis[WRIST[side]], pose.vis[ELBOW[side]], pose.vis[SHOULDER[side]]))
+            # shoulder -> wrist only: in a punch straight at the camera the glove hides the elbow (low visibility), and the
+            # extension does not use it
+            hand_vis = float(min(pose.vis[WRIST[side]], pose.vis[SHOULDER[side]]))
             extensions.append(float(min(2.0, extension)))
             confidences.append(hand_vis)
             if self.calibrating:

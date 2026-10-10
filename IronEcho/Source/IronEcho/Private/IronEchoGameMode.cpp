@@ -482,6 +482,8 @@ FIronEchoFighterVisualState AIronEchoGameMode::MakeVisualState(IronEchoCore::Fig
 	V.bBodyShot = S.AttackZone == IronEchoCore::PunchZone::Body;
 	V.bKick = S.AttackType == IronEchoCore::AttackKind::Kick;
 	V.bLowKick = V.bKick && S.AttackZone == IronEchoCore::PunchZone::Leg;
+	V.bElbow = S.AttackType == IronEchoCore::AttackKind::Elbow;
+	V.bKnee = S.AttackType == IronEchoCore::AttackKind::Knee;
 	V.LegSlowSeconds = static_cast<float>(S.LegSlowTicksLeft) * TickSeconds;
 	V.LastHitTakenTime = Memory.LastHitTakenTime;
 	V.LastHitTakenFromHand = Memory.LastHitFromHand;
@@ -571,6 +573,8 @@ void AIronEchoGameMode::DispatchEvents()
 		Event.bBodyShot = Core.Zone == IronEchoCore::PunchZone::Body;
 		Event.bKick = Core.Kind == IronEchoCore::AttackKind::Kick;
 		Event.bLowKick = Event.bKick && Core.Zone == IronEchoCore::PunchZone::Leg;
+		Event.bElbow = Core.Kind == IronEchoCore::AttackKind::Elbow;
+		Event.bKnee = Core.Kind == IronEchoCore::AttackKind::Knee;
 		Event.bGlancing = Core.bGlancing;
 		Event.bSmothered = Core.bSmothered;
 		Event.Power = Core.Power;

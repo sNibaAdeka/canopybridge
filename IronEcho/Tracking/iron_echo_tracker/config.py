@@ -19,6 +19,9 @@ class PunchConfig:
     rearm_timeout: float = 0.6  # s, re-arm anyway after this
     min_interval: float = 0.15  # s between punches of the same hand
     min_visibility: float = 0.5
+    vel_min_span: float = 0.05  # s: velocity over at least two frames at 30 fps...
+    vel_max_span: float = 0.12  # ...and at most this far back
+    gap_reset: float = 0.30  # s: a doubtful frame is skipped; only a longer gap forgets the motion
     strength_velocity_max: float = 5.0  # forward velocity mapped to strength 1.0
 
 

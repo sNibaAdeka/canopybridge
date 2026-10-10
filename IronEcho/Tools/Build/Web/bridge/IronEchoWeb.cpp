@@ -33,7 +33,7 @@ namespace
 		"dodgeEffective", "lean", "x", "y", "faceX", "faceY", "speedForward", "speedSide", "moving", "onRopes", "headOffset", "zone",
 		"aimX", "aimY", "kind", "legSlow", "roundDamage", "totalDamage", "thrown", "landed", "punchesBlocked", "dodgesMade", "blocksMade",
 		"counterHits", "combo", "maxCombo", "knockdowns", "roundKnockdowns", "roundLanded", "roundDefenses", "bodyLanded",
-		"glancingHits", "kicksThrown", "kicksLanded"};
+		"glancingHits", "kicksThrown", "kicksLanded", "elbowsThrown", "elbowsLanded", "kneesThrown", "kneesLanded"};
 	const char* const kCombatEventFields[] = {
 		"type", "actor", "target", "hand", "dodge", "counter", "tired", "damage", "targetHealthAfter",
 		"targetStaminaAfter", "attackId", "combo", "knockdownNumber", "tick", "zone", "glancing", "smothered", "power", "kind"};
@@ -167,7 +167,8 @@ namespace
 			static_cast<double>(F.KnockdownsSuffered), static_cast<double>(F.RoundKnockdownsSuffered),
 			static_cast<double>(F.RoundPunchesLanded), static_cast<double>(F.RoundDefenses),
 			static_cast<double>(F.BodyPunchesLanded), static_cast<double>(F.GlancingHits),
-			static_cast<double>(F.KicksThrown), static_cast<double>(F.KicksLanded)};
+			static_cast<double>(F.KicksThrown), static_cast<double>(F.KicksLanded),
+			static_cast<double>(F.ElbowsThrown), static_cast<double>(F.ElbowsLanded), static_cast<double>(F.KneesThrown), static_cast<double>(F.KneesLanded)};
 		static_assert(sizeof(Values) / sizeof(Values[0]) == kFighterCount, "fighter layout");
 		for (int32_t Index = 0; Index < kFighterCount; ++Index)
 		{
@@ -358,10 +359,35 @@ IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int3
 	WriteState();
 }
 
+namespace
+{
+	// Close range (1.6): bits 4 / 5 of the punch mask are the lead / rear elbow, of the kick mask the lead / rear knee.
+	void AddCloseRange(InputFrame& Frame, int32_t PunchMask, int32_t KickMask, float Confidence)
+	{
+		for (int32_t Bit = 4; Bit < 6; ++Bit)
+		{
+			for (const bool bKnee : {false, true})
+			{
+				if (((bKnee ? KickMask : PunchMask) & (1 << Bit)) == 0)
+				{
+					continue;
+				}
+				PunchIntent Strike;
+				Strike.PunchHand = Bit == 4 ? Hand::Left : Hand::Right;
+				Strike.Kind = bKnee ? AttackKind::Knee : AttackKind::Elbow;
+				Strike.Zone = bKnee ? PunchZone::Body : PunchZone::Head;
+				Strike.Strength = 1.0f;
+				Strike.Confidence = Confidence;
+				Frame.AddPunch(Strike);
+			}
+		}
+	}
+}
+
 // One render frame of input. Status: TrackingStatus (7 = Live). Lean/Block as in InputFrame (calibrated units).
-// PunchMask: bit 0 = left (jab), bit 1 = right (cross), bit 2 = left to the body, bit 3 = right to the body; each set
-// bit is one new punch this frame. KickMask: bit 0 = lead-leg kick to the body, 1 = rear-leg kick to the body,
-// 2 = lead-leg low kick, 3 = rear-leg low kick. MoveForward / MoveLateral: InputFrame footwork (-1..1; 0, 0 = the
+// PunchMask: bit 0 = left (jab), bit 1 = right (cross), bit 2 = left to the body, bit 3 = right to the body,
+// bit 4 = lead elbow, bit 5 = rear elbow (1.6); each set bit is one new strike this frame. KickMask: bit 0 = lead-leg kick
+// to the body, 1 = rear-leg kick to the body, 2 = lead-leg low kick, 3 = rear-leg low kick, 4 = lead knee, 5 = rear knee (1.6). MoveForward / MoveLateral: InputFrame footwork (-1..1; 0, 0 = the
 // camera's lean steps). Returns the number of 120 Hz ticks simulated.
 IE_EXPORT(ie_frame) int32_t ie_frame(double DeltaSeconds, int32_t Status, double Confidence, double LeanLateral, double LeanForward,
 	double BlockAmount, int32_t PunchMask, double PunchConfidence, double MoveForward, double MoveLateral, int32_t KickMask)
@@ -403,6 +429,8 @@ IE_EXPORT(ie_frame) int32_t ie_frame(double DeltaSeconds, int32_t Status, double
 			Frame.AddPunch(Kick);
 		}
 	}
+
+	AddCloseRange(Frame, PunchMask, KickMask, static_cast<float>(PunchConfidence));
 
 	MatchInput Input;
 	Input.bInputReady = Frame.Status == TrackingStatus::Live;
@@ -470,6 +498,7 @@ namespace
 				Frame.AddPunch(Kick);
 			}
 		}
+		AddCloseRange(Frame, Punches, Kicks, 1.0f);
 		return Frame;
 	}
 }

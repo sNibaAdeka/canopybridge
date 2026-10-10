@@ -209,6 +209,13 @@ namespace IronEchoCore
 				Kind = AttackKind::Kick;
 				Zone = FoeSnap.bMoving ? PunchZone::Leg : PunchZone::Body;
 			}
+			// Inside elbow reach (the human walked in, or the ropes did it): an elbow to the head or a knee to the body.
+			if (Kind == AttackKind::Punch && Sim.Gap() <= Me.SpecFor(Choice, PunchZone::Head, AttackKind::Elbow).ReachMeters
+				&& Rng.Chance(Config.ClinchStrikeChance))
+			{
+				Kind = Rng.Chance(0.5f) ? AttackKind::Elbow : AttackKind::Knee;
+				Zone = Kind == AttackKind::Elbow ? PunchZone::Head : PunchZone::Body;
+			}
 			const AttackSpec Spec = Me.SpecFor(Choice, Zone, Kind);
 			const bool bFoeCommitted = FoeSnap.State == ActionState::Attack && FoeSnap.Stage != AttackStage::Recovery;
 			const bool bWaitOut = bFoeCommitted && Rng.Chance(Config.AvoidTradeChance);
