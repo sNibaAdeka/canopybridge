@@ -173,8 +173,12 @@ async function camera(browser) {
     const frames = await (await fetch('/__synthetic.json')).json();
     cam.proc = new cam.proc.constructor((a, b, c) => cam._say(a, b, c));
     const msgs = []; let k = 0; let calibrated = false; let fought = false; let peakLean = 0; let stepIn = 0; let peakBlock = 0;
+    const kickStates = []; // the fighter's state when each detected kick reached the game: a stunned fighter cannot kick (a rule, not a miss)
     const feed = () => { const f = frames[Math.min(k, frames.length - 1)]; k++;
-      cam.proc.process(f.w ? f.w.map(([x, y, z, visibility]) => ({ x, y, z, visibility })) : null, f.t); return cam.poll(); };
+      cam.proc.process(f.w ? f.w.map(([x, y, z, visibility]) => ({ x, y, z, visibility })) : null, f.t);
+      const out = cam.poll();
+      if (out.kickMask) { const p = app.core.snapshot().player; kickStates.push(`${p.stateName}/${p.stageName}`); }
+      return out; };
     while (k < frames.length) {
       app.debugAdvance(0.5, feed);
       const m = document.querySelector('#cam .cam-msg b')?.textContent || '';
@@ -187,13 +191,16 @@ async function camera(browser) {
     }
     const s = app.core.snapshot();
     return { msgs, calibrated, fought, detected: cam.proc.punches.length, thrown: s.player.thrown, landed: s.player.landed, peakLean, stepIn, peakBlock,
-      kicksDetected: cam.proc.kicks.map((x) => x[1] + x[2]).join(','), kicksThrown: s.player.kicksThrown, personal: !!(cam.proc.cal && cam.proc.cal.blockPose) };
+      kicksDetected: cam.proc.kicks.map((x) => x[1] + x[2]).join(','), kicksThrown: s.player.kicksThrown, personal: !!(cam.proc.cal && cam.proc.cal.blockPose), kickStates };
   });
   check('camera: calibration completes with on-screen steps', r.calibrated && r.msgs.length >= 3, r.msgs.join(' → '));
   check('camera: the bout starts after calibration', r.fought);
   check('camera: body punches reach the opponent', r.thrown >= 20 && r.landed > 0, `detected ${r.detected}, thrown ${r.thrown}, landed ${r.landed}`);
   check('camera: the personal block pose is calibrated and read back', r.personal && r.peakBlock > 0.85, `peak ${r.peakBlock.toFixed(2)}`);
-  check('camera: four leg kicks are detected (mid and low, both legs) and thrown', r.kicksDetected === '0mid,1mid,0low,1low' && r.kicksThrown >= 4, `${r.kicksDetected}; thrown ${r.kicksThrown}`);
+  // every detected kick is thrown, except one that arrives while the fighter is stunned, down or mid-attack (the rules refuse it)
+  const refused = r.kickStates.filter((st) => /^(HitStun|BlockStun|KnockedDown|KnockedOut)\//.test(st) || /^Attack\/(Windup|Active)/.test(st)).length;
+  check('camera: four leg kicks are detected (mid and low, both legs) and thrown', r.kicksDetected === '0mid,1mid,0low,1low' && r.kicksThrown >= 4 - refused,
+    `${r.kicksDetected}; thrown ${r.kicksThrown}; states at the request: ${r.kickStates.join(', ')}`);
   check('camera: leaning toward the screen steps the robot in', r.peakLean >= 0.55 && r.stepIn > 0.3, `lean ${r.peakLean.toFixed(2)}, speed ${r.stepIn.toFixed(2)} m/s`);
   check('camera: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
   await page.close();
@@ -276,7 +283,14 @@ async function animation(browser) {
     const v = new V3();
     const q = new Q4();
     const prev = {};
-    const out = { steps: 0, rootPops: 0, rolls: 0, limbJumps: 0, bigLimbJumps: 0, worstRoll: 0, worstJump: 0, worstRoot: 0 };
+    const out = { steps: 0, rootPops: 0, rolls: 0, limbJumps: 0, bigLimbJumps: 0, worstRoll: 0, worstJump: 0, worstRoot: 0, where: {} };
+    // where the worst roll / jump happened: robot, bone, its fighter's state (a failure has to say what to look at)
+    const was = {};
+    const at = (key, n) => {
+      const f = app.core.snapshot()[key] || {};
+      const a = app.anim[key].p;
+      return `${key} ${n} ${was[key] || ''} -> ${f.stateName}/${f.stageName} kind ${f.kind} hand ${f.hand} a ${(+f.stageAlpha).toFixed(2)}, elbows ${a.lead_elbow.toFixed(2)}/${a.rear_elbow.toFixed(2)}`;
+    };
     const script = (k) => {
       const t = k / 60;
       const s = { status: 7, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, moveForward: 0, moveSide: 0 };
@@ -308,18 +322,25 @@ async function animation(browser) {
           if (dr > 0.10) out.rootPops++;
           let bad = false;
           let big = false;
-          for (const n of names) { const d = cur.pos[n].distanceTo(p.pos[n]); out.worstJump = Math.max(out.worstJump, d); if (d > 0.22) bad = true; if (d > 0.5) big = true; }
+          for (const n of names) {
+            const d = cur.pos[n].distanceTo(p.pos[n]);
+            if (d > out.worstJump) { out.worstJump = d; out.where.jump = at(key, n); }
+            if (d > 0.22) bad = true;
+            if (d > 0.5) big = true;
+          }
           if (bad) out.limbJumps++;
           if (big) out.bigLimbJumps++;
           let roll = false;
           for (const n of rollNames) {
             const ang = 2 * Math.acos(Math.min(1, Math.abs(cur.rot[n].dot(p.rot[n])))) * 180 / Math.PI;
-            out.worstRoll = Math.max(out.worstRoll, ang);
+            if (ang > out.worstRoll) { out.worstRoll = ang; out.where.roll = at(key, n); }
             if (ang > 120) roll = true;
           }
           if (roll) out.rolls++;
         }
         prev[key] = cur;
+        const f = app.core.snapshot()[key] || {};
+        was[key] = `${f.stateName}/${f.stageName} kind ${f.kind} a ${(+f.stageAlpha).toFixed(2)}`;
       }
       out.steps++;
       if (info.phase === 'MatchOver') break;
@@ -327,8 +348,8 @@ async function animation(browser) {
     return out;
   });
   check('animation: no robot teleports (knock-back is drawn as a slide)', m.rootPops === 0, `${m.steps} steps, worst root step ${m.worstRoot.toFixed(3)} m`);
-  check('animation: no limb rolls through 180 degrees in one frame', m.rolls === 0, `worst ${m.worstRoll.toFixed(0)} deg`);
-  check('animation: no elbow, knee or foot jumps half a metre in one frame', m.bigLimbJumps === 0, `worst ${m.worstJump.toFixed(2)} m; ${m.limbJumps} steps above 0.22 m`);
+  check('animation: no limb rolls through 180 degrees in one frame', m.rolls === 0, `worst ${m.worstRoll.toFixed(0)} deg: ${m.where.roll}`);
+  check('animation: no elbow, knee or foot jumps half a metre in one frame', m.bigLimbJumps === 0, `worst ${m.worstJump.toFixed(2)} m: ${m.where.jump}; ${m.limbJumps} steps above 0.22 m`);
   check('animation: very few limb jumps over 0.22 m', m.limbJumps <= 12, `${m.limbJumps}`);
   check('animation: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
   await page.close();

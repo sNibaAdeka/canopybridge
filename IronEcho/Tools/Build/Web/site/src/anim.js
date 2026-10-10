@@ -37,7 +37,7 @@ const noise = (t, f, ph) => 0.62 * Math.sin(t * f + ph) + 0.38 * Math.sin(t * f 
 
 const SCALARS = ['crouch', 'yaw', 'lean', 'twist', 'nod', 'lateral', 'elbow_out', 'lead_extended', 'rear_extended', 'lead_elbow', 'rear_elbow',
   'head_turn', 'head_tilt', 'side_bend', 'body_x'];
-const OMEGA = { crouch: 13, yaw: 15, lean: 14, twist: 17, nod: 16, lateral: 13, elbow_out: 14, lead_elbow: 34, rear_elbow: 34, lead_extended: 40,
+const OMEGA = { crouch: 13, yaw: 15, lean: 14, twist: 17, nod: 16, lateral: 13, elbow_out: 14, lead_elbow: 26, rear_elbow: 26, lead_extended: 40,
   rear_extended: 40, head_turn: 16, head_tilt: 14, side_bend: 14, body_x: 11 };
 const ZETA = { yaw: 0.62, twist: 0.58, lean: 0.7, body_x: 0.66, lateral: 0.75 }; // the rest: critically damped
 const HAND_OMEGA = 30;
@@ -253,42 +253,48 @@ export class FighterAnimator {
       rearBias = lerp(rearBias, 0, lift);
     }
 
-    // elbow (1.6): the glove folds back to the face and the elbow swings through at chin height, the body turning behind it
+    // elbow (1.6): the glove folds back to the face and the elbow swings through at chin height, the body turning behind it.
+    // One continuous path: guard -> cocked (elbow out, glove by the ear) in the first part of the windup, cocked -> through to the
+    // end of the windup, held while active, through -> guard in the recovery.
     if (f.stateName === 'Attack' && f.kind === 2) {
       const lead1 = f.hand === 0;
       const a = f.stageAlpha;
-      const L = this.isBot ? 0.55 : 0.2;
-      let e = 0;
-      if (f.stageName === 'Windup') e = a < L ? -0.2 * smooth(a / L) : -0.2 + 1.2 * easeOut((a - L) / (1 - L));
-      else if (f.stageName === 'Active') e = 1;
-      else if (f.stageName === 'Recovery') e = 1 - smooth(a);
-      const pos = clamp(e, 0, 1);
-      const load = clamp(-e / 0.2, 0, 1);
+      // the elbow travels much further than a jab's glove before it strikes: half the (short, 0.12 s) windup goes into cocking it,
+      // otherwise the joint would jump 30 cm in a frame
+      const L = this.isBot ? 0.6 : 0.45;
+      let cock = 0;  // guard -> cocked
+      let pos = 0;   // cocked -> through
+      let back = 0;  // recovery: through -> guard
+      if (f.stageName === 'Windup') { cock = smooth(Math.min(1, a / L)); pos = a > L ? easeOut((a - L) / (1 - L)) : 0; }
+      else if (f.stageName === 'Active') { cock = 1; pos = 1; }
+      else if (f.stageName === 'Recovery') { back = smooth(a); cock = 1; pos = 1; }
       const big = this.isBot ? 1.0 : 0.5;
+      const load = f.stageName === 'Windup' && a <= L ? cock : 0;
       this.telegraph = this.isBot ? load : 0;
-      const k = Math.max(pos, load);
+      const amount = cock * (1 - back);                  // how far the elbow is up and out
+      const swing = pos * (1 - back);                    // how far through the body turn is
+      const path = (guard, cocked, through) => {
+        const strike = lerp3(lerp3(guard, cocked, cock), through, pos);
+        return back > 0 ? lerp3(through, guard, back) : strike;
+      };
       if (lead1) {
-        const cocked = [0.10, 0.32, 1.44];   // elbow out, glove by the ear
-        const through = [0.20, -0.04, 1.52]; // the glove ends at the other side of the own chin
-        lead = load > 0 ? lerp3(lead, cocked, load) : lerp3(cocked, through, pos);
-        T.lead_elbow = k;
-        T.yaw = lerp(T.yaw, -30, pos) + 14 * load * big;
-        T.twist = lerp(T.twist, -24, pos) + 12 * load * big;
-        leadBias = lerp(leadBias, 0.08, pos);
+        lead = path(lead, [0.14, 0.12, 1.66], [0.22, -0.04, 1.54]); // cocked: the glove by the own temple (not at the shoulder: the arm would fold through it)
+        T.lead_elbow = amount;
+        T.yaw = lerp(T.yaw, -30, swing) + 14 * load * big;
+        T.twist = lerp(T.twist, -24, swing) + 12 * load * big;
+        leadBias = lerp(leadBias, 0.08, swing);
       } else {
-        const cocked = [0.04, -0.34, 1.44];
-        const through = [0.22, 0.06, 1.52];
-        rear = load > 0 ? lerp3(rear, cocked, load) : lerp3(cocked, through, pos);
-        T.rear_elbow = k;
-        T.yaw = lerp(T.yaw, 30, pos) - 16 * load * big;
-        T.twist = lerp(T.twist, 34, pos) - 18 * load * big;
-        pivot = pos;
-        heelR = Math.max(heelR, 0.06 * pos);
+        rear = path(rear, [0.12, -0.12, 1.66], [0.24, 0.06, 1.54]);
+        T.rear_elbow = amount;
+        T.yaw = lerp(T.yaw, 30, swing) - 16 * load * big;
+        T.twist = lerp(T.twist, 34, swing) - 18 * load * big;
+        pivot = swing;
+        heelR = Math.max(heelR, 0.06 * swing);
       }
-      T.lean = lerp(T.lean, 14, pos);
-      T.body_x = lerp(T.body_x, 0.07, pos);
-      T.crouch += 0.02 * pos;
-      T.head_turn = (lead1 ? 8 : -10) * pos;
+      T.lean = lerp(T.lean, 14, swing);
+      T.body_x = lerp(T.body_x, 0.07, swing);
+      T.crouch += 0.02 * swing;
+      T.head_turn = (lead1 ? 8 : -10) * swing;
     }
 
     // punch: shaped extension e (< 0 loading, 1 full) from the attack stage and its progress
@@ -516,7 +522,9 @@ export class FighterAnimator {
       if (ZETA[k]) [this.p[k], this.v[k]] = springZ(this.p[k], this.v[k], T[k], om, ZETA[k], dt);
       else [this.p[k], this.v[k]] = spring(this.p[k], this.v[k], T[k], om, dt);
     }
-    const handOmega = (side) => (attacking && ((side === 'lead' && f.hand === 0) || (side === 'rear' && f.hand === 1)) ? PUNCH_OMEGA : HAND_OMEGA);
+    // a straight's glove snaps out (PUNCH_OMEGA); an elbow's glove only folds back to the face, at the elbow's own pace, or the glove
+    // reaches the temple before the elbow has turned out and the joint jumps across the arm
+    const handOmega = (side) => (attacking && f.kind !== 2 && ((side === 'lead' && f.hand === 0) || (side === 'rear' && f.hand === 1)) ? PUNCH_OMEGA : HAND_OMEGA);
     for (const [side, target, key] of [['lead', lead, 'lead_hand'], ['rear', rear, 'rear_hand']]) {
       const om = handOmega(side);
       for (let i = 0; i < 3; i++) {
@@ -555,7 +563,9 @@ export class FighterAnimator {
       if (this.kickS.lift < 0.01) this.kickS = null;
     }
     if (this.kickS && live) this._applyKick(P, feet, this.kickS);
-    this.rig.applyPose(computePose(P));
+    // the elbows' bend directions of the last frame: computePose limits how fast they may turn (no joint flips across the arm)
+    this.poseMemo = this.poseMemo || {};
+    this.rig.applyPose(computePose(P, this.poseMemo, dt));
     // visor LEDs flare while the bot loads a punch: a readable "now!" for a human 2 m from the screen
     this.glow = (this.glow || 0) + ((this.telegraph > 0 ? 1 : 0) - (this.glow || 0)) * Math.min(1, dt * 18);
     this.rig.material.emissiveIntensity = this.rig.baseEmissive * (1 + 4.5 * this.glow);

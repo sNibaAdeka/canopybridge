@@ -74,7 +74,7 @@ for (const b of Object.keys(RIG_BONES)) {
 const restY = (b) => new THREE.Vector3().setFromMatrixColumn(REST[b], 1);
 const boneLen = (b) => vTail(b).distanceTo(vHead(b));
 
-function twoBone(root, target, a, b, pole, poleUp = null, blendUp = 0) {
+function twoBone(root, target, a, b, pole, poleUp = null, blendUp = 0, turns = null, prevN = null, maxTurn = Math.PI) {
   const d = target.clone().sub(root);
   const dist = Math.max(1e-4, Math.min(d.length(), (a + b) * 0.999));
   d.normalize();
@@ -83,21 +83,40 @@ function twoBone(root, target, a, b, pole, poleUp = null, blendUp = 0) {
   const ang = Math.acos(Math.max(-1, Math.min(1, cosA)));
   const proj = (v) => v.clone().sub(d.clone().multiplyScalar(v.dot(d)));
   let n = proj(pole.clone().normalize());
-  if (poleUp && blendUp > 0) {
-    // A hand above the shoulder (a block, a high guard) leaves the downward pole running along the limb's axis: the elbow has
-    // no defined side and flips. There the elbow direction turns, by angle in the plane across the limb, toward `poleUp`
-    // (forward and down, as in a real high guard); `blendUp` is 0 for ordinary hand heights, so those poses are untouched.
-    const n1 = proj(poleUp.clone().normalize());
-    if (n.length() < 1e-4) n = n1;
-    else if (n1.length() > 1e-4) {
-      const e1 = n.clone().normalize();
-      const e2 = d.clone().cross(e1);
-      const theta = Math.atan2(n1.dot(e2), n1.dot(e1)) * blendUp;
-      n = e1.multiplyScalar(Math.cos(theta)).add(e2.multiplyScalar(Math.sin(theta)));
-    }
-  }
+  // Turn the elbow direction, by angle in the plane across the limb, toward `toward` by `w` (0..1). Mixing pole vectors instead
+  // can pass along the limb, where the elbow has no side and jumps around the arm in one frame.
+  const turn = (toward, w) => {
+    if (!toward || w <= 0) return;
+    const n1 = proj(toward.clone().normalize());
+    if (n.length() < 1e-4) { n = n1; return; }
+    if (n1.length() < 1e-4) return;
+    const e1 = n.clone().normalize();
+    const e2 = d.clone().cross(e1);
+    const theta = Math.atan2(n1.dot(e2), n1.dot(e1)) * Math.min(1, w);
+    n = e1.multiplyScalar(Math.cos(theta)).add(e2.multiplyScalar(Math.sin(theta)));
+  };
+  // A hand above the shoulder (a block, a high guard) leaves the downward pole running along the limb's axis: the elbow has
+  // no defined side and flips. There it turns toward `poleUp` (forward and down, as in a real high guard); `blendUp` is 0 for
+  // ordinary hand heights, so those poses are untouched.
+  turn(poleUp, blendUp);
+  // Further turns in order, each well under 180 degrees, so the sign of each angle cannot flip from one frame to the next.
+  if (turns) for (const [toward, w] of turns) turn(toward, w);
   if (n.length() < 1e-6) n.set(0, 0, -1);
   n.normalize();
+  // Continuity in time: the bend direction turns at most `maxTurn` (rad) from the last frame's. Every pole rule above is continuous
+  // almost everywhere, but near the limb's axis a small move of the hand swings the projected pole far round; the joint must not.
+  if (prevN) {
+    const p0 = proj(prevN);
+    if (p0.length() > 1e-4) {
+      const e1 = p0.normalize();
+      const e2 = d.clone().cross(e1);
+      const theta = Math.atan2(n.dot(e2), n.dot(e1));
+      if (Math.abs(theta) > maxTurn) {
+        const t = Math.sign(theta) * maxTurn;
+        n = e1.multiplyScalar(Math.cos(t)).add(e2.multiplyScalar(Math.sin(t))).normalize();
+      }
+    }
+  }
   const mid = root.clone().add(d.clone().multiplyScalar(Math.cos(ang)).add(n.multiplyScalar(Math.sin(ang))).multiplyScalar(a));
   return [mid, tgt, n];
 }
@@ -134,7 +153,9 @@ function chainFrames(p0, p1, p2, yAxis) {
 }
 
 // robot.pose(): deform matrix per bone (Blender armature space). A rigid part bound to bone b moves by D[b].
-export function computePose(p) {
+// `memo` (optional, one per robot) keeps the last bend direction of each arm; `dt` the time since it (s).
+const ELBOW_TURN_RATE = 26; // rad/s, ~25 degrees a frame at 60 fps: a block or a hook turns the elbow well under this
+export function computePose(p, memo = null, dt = 1 / 60) {
   const D = {};
   const lat = p.lateral;
   const hip = V(0, 0, 0.97);
@@ -155,9 +176,7 @@ export function computePose(p) {
     const sh = vHead(`upperarm_${side}`).applyMatrix4(tChest);
     const a = boneLen(`upperarm_${side}`);
     const b = boneLen(`lowerarm_${side}`);
-    let pole = V(-0.35, s * p.elbow_out, -1.0).lerp(V(0.0, s * 0.2, -1.0), Math.max(0, Math.min(1, ext)));
-    // elbow strike: the point of the elbow leads, forward and out at chin height (the glove is folded back to the face)
-    if (elbowStrike > 0) pole = pole.lerp(V(0.75, s * 0.55, 0.25), Math.max(0, Math.min(1, elbowStrike)));
+    const pole = V(-0.35, s * p.elbow_out, -1.0).lerp(V(0.0, s * 0.2, -1.0), Math.max(0, Math.min(1, ext)));
     // While kicking (guard_follow 0..1) a hand that is not punching goes with the turning torso, like a real boxer's guard does:
     // left where it was, the shoulder swings through the glove target and the arm flips over the shoulder.
     let goal = V(target[0], target[1], target[2]);
@@ -166,7 +185,15 @@ export function computePose(p) {
     const reach = armTarget(sh, goal, s);
     const up = reach.clone().sub(sh).normalize().z; // how far above the shoulder the glove is, 0..1
     const hUp = Math.max(0, Math.min(1, (up - 0.25) / 0.35));
-    const [elbow, wrist, bend] = twoBone(sh, reach, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp));
+    // An elbow strike turns the point of the elbow out to the side, then forward at chin height, as a real one swings: two turns of
+    // about 90 degrees each. One turn straight from "down and back" to "forward and up" is near 180 degrees and its sign flips.
+    const strike = Math.max(0, Math.min(1, elbowStrike));
+    const turns = strike > 0 ? [[V(0.1, s, 0.1), Math.min(1, strike * 2)], [V(0.75, s * 0.55, 0.25), Math.max(0, strike * 2 - 1)]] : null;
+    // (the strike's own turns replace the raised-glove one: the glove by the temple is part of the strike, not a high guard)
+    const prevN = memo ? memo[side] : null;
+    const [elbow, wrist, bend] = twoBone(sh, reach, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp) * (1 - strike), turns,
+      prevN, ELBOW_TURN_RATE * Math.max(1 / 240, Math.min(0.1, dt)));
+    if (memo) memo[side] = bend.clone();
     const [fUp, fLo] = chainFrames(sh, elbow, wrist, wrist.clone().sub(sh).normalize().cross(bend).negate());
     D[`upperarm_${side}`] = mul(fUp, REST_INV[`upperarm_${side}`]);
     D[`lowerarm_${side}`] = mul(fLo, REST_INV[`lowerarm_${side}`]);
