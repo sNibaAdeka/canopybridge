@@ -14,6 +14,7 @@
   **Предел защиты:** человек, который запустит ядро у себя и подберёт идеальный ввод, получит валидную запись. Таблица защищена от подделки запросом, не от программ-игроков.
 
 ## Включить на Vercel + Supabase (один раз)
+Проект Supabase уже создан: `iron-echo`, ref `tboqtclodnlzqcllaaij`, `https://tboqtclodnlzqcllaaij.supabase.co`, схема применена (шаг 1 сделан).
 1. Supabase: создай проект (бесплатного плана хватит), выполни `rating_schema.sql` (SQL Editor). Таблицы закрыты RLS: читает и пишет только ключ сервера.
 2. В проекте Vercel `iron-echo-boxing` → Settings → Environment Variables: `SUPABASE_URL` (Project URL) и `SUPABASE_SERVICE_KEY` (secret / service_role key; **только на сервере**).
 3. Передеплой. Без этих переменных функция отвечает `503 not_configured`, а страница показывает «Рейтинг сейчас недоступен».
