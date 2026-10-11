@@ -8,7 +8,7 @@
 #include "IronEchoTypes.generated.h"
 
 #define IRONECHO_VISUAL_CONTRACT_VERSION 2
-#define IRONECHO_VISUAL_CONTRACT_MINOR 2
+#define IRONECHO_VISUAL_CONTRACT_MINOR 3
 
 IRONECHO_API DECLARE_LOG_CATEGORY_EXTERN(LogIronEcho, Log, All);
 
@@ -184,7 +184,9 @@ enum class EIronEchoCombatEventType : uint8
 	DodgeEnded,
 	InputDropped,
 	KnockedDown,
-	GotUp
+	GotUp,
+	DuckStarted, // contract 2.3
+	DuckEnded
 };
 
 UENUM(BlueprintType)
@@ -264,6 +266,11 @@ struct IRONECHO_API FIronEchoFighterVisualState
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bKick = false;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bElbow = false; // close range (contract 2.2): elbow to the head
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bKnee = false;  // close range (contract 2.2): knee to the body
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bHook = false;     // contract 2.3: hook (head, or body with bBodyShot)
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bUppercut = false; // contract 2.3: uppercut (always to the head)
+	/** Contract 2.3: ducking (wants the head down) and how far the head is below its standing height, cm (rules: up to 30 cm). */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Defense") bool bDucking = false;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Defense") float HeadDrop = 0.0f;
 	/** The current kick goes low (to the legs). */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho|Action") bool bLowKick = false;
 	/** Seconds the legs stay slowed after low kicks (limp). */
@@ -380,6 +387,11 @@ struct IRONECHO_API FIronEchoCombatEvent
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bKick = false;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bElbow = false; // close range (contract 2.2): elbow to the head
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bKnee = false;  // close range (contract 2.2): knee to the body
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bHook = false;     // contract 2.3
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bUppercut = false; // contract 2.3
+	/** Contract 2.3: Dodged — the punch went over the defender's ducked head; HitConfirmed — an uppercut through the raised guard. */
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bDucked = false;
+	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bThroughGuard = false;
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bLowKick = false;
 	/** Contract 2: a graze (HitConfirmed): reduced damage, show a lighter reaction. */
 	UPROPERTY(BlueprintReadOnly, Category = "IronEcho") bool bGlancing = false;

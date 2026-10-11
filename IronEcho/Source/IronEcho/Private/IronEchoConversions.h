@@ -86,7 +86,7 @@ namespace IronEchoConvert
 	static_assert(static_cast<uint8>(IronEchoCore::MatchPhase::Knockdown) == static_cast<uint8>(EIronEchoMatchPhase::Knockdown), "MatchPhase order");
 	static_assert(static_cast<uint8>(IronEchoCore::PauseReason::TrackingLost) == static_cast<uint8>(EIronEchoPauseReason::TrackingLost), "PauseReason order");
 	static_assert(static_cast<uint8>(IronEchoCore::ResultMethod::TechnicalKnockOut) == static_cast<uint8>(EIronEchoResultMethod::TechnicalKnockOut), "ResultMethod order");
-	static_assert(static_cast<uint8>(IronEchoCore::CombatEventType::GotUp) == static_cast<uint8>(EIronEchoCombatEventType::GotUp), "CombatEventType order");
+	static_assert(static_cast<uint8>(IronEchoCore::CombatEventType::DuckEnded) == static_cast<uint8>(EIronEchoCombatEventType::DuckEnded), "CombatEventType order");
 	static_assert(static_cast<uint8>(IronEchoCore::MatchEventType::KnockdownCount) == static_cast<uint8>(EIronEchoMatchEventType::KnockdownCount), "MatchEventType order");
 	static_assert(static_cast<uint8>(IronEchoCore::DecisionKind::Majority) == static_cast<uint8>(EIronEchoDecisionKind::Majority), "DecisionKind order");
 	static_assert(static_cast<uint8>(IronEchoCore::Protocol::CalibrationStep::Done) == static_cast<uint8>(EIronEchoCalibrationStep::Done), "CalibrationStep order");

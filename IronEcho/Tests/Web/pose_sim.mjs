@@ -6,6 +6,8 @@
 //  - occlusion: a forearm pointing at the camera hides the elbow behind the glove; MediaPipe then reports the elbow with low visibility
 //    and a wandering position;
 //  - noise: a few mm side to side, centimetres in depth; 30 frames per second with timestamp jitter and dropped frames.
+// Each frame also carries the image landmarks (normalised x, y as PoseLandmarker's `landmarks`): a pinhole camera 2.3 m in front of
+// the hips at chest height. The image is what a duck shows best (the whole body goes down; the world landmarks are centred on the hips).
 //
 // Body frame (metres): X forward to the camera, Y the person's right, Z up, origin between the hips. MediaPipe world:
 // x = -Y, y = -Z, z = -X (what PoseLandmarker returns and pose.js turns back into the body frame).
@@ -22,9 +24,18 @@ const ARM = {
   punch: [0.54, 0.06, 0.06],
   body: [0.48, 0.05, -0.20],
   block: [0.17, 0.12, 0.30],
-  // elbow strike: the hand stays by the head, the elbow swings across at shoulder height (wrist near the opposite shoulder)
-  elbow: [0.22, 0.30, 0.10],
+  // elbow strike: the arm folds tight (the fist by the own jaw), the elbow swings across at shoulder height
+  // (1.7: was [0.22, 0.30, 0.10], a 90-degree arm, which is the shape of a hook, not of an elbow)
+  elbow: [0.14, 0.16, 0.12],
+  // hook (1.7): the glove swings out to the side of the head (cocked), then across the front at head height, arm bent ~90 degrees
+  // (the swing is an arc of constant radius around the shoulder: the bent arm swings, it does not reach)
+  hookArc: { r: 0.42, from: -0.55, to: 0.65, up: 0.10, bodyUp: -0.18 },
+  // uppercut: the glove drops to the chest, then drives up under the chin in front
+  upperDip: [0.20, 0.04, -0.10],
+  upperTop: [0.34, 0.10, 0.24],
 };
+const CAMERA = { distance: 2.3, height: 0.45, focal: 1.25 }; // m in front of / above the hips (standing), focal in image heights
+const HIP_HEIGHT = 0.95;
 
 export function rng(seed) { let s = seed >>> 0 || 1; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
 const smooth = (x) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c); };
@@ -76,6 +87,12 @@ export class Script {
   knee(start, side, o = {}) { return this._add({ kind: 'knee', start, side, up: 0.16, hold: 0.08, down: 0.24, ...o }); }
   // an elbow strike: the elbow swings across at shoulder height with the hand by the head
   elbow(start, side, o = {}) { return this._add({ kind: 'elbow', start, side, up: 0.13, hold: 0.05, down: 0.22, ...o }); }
+  // a hook (1.7): cock out to the side (first 40 % of `up`), then across; `body: true` to the ribs
+  hook(start, side, o = {}) { return this._add({ kind: 'hook', start, side, up: 0.22, hold: 0.05, down: 0.25, ...o }); }
+  // an uppercut: dip (first 40 % of `up`), then up under the chin
+  uppercut(start, side, o = {}) { return this._add({ kind: 'uppercut', start, side, up: 0.22, hold: 0.05, down: 0.25, ...o }); }
+  // a duck: the knees bend and the waist folds, the head drops `metres`, held for `seconds`
+  duck(start, seconds, metres = 0.28, o = {}) { return this._add({ kind: 'duck', start, amount: metres, up: 0.16, hold: seconds - 0.32, down: 0.16, ...o }); }
   // the guard drifting: small random walk of the gloves, as a real person never stands still
   fidget(amount = 0.04) { this.fidgetAmount = amount; return this; }
 }
@@ -93,7 +110,8 @@ export function* stream(script, faults = {}) {
     if (script.fidgetAmount) for (const s of [0, 1]) for (let k = 0; k < 3; k++) fid[s][k] = 0.92 * fid[s][k] + 0.08 * script.fidgetAmount * 2.2 * gauss();
     if (f.drop && r() < f.drop) continue;
     const ts = f.start + t + (f.jitterMs ? (r() - 0.5) * 2 * f.jitterMs / 1000 : 0);
-    yield { t: ts, world: frame(script, t, f, gauss, fid) };
+    const fr = frame(script, t, f, gauss, fid);
+    yield { t: ts, world: fr.world, image: fr.image };
   }
 }
 
@@ -102,11 +120,27 @@ function frame(script, t, f, gauss, fid) {
   let fwd = 0.008 * Math.sin(2 * Math.PI * 0.21 * t + 1);
   const arm = [{ w: 0, pose: null }, { w: 0, pose: null }];
   let block = 0;
+  let duck = 0;
   const leg = [{ kick: 0, low: false, knee: 0 }, { kick: 0, low: false, knee: 0 }];
   for (const a of script.actions) {
     const w = envelope(a, t);
     if (!w) continue;
-    if (a.kind === 'slip') lat += a.amount * w;
+    if (a.kind === 'duck') duck = Math.max(duck, a.amount * w);
+    else if (a.kind === 'hook' || a.kind === 'uppercut') {
+      // a two-stage path: 0..0.4 of the rise = guard -> cocked / dipped, then -> through / up; back the straight way
+      const up = a.up ?? 0.22;
+      const local = t - a.start;
+      const p = local < up ? local / up : 1;
+      const H = ARM.hookArc;
+      const arc = (phi) => [H.r * Math.cos(phi), H.r * Math.sin(phi), a.body ? H.bodyUp : H.up];
+      const first = a.kind === 'hook' ? arc(H.from) : ARM.upperDip;
+      const last = a.kind === 'hook' ? arc(H.to) : ARM.upperTop;
+      const rising = local < up;
+      const swing = (q) => (a.kind === 'hook' ? arc(H.from + (H.to - H.from) * q) : lerp3(first, last, q));
+      const pose = rising ? (p < 0.4 ? lerp3(ARM.guard, first, smooth(p / 0.4)) : swing(smooth((p - 0.4) / 0.6))) : last;
+      const wHere = rising ? 1 : w; // the path itself carries the rise; the envelope only brings it back
+      if (wHere > arm[a.side].w || rising) arm[a.side] = { w: wHere, pose, kind: a.kind };
+    } else if (a.kind === 'slip') lat += a.amount * w;
     else if (a.kind === 'lean') fwd += a.amount * w;
     else if (a.kind === 'block') block = Math.max(block, w);
     else if (a.kind === 'punch' || a.kind === 'elbow') {
@@ -116,12 +150,15 @@ function frame(script, t, f, gauss, fid) {
   }
   const P = new Array(33).fill(null).map(() => [0, 0, 0]);
   const vis = new Array(33).fill(0.98);
+  // a duck: the hips drop (knees bend: in the hip-centred world the feet come up) and the torso folds forward
+  const hipDrop = 0.7 * duck;
+  const fold = 0.9 * duck; // rad of forward bend at the waist (~15 degrees at a full duck)
   // legs
   P[23] = [0, -0.11, 0]; P[24] = [0, 0.11, 0];
   for (const side of [0, 1]) {
     const sy = side === 0 ? -1 : 1;
     const hip = P[23 + side];
-    let foot = [0, sy * 0.13, -0.88];
+    let foot = [0, sy * 0.13, -0.88 + hipDrop];
     let pole = [1, 0, 0]; // knees bend forward
     const L = leg[side];
     if (L.kick) { // straight leg up and forward (mid kick: foot at hip height; low kick: foot at knee height)
@@ -145,6 +182,8 @@ function frame(script, t, f, gauss, fid) {
   for (const [i, y] of [[1, -0.02], [2, -0.035], [3, -0.05], [4, 0.02], [5, 0.035], [6, 0.05]]) P[i] = [0.09, y, 0.69];
   P[7] = [0, -0.075, 0.67]; P[8] = [0, 0.075, 0.67]; P[9] = [0.085, -0.025, 0.62]; P[10] = [0.085, 0.025, 0.62];
   for (let i = 0; i <= 12; i++) { const z = P[i][2]; P[i][1] += lat * (z / HEAD_Z); P[i][0] += fwd * (z / HEAD_Z); }
+  const bend = (p) => [p[0] * Math.cos(fold) + p[2] * Math.sin(fold), p[1], -p[0] * Math.sin(fold) + p[2] * Math.cos(fold)];
+  if (fold) for (let i = 0; i <= 12; i++) P[i] = bend(P[i]);
   for (const side of [0, 1]) {
     const sy = side === 0 ? -1 : 1;
     const sh = P[11 + side];
@@ -153,9 +192,9 @@ function frame(script, t, f, gauss, fid) {
     if (a.w) target = lerp3(target, a.pose, a.w);
     target = add(target, mul(fid[side], 1));
     target = add(target, [0.008 * Math.sin(3.1 * t + side), 0.008 * Math.sin(2.3 * t + 2 * side), 0.008 * Math.sin(2.7 * t + side)]);
-    const wristT = add(sh, [target[0], -sy * target[1], target[2]]);
-    // an elbow strike lifts the elbow out to the side; otherwise it hangs down and out
-    const pole = a.kind === 'elbow' && a.w > 0.2 ? [0.2, sy * 1.0, 0.25] : [0, sy * 0.6, -1];
+    const wristT = add(sh, bend([target[0], -sy * target[1], target[2]]));
+    // an elbow strike and a hook lift the elbow out to the side; otherwise it hangs down and out
+    const pole = (a.kind === 'elbow' && a.w > 0.2) ? [0.2, sy * 1.0, 0.25] : (a.kind === 'hook' && a.w > 0.2) ? [0, sy * 1.0, 0.45] : [0, sy * 0.6, -1];
     const [elbow, wrist] = twoBone(sh, wristT, pole, UPPER_ARM, FOREARM);
     P[13 + side] = elbow; P[15 + side] = wrist;
     const d = sub(wrist, elbow); const dl = Math.max(len(d), 1e-6);
@@ -178,11 +217,17 @@ function frame(script, t, f, gauss, fid) {
       if (d[0] / dl > 0.7) { vis[13 + side] = 0.22; P[13 + side] = add(e, [gauss() * 0.04, gauss() * 0.04, gauss() * 0.04]); vis[15 + side] = 0.80; }
     }
   }
+  // the image: true positions (2D is what MediaPipe gets right), the hips `hipDrop` lower in the room, a few pixels of noise
+  const image = P.map((p, i) => {
+    const depth = CAMERA.distance - p[0];
+    const up = p[2] + HIP_HEIGHT - hipDrop - (HIP_HEIGHT + CAMERA.height);
+    return { x: 0.5 + (CAMERA.focal * p[1]) / depth + gauss() * 0.002, y: 0.5 - (CAMERA.focal * up) / depth + gauss() * 0.002, z: 0, visibility: vis[i] };
+  });
   const world = P.map((p, i) => {
     const n = [gauss() * f.noise, gauss() * f.noise, gauss() * (i >= 13 ? f.depthNoise : f.noise)];
     return { x: -(p[1] + n[1]), y: -(p[2] + n[2]), z: -(p[0] + n[0]), visibility: vis[i] };
   });
-  return world;
+  return { world, image };
 }
 
 // The web calibration as a player does it: guard 2.2 s, block, slip left, slip right; `punches` adds the punch step

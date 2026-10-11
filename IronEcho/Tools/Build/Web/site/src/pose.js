@@ -33,6 +33,25 @@ const KICK_CFG = { minLift: 0.22, minSpeed: 1.4, midLift: 0.55, settle: 0.08, re
 // Elbow strike (web, 1.6): the elbow comes up to shoulder height fast while the arm stays folded (glove by the head).
 // A block lifts BOTH elbows a little; an elbow strike lifts one, to the shoulder line: minAsym over the other elbow.
 const ELBOW_CFG = { minRaise: 0.17, minAsym: 0.10, minSpeed: 1.3, maxFold: 0.62, rearmRaise: 0.06, minInterval: 0.45, minVisibility: 0.5 };
+// Hooks and uppercuts (web, 1.7). What a hand does is read from the direction its wrist moves relative to its shoulder (arm lengths per
+// second): forward = a straight (PunchDetector), across toward the other side with the arm bent but open = a hook (a hook's glove
+// swings on an arc around the shoulder, so its reach hardly changes: the straight detector does not see it), up out of a dip below
+// the guard = an uppercut. An elbow strike also swings across, but folded (the glove at the head): hookMinOpen keeps them apart. A
+// block lifts both gloves, an uppercut one (upOtherShare); the return of a body shot rises too, but backward (upMaxBack).
+const STRIKE_CFG = { window: 0.30, minInterval: 0.35, minVisibility: 0.5, gapReset: 0.30,
+  hookInSpeed: 1.6, hookTravel: 0.30, hookDominance: 1.2, hookMinOpen: 0.62, hookBodyBelow: -0.20,
+  upSpeed: 1.8, upRise: 0.30, upDip: 0.12, upDominance: 1.3, upMaxBack: -0.4, upOtherShare: 0.35,
+  // an elbow strike is confirmed this long after it fires, unless the arm opened meanwhile (then it was the cocking of a hook)
+  elbowConfirm: 0.10, elbowMaxOpen: 0.62, elbowMinAsym: 0.05,
+  // a straight that fires while the glove swings OUT this fast relative to forward (or up to cockHold after) is the cocking of a hook
+  cockOut: 1.0, cockMinSpeed: 1.0, cockTravel: 0.12, cockHold: 0.15,
+  // a hand coming back to the guard from any strike rises too: an uppercut needs this long since the same hand's last strike
+  upAfterStrike: 0.7 };
+// Duck (web, 1.7): how far the head has dropped. Best seen in the image (the world landmarks are centred on the hips, which go down
+// with a knee-bend duck): head height in the frame against the calibrated stance, in torso lengths. Without image landmarks (the
+// two-camera fusion) from the world: the waist folding plus both feet rising toward the hips (the knees bending).
+// The stance it compares with follows the player slowly while not ducking (stepping back from the camera lowers the head in the frame).
+const DUCK_CFG = { fullTorso: 0.5, fullMetres: 0.25, followBelow: 0.35, followSeconds: 6 };
 // Personal block: the calibrated block pose (wrists relative to the head) against the neutral guard.
 const BLOCK_CAL = { minRise: 0.07, holdSeconds: 0.7, waitSeconds: 10, minDelta: 0.07 };
 const KEY_POINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24];
@@ -67,6 +86,14 @@ const median = (xs) => { const s = [...xs].sort((x, y) => x - y); const m = s.le
 const std = (xs) => { const m = xs.reduce((a, b) => a + b, 0) / xs.length; return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length); };
 
 // MediaPipe world (x = person's left, y down, z away) -> body frame (X forward to the camera, Y person's right, Z up).
+// Image landmarks -> what a duck changes: head height in the frame (0 = top) and the torso's length in the frame (shoulders to hips).
+function imageMeasures(lm) {
+  const y = (i) => lm[i].y;
+  const headY = (y(P.NOSE) + y(P.LEAR) + y(P.REAR)) / 3;
+  const torso = (y(P.LH) + y(P.RH)) / 2 - (y(P.LS) + y(P.RS)) / 2;
+  return { headY, torso };
+}
+
 function bodyPose(world, t) {
   const p = world.map((w) => [-w.z, -w.x, -w.y]);
   const vis = world.map((w) => (w.visibility ?? 1));
@@ -212,6 +239,70 @@ class KickDetector {
   }
 }
 
+class HandStrikeDetector {
+  constructor(side) { this.side = side; this.reset(); this.firedAt = -1e9; }
+  reset() { this.history = []; this.v = [0, 0, 0]; this.dip = 0; this.cockAt = -1e9; }
+  // rel: wrist - shoulder in arm lengths [forward, inward (toward the other side), up]; open: |wrist - shoulder| / arm;
+  // guardUp: the guard's wrist height over the shoulder (arm lengths); otherUp: the other hand's upward speed.
+  // Returns 'hook' | 'hookBody' | 'upper' | null.
+  update(t, rel, open, visibility, guardUp, otherUp) {
+    const c = STRIKE_CFG;
+    const last = this.history[this.history.length - 1];
+    if (visibility < c.minVisibility || !rel.every(Number.isFinite)) {
+      if (last && t - last[0] > c.gapReset) this.reset();
+      return null;
+    }
+    if (last && t - last[0] > c.gapReset) this.reset();
+    this.history.push([t, rel[0], rel[1], rel[2]]);
+    while (this.history.length && t - this.history[0][0] > c.window) this.history.shift();
+    if (this.history.length < 3) return null;
+    // velocity against the newest sample at least two frames (30 fps) back, at most 0.12 s
+    let ref = null;
+    for (let i = this.history.length - 2; i >= 0; i--) {
+      const age = t - this.history[i][0];
+      if (age > PUNCH_CFG.velMaxSpan) break;
+      ref = this.history[i];
+      if (age >= PUNCH_CFG.velMinSpan) break;
+    }
+    if (!ref) return null;
+    const dt = t - ref[0];
+    if (dt <= 1e-4) return null;
+    this.v = [(rel[0] - ref[1]) / dt, (rel[1] - ref[2]) / dt, (rel[2] - ref[3]) / dt];
+    this.open = open;
+    this.low = rel[2] < c.hookBodyBelow;
+    const minIn = Math.min(...this.history.map((s) => s[2]));
+    this.outTravel = Math.max(...this.history.map((s) => s[2])) - rel[1];
+    const minUp = Math.min(...this.history.map((s) => s[3]));
+    this.travelIn = rel[1] - minIn;
+    this.rise = rel[2] - minUp;
+    this.dip = guardUp - minUp;
+    this.otherUp = otherUp;
+    this.t = t;
+    if (this._swingingOut()) this.cockAt = t;
+    if (t - this.firedAt < c.minInterval) return null;
+    const kind = this.shape();
+    if (kind === 'hook' || kind === 'hookBody' || kind === 'upper') { this.firedAt = t; return kind; }
+    return null;
+  }
+  // What the hand's current motion is: 'hook' | 'hookBody' | 'upper' | 'cock' (swinging out: the start of a hook) | null.
+  shape() {
+    const c = STRIKE_CFG;
+    const [vf, vi, vu] = this.v;
+    if (vi >= c.hookInSpeed && this.travelIn >= c.hookTravel && vi >= c.hookDominance * Math.max(0, vf) && this.open >= c.hookMinOpen) {
+      return this.low ? 'hookBody' : 'hook';
+    }
+    if (vu >= c.upSpeed && this.rise >= c.upRise && this.dip >= c.upDip && vu >= c.upDominance * Math.max(0, vf) && vf >= c.upMaxBack
+      && (this.otherUp ?? 0) < c.upOtherShare * vu) return 'upper';
+    if (this._swingingOut() || this.t - this.cockAt <= c.cockHold) return 'cock';
+    return null;
+  }
+  // the glove swinging out to the side right now (the cocking of a hook): only the motion itself, never the remembered cockAt
+  _swingingOut() {
+    const c = STRIKE_CFG;
+    return -this.v[1] >= Math.max(c.cockMinSpeed, c.cockOut * this.v[0]) && this.outTravel >= c.cockTravel;
+  }
+}
+
 class ElbowDetector {
   constructor(side) { this.side = side; this.reset(); this.firedAt = -1e9; }
   reset() { this.history = []; this.armed = true; }
@@ -256,8 +347,16 @@ const BODY_PUNCH_DROP = 0.25; // wrist below the shoulder line by this many arm 
 export class PoseProcessor {
   constructor(say = () => {}, opts = {}) {
     this._say = say;
-    // close: elbows and knees (1.6, web only like the kicks)
-    this.opts = { personalBlock: true, kicks: true, punchCal: true, close: true, ...opts };
+    // close: elbows and knees (1.6, web only like the kicks); strikes: hooks, uppercuts and the duck (1.7, web only)
+    this.opts = { personalBlock: true, kicks: true, punchCal: true, close: true, strikes: true, ...opts };
+    this.strikeDetectors = [new HandStrikeDetector(0), new HandStrikeDetector(1)];
+    this.strikes = [];        // [t, side, 'hook' | 'hookBody' | 'upper'] log (tests)
+    this.lastHand = [-1e9, -1e9]; // when each hand last struck (one strike per hand at a time)
+    this.lastOther = [-1e9, -1e9]; // when each hand last threw a hook, an uppercut or an elbow (no straight right after one)
+    this.lastElbow = [-1e9, -1e9];
+    this.pendingElbow = [null, null]; // { t, open }: an elbow strike waiting to be told from a hook (1.7)
+    this.duck = 0;
+    this.ducks = [];          // [t] each time the duck goes past 0.6 (tests)
     this.elbowDetectors = [new ElbowDetector(0), new ElbowDetector(1)];
     this.elbows = []; // [t, side] log (tests)
     this.kickMask = 0;
@@ -283,7 +382,8 @@ export class PoseProcessor {
   }
 
   // world: 33 MediaPipe world landmarks {x, y, z, visibility} or null when nobody is detected; t in seconds.
-  process(world, t) {
+  // image (optional): the same frame's image landmarks ({x, y} normalised); they show a duck best.
+  process(world, t, image = null) {
     if (!world) {
       this.status = this.cal ? 3 : 6; // NoPerson
       this.confidence = 0;
@@ -292,6 +392,7 @@ export class PoseProcessor {
       return;
     }
     const pose = bodyPose(world, t);
+    pose.img = image && image.length >= 25 ? imageMeasures(image) : null;
     this.confidence = pose.visibilityOf(KEY_POINTS);
     if (!this.cal) {
       this._calibrate(pose);
@@ -312,6 +413,14 @@ export class PoseProcessor {
     const [sl, sf] = this.smooth.filter([leanLat, leanFwd], t);
     this.lean = Math.max(-2, Math.min(2, sl));
     this.leanForward = Math.max(-2, Math.min(2, sf));
+    if (this.opts.strikes) {
+      this.duck = this._duck(pose, head, hips);
+      // the log counts a duck once: down past 0.6, then up below 0.4 before the next one (the core's own hysteresis, IntentConfig)
+      if (this.duck >= 0.6 && !this.ducked) { this.ducks.push(t); this.ducked = true; }
+      if (this.duck < 0.4) this.ducked = false;
+      // a duck folds the waist and brings the head toward the screen: that is not the lean that steps in
+      this.leanForward *= 1 - Math.max(0, Math.min(1, (this.duck - 0.2) / 0.4));
+    }
     this.block = this._block(pose);
     if (c.blockPose) this.blockPersonal = this._blockPersonal(pose);
     if (this.opts.kicks && c.legBase) this._kicks(pose, t);
@@ -323,8 +432,17 @@ export class PoseProcessor {
         const fold = norm(sub(pose.p[WRIST_I[side]], pose.p[SHOULDER_I[side]])) / c.arm[side];
         const vis = Math.min(pose.vis[ELBOW_I[side]], pose.vis[SHOULDER_I[side]]);
         if (this.elbowDetectors[side].update(t, raise, fold, elbow, vis, raises[1 - side])) {
-          this.mask |= side === 0 ? 16 : 32;
-          this.elbows.push([t, side]);
+          if (this.opts.strikes) this.pendingElbow[side] = { t, open: fold, asym: raise - raises[1 - side] };
+          else this._elbow(t, side);
+        }
+        const pe = this.pendingElbow[side];
+        if (pe) {
+          // a hook raises the elbow too, but its arm opens: wait a moment for the arm before calling it an elbow; and a block that
+          // raised one elbow first raises the other one after it
+          pe.open = Math.max(pe.open, fold);
+          pe.asym = Math.min(pe.asym, raise - raises[1 - side]);
+          if (pe.open > STRIKE_CFG.elbowMaxOpen || pe.asym < STRIKE_CFG.elbowMinAsym) this.pendingElbow[side] = null;
+          else if (t - pe.t >= STRIKE_CFG.elbowConfirm) { this.pendingElbow[side] = null; this._elbow(pe.t, side); }
         }
       }
     }
@@ -334,18 +452,73 @@ export class PoseProcessor {
       const fwd = delta[0] / c.arm[side];
       // the extension is shoulder -> wrist: the elbow is not needed, and in a punch straight at the camera the glove hides it
       const vis = Math.min(pose.vis[WRIST_I[side]], pose.vis[SHOULDER_I[side]]);
+      let kind = null;
+      const sd = this.strikeDetectors[side];
+      if (this.opts.strikes && c.guardUp) {
+        const rel = [delta[0] / c.arm[side], (side === 0 ? delta[1] : -delta[1]) / c.arm[side], delta[2] / c.arm[side]];
+        kind = sd.update(t, rel, ext, vis, c.guardUp[side], this.strikeDetectors[1 - side].v[2]);
+      }
       if (this.detectors[side].update(t, ext, fwd, vis, c.guardExt[side])) {
-        // a punch that ends well below the shoulders goes to the body (web only for now: the v1 tracker protocol
-        // carries head punches; see Docs/Contracts/INPUT_CONTRACT.md 1.2)
-        const low = pose.p[WRIST_I[side]][2] - pose.shoulderMid()[2] < -BODY_PUNCH_DROP * c.arm[side];
-        this.mask |= side === 0 ? (low ? 4 : 1) : (low ? 8 : 2);
-        this.punches.push([t, side]);
+        // The straight detector sees a hand leave the guard toward the screen. With hooks and uppercuts on, the direction decides:
+        // across = a hook, up = an uppercut, swinging out = the cocking of a hook (it fires when the glove comes across).
+        const shape = this.opts.strikes && c.guardUp ? sd.shape() : null;
+        if (shape === 'hook' || shape === 'hookBody' || shape === 'upper') { kind = shape; sd.firedAt = t; }
+        else if (shape !== 'cock' && t - this.lastOther[side] >= STRIKE_CFG.minInterval) {
+          // a punch that ends well below the shoulders goes to the body (web only for now: the v1 tracker protocol
+          // carries head punches; see Docs/Contracts/INPUT_CONTRACT.md 1.2)
+          const low = pose.p[WRIST_I[side]][2] - pose.shoulderMid()[2] < -BODY_PUNCH_DROP * c.arm[side];
+          this.mask |= side === 0 ? (low ? 4 : 1) : (low ? 8 : 2);
+          this.punches.push([t, side]);
+          this.lastHand[side] = t;
+        }
+      }
+      if (kind === 'upper' && t - this.lastHand[side] < STRIKE_CFG.upAfterStrike) kind = null;
+      if (kind && t - this.lastHand[side] >= STRIKE_CFG.minInterval && t - this.lastElbow[side] >= STRIKE_CFG.minInterval) {
+        this.pendingElbow[side] = null; // the raised elbow was this hook's
+        // 64 / 128 hook, 256 / 512 hook to the body, 1024 / 2048 uppercut: lead (left) / rear (right)
+        this.mask |= (kind === 'hook' ? 64 : kind === 'hookBody' ? 256 : 1024) << side;
+        this.strikes.push([t, side, kind]);
+        this.lastHand[side] = t;
+        this.lastOther[side] = t;
       }
     }
   }
 
+  _elbow(t, side) {
+    this.mask |= side === 0 ? 16 : 32;
+    this.elbows.push([t, side]);
+    this.lastElbow[side] = t;
+    this.lastHand[side] = t;
+    this.lastOther[side] = t;
+  }
+
+  // 0 = standing, 1 = a full duck (the head about a quarter of a metre lower).
+  _duck(pose, head, hips) {
+    const c = this.cal;
+    const dt = this.duckT === undefined ? 0 : Math.max(0, Math.min(0.2, pose.t - this.duckT));
+    this.duckT = pose.t;
+    const follow = this.duck < DUCK_CFG.followBelow ? dt / DUCK_CFG.followSeconds : 0;
+    if (pose.img && c.neutralImg && c.neutralImg.torso > 0.02) {
+      const n = c.neutralImg;
+      const amount = (pose.img.headY - n.headY) / (DUCK_CFG.fullTorso * n.torso);
+      n.headY += (pose.img.headY - n.headY) * follow;
+      n.torso += (pose.img.torso - n.torso) * follow;
+      return Math.max(0, Math.min(1.5, amount));
+    }
+    // world: the waist folds (the head comes down toward the hips) and both feet rise toward the hips (the knees bend)
+    const up = head[2] - hips[2];
+    let down = c.headUp - up;
+    c.headUp += (up - c.headUp) * follow;
+    if (c.legBase && this.legsVisible) {
+      const lifts = [0, 1].map((s) => (pose.p[ANKLE_I[s]][2] - hips[2]) - c.legBase[s]);
+      down += Math.max(0, Math.min(lifts[0], lifts[1]));
+    }
+    return Math.max(0, Math.min(1.5, down / DUCK_CFG.fullMetres));
+  }
+
   _resetMotion() {
     this.detectors.forEach((d) => d.reset());
+    if (this.strikeDetectors) this.strikeDetectors.forEach((d) => d.reset());
     this.kickDetectors.forEach((d) => d.reset());
     if (this.elbowDetectors) this.elbowDetectors.forEach((d) => d.reset());
     this.smooth.reset();
@@ -354,12 +527,18 @@ export class PoseProcessor {
   _kicks(pose, t) {
     const hip = pose.hipMid();
     let seen = 0;
+    const close = this.opts.close && this.cal.kneeBase;
+    const lifts = [0, 1].map((s) => (pose.p[ANKLE_I[s]][2] - hip[2]) - this.cal.legBase[s]);
+    const rises = [0, 1].map((s) => (close ? (pose.p[KNEE_I[s]][2] - hip[2]) - this.cal.kneeBase[s] : 0));
     for (const side of [0, 1]) {
       const vis = Math.min(pose.vis[ANKLE_I[side]], pose.vis[KNEE_I[side]], pose.vis[HIP_I[side]]);
       seen += vis;
-      const lift = (pose.p[ANKLE_I[side]][2] - hip[2]) - this.cal.legBase[side];
-      const close = this.opts.close && this.cal.kneeBase;
-      const rise = close ? (pose.p[KNEE_I[side]][2] - hip[2]) - this.cal.kneeBase[side] : null;
+      // A kick lifts one leg; a duck (1.7) bends both knees, and in the hip-centred world both feet come up together. What both legs
+      // share (beyond the standing leg's own small dip) is the body going down, not a leg strike.
+      const common = this.opts.strikes ? Math.max(0, Math.min(lifts[0], lifts[1]) - 0.03) : 0;
+      const commonKnee = this.opts.strikes && close ? Math.max(0, Math.min(rises[0], rises[1]) - 0.03) : 0;
+      const lift = lifts[side] - common;
+      const rise = close ? rises[side] - commonKnee : null;
       const kneeP = pose.p[KNEE_I[side]];
       const ankleP = pose.p[ANKLE_I[side]];
       const ahead = close ? (ankleP[0] - kneeP[0]) + 0.6 * Math.abs(ankleP[1] - kneeP[1]) : null;
@@ -427,6 +606,8 @@ export class PoseProcessor {
         this.kneeBase = [0, 1].map((s) => median(this.neutral.map((q) => q.p[KNEE_I[s]][2] - q.hipMid()[2])));
         this.legLen = [0, 1].map((s) => median(this.neutral.map((q) => norm(sub(q.p[KNEE_I[s]], q.p[HIP_I[s]])) + norm(sub(q.p[ANKLE_I[s]], q.p[KNEE_I[s]])))));
         this.elbowBase = [0, 1].map((s) => median(this.neutral.map((q) => q.p[ELBOW_I[s]][2] - q.p[SHOULDER_I[s]][2])));
+        const imgs = this.neutral.filter((q) => q.img);
+        this.neutralImg = imgs.length >= 3 ? { headY: median(imgs.map((q) => q.img.headY)), torso: median(imgs.map((q) => q.img.torso)) } : null;
         this.holdStart = null;
         this.stepStart = pose.t;
         this.step = this.opts.personalBlock ? 'block' : 'slipLeft';
@@ -583,13 +764,17 @@ export class PoseProcessor {
       kneeBase: this.kneeBase,
       legLen: this.legLen,
       elbowBase: this.elbowBase,
+      // 1.7: the guard's wrist height over its own shoulder (arm lengths), the head over the hips (m), the stance in the image
+      guardUp: [0, 1].map((s) => median(ps.map((q) => (q.p[WRIST_I[s]][2] - q.p[SHOULDER_I[s]][2]) / arm[s]))),
+      headUp: median(ps.map((q) => q.head()[2] - q.hipMid()[2])),
+      neutralImg: this.neutralImg || null,
       slipLeft: this.slip[0],
       slipRight: this.slip[1],
       punchLimits: this.punchLimits || [null, null],
     };
     this.detectors.forEach((d, s) => d.setLimits(this.cal.punchLimits[s]));
     this._resetMotion();
-    this._say('Готово! Бой начинается', 100, 'Удар — резко к экрану (ниже плеч — в корпус). Вплотную: локоть — одной рукой вверх-вперёд, колено — к груди. Блок — руки к лицу. Уклон — голову в сторону. Наклон к экрану — шаг вперёд.');
+    this._say('Готово! Бой начинается', 100, 'Прямой — резко к экрану (ниже плеч — в корпус). Хук — дугой сбоку, локоть вверх. Апперкот — снизу вверх под подбородок. Нырок — присесть, голову вниз. Вплотную: локоть, колено. Блок — руки к лицу. Уклон — голову в сторону. Наклон к экрану — шаг вперёд.');
     setTimeout(() => this._say(''), 2600);
   }
 
@@ -599,7 +784,7 @@ export class PoseProcessor {
     const kickMask = this.kickMask;
     this.kickMask = 0;
     const block = this.cal && this.cal.blockPose ? this.blockPersonal : this.block;
-    return { status: this.status, lean: this.lean, leanForward: this.leanForward, block, punchMask: mask, kickMask, confidence: this.confidence };
+    return { status: this.status, lean: this.lean, leanForward: this.leanForward, block, duck: this.duck, punchMask: mask, kickMask, confidence: this.confidence };
   }
 }
 
@@ -1071,7 +1256,7 @@ export class CameraInput {
           this.drawingUtils.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
           this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
         }
-        this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, tc / 1000);
+        this.proc.process(res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null, tc / 1000, res.landmarks && res.landmarks[0]);
       });
     }
   }
@@ -1147,7 +1332,7 @@ export class CameraInput {
     }
     const world = res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null;
     if (this.fusion) this.fusion.pushA(stamp / 1000, world);
-    else this.proc.process(world, stamp / 1000);
+    else this.proc.process(world, stamp / 1000, res.landmarks && res.landmarks[0]);
   }
 
   // frames per second of this camera's detector (for the F3 overlay)

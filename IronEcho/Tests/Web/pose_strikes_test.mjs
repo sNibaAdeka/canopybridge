@@ -1,5 +1,6 @@
 // Camera strikes without a person: the browser pose module (site/src/pose.js) reads a synthetic fighter (pose_sim.mjs) that throws
-// straight punches AT the camera, elbows, knees and kicks, then stands, blocks, slips and leans for a while (nothing may fire there).
+// straight punches AT the camera, hooks, uppercuts, elbows, knees and kicks and ducks, then stands, blocks, slips and leans for a while
+// (nothing may fire there).
 // Run with the faults one webcam really has: depth compression, the elbow hidden behind the glove, noise, 30 fps, dropped frames.
 //
 //   node Tests/Web/pose_strikes_test.mjs
@@ -15,14 +16,17 @@ const { Script, stream, calibration, rng } = await import(pathToFileURL(path.joi
 globalThis.setTimeout = () => 0; // the processor clears its "ready" message later; nothing to wait for here
 
 const results = [];
+const FLOOR = { punch: 0.92, hook: 0.85, hookBody: 0.85, upper: 0.85, elbow: 0.85, knee: 0.85, kick: 0.85, low: 0.85, duck: 0.9 };
 const check = (name, ok, info = '') => { results.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? `  (${info})` : ''}`); };
 
-// One session: calibration (with the punch step), then 64 strikes in random order, then 40 s of no strikes.
+// One session: calibration (with the punch step), then 104 strikes and ducks in random order, then 40 s of no strikes.
 function session(faults, seed) {
   const { script, end } = calibration(new Script(), { punches: true });
   const r = rng(seed * 977 + 3);
   const kinds = [];
   for (let i = 0; i < 16; i++) kinds.push('punch', 'elbow', 'knee', i % 2 ? 'kick' : 'low');
+  for (let i = 0; i < 12; i++) kinds.push(i % 4 === 3 ? 'hookBody' : 'hook', 'upper');
+  for (let i = 0; i < 16; i++) kinds.push('duck');
   for (let i = kinds.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [kinds[i], kinds[j]] = [kinds[j], kinds[i]]; }
   const truth = [];
   let t = end + 1.0;
@@ -33,6 +37,10 @@ function session(faults, seed) {
     if (kind === 'knee') script.knee(t, side, { up: 0.14 + r() * 0.06 });
     if (kind === 'kick') script.kick(t, side, { up: 0.16 + r() * 0.06 });
     if (kind === 'low') script.kick(t, side, { up: 0.16 + r() * 0.06, low: true });
+    if (kind === 'hook') script.hook(t, side, { up: 0.18 + r() * 0.08 });
+    if (kind === 'hookBody') script.hook(t, side, { up: 0.18 + r() * 0.08, body: true });
+    if (kind === 'upper') script.uppercut(t, side, { up: 0.18 + r() * 0.08 });
+    if (kind === 'duck') script.duck(t, 0.6 + r() * 0.4, 0.24 + r() * 0.08);
     truth.push({ t, side, kind });
     t += 1.1 + r() * 0.5;
   }
@@ -46,19 +54,22 @@ function session(faults, seed) {
   script.idle(t, 1.0);
   script.fidget(0.03);
   const proc = new PoseProcessor(() => {}, {});
-  for (const fr of stream(script, { ...faults, seed })) proc.process(fr.world, fr.t);
+  for (const fr of stream(script, { ...faults, seed })) proc.process(fr.world, fr.t, faults.noImage ? null : fr.image);
   // every detection as [t, side, kind]
   const det = [
     ...proc.punches.map(([pt, s]) => [pt, s, 'punch']),
     ...proc.elbows.map(([pt, s]) => [pt, s, 'elbow']),
     ...proc.kicks.map(([pt, s, k]) => [pt, s, k === 'mid' ? 'kick' : k]),
+    ...proc.strikes.map(([pt, s, k]) => [pt, s, k]),
+    ...proc.ducks.map((pt) => [pt, -1, 'duck']),
   ].filter(([pt]) => pt > end + 0.5).sort((a, b) => a[0] - b[0]);
   const used = new Set();
   const tally = {};
-  for (const k of ['punch', 'elbow', 'knee', 'kick', 'low']) tally[k] = { of: 0, hit: 0, wrong: {} };
+  for (const k of Object.keys(FLOOR)) tally[k] = { of: 0, hit: 0, wrong: {} };
   for (const s of truth) {
     tally[s.kind].of++;
-    const near = det.map((d, i) => [d, i]).filter(([d, i]) => !used.has(i) && d[0] >= s.t && d[0] <= s.t + 0.5 && d[1] === s.side);
+    const side = s.kind === 'duck' ? -1 : s.side;
+    const near = det.map((d, i) => [d, i]).filter(([d, i]) => !used.has(i) && d[0] >= s.t && d[0] <= s.t + 0.5 && d[1] === side);
     const right = near.find(([d]) => d[2] === s.kind);
     if (right) { used.add(right[1]); tally[s.kind].hit++; }
     else if (near.length) { const k = near[0][0][2]; tally[s.kind].wrong[k] = (tally[s.kind].wrong[k] || 0) + 1; used.add(near[0][1]); }
@@ -71,8 +82,9 @@ const SETS = [
   ['clean 60 fps', { fps: 60 }],
   ['webcam 30 fps, jitter, drops', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02 }],
   ['frontal: depth 0.6 + hidden elbow', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02, depth: 0.6, occlusion: true }],
+  // two cameras fused: world landmarks only (the duck is read from the waist and the knees)
+  ['fusion: no image landmarks', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02, noImage: true }],
 ];
-const FLOOR = { punch: 0.92, elbow: 0.85, knee: 0.85, kick: 0.85, low: 0.85 };
 for (const [name, faults] of SETS) {
   const runs = [1, 2, 3].map((seed) => session(faults, seed));
   const sum = {};

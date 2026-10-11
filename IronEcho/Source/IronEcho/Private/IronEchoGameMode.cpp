@@ -484,6 +484,10 @@ FIronEchoFighterVisualState AIronEchoGameMode::MakeVisualState(IronEchoCore::Fig
 	V.bLowKick = V.bKick && S.AttackZone == IronEchoCore::PunchZone::Leg;
 	V.bElbow = S.AttackType == IronEchoCore::AttackKind::Elbow;
 	V.bKnee = S.AttackType == IronEchoCore::AttackKind::Knee;
+	V.bHook = S.AttackType == IronEchoCore::AttackKind::Hook;
+	V.bUppercut = S.AttackType == IronEchoCore::AttackKind::Uppercut;
+	V.bDucking = S.bDucking;
+	V.HeadDrop = S.HeadDrop * IronEchoConvert::MetersToCm;
 	V.LegSlowSeconds = static_cast<float>(S.LegSlowTicksLeft) * TickSeconds;
 	V.LastHitTakenTime = Memory.LastHitTakenTime;
 	V.LastHitTakenFromHand = Memory.LastHitFromHand;
@@ -575,6 +579,10 @@ void AIronEchoGameMode::DispatchEvents()
 		Event.bLowKick = Event.bKick && Core.Zone == IronEchoCore::PunchZone::Leg;
 		Event.bElbow = Core.Kind == IronEchoCore::AttackKind::Elbow;
 		Event.bKnee = Core.Kind == IronEchoCore::AttackKind::Knee;
+		Event.bHook = Core.Kind == IronEchoCore::AttackKind::Hook;
+		Event.bUppercut = Core.Kind == IronEchoCore::AttackKind::Uppercut;
+		Event.bDucked = Core.bDucked;
+		Event.bThroughGuard = Core.bThroughGuard;
 		Event.bGlancing = Core.bGlancing;
 		Event.bSmothered = Core.bSmothered;
 		Event.Power = Core.Power;
