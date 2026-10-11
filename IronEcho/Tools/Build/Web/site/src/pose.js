@@ -1400,8 +1400,33 @@ export class CameraInput {
       this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
     }
     const world = res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null;
+    this._watchExposure(world);
     if (this.fusion) this.fusion.pushA(stamp / 1000, world);
     else this.proc.process(world, stamp / 1000, res.landmarks && res.landmarks[0]);
+  }
+
+  // Many webcams cut the exposure when asked for 60 frames a second, and a dim room then gives a dark picture the model cannot read:
+  // "the camera constantly does not see me". When the person is missing from most of the last 4 seconds of results, once, ask the
+  // camera for 30 frames a second (a longer exposure). The detector is not faster than that anyway.
+  _watchExposure(world) {
+    if (this.fpsLowered || this.source !== 'webcam') return;
+    this.expSeen = (this.expSeen || 0) + (world ? 1 : 0);
+    this.expAll = (this.expAll || 0) + 1;
+    if (this.expAll < 100) return;
+    const missing = 1 - this.expSeen / this.expAll;
+    this.expSeen = 0;
+    this.expAll = 0;
+    if (missing < 0.6) return;
+    this.fpsLowered = true;
+    try {
+      const track = this.video.srcObject && this.video.srcObject.getVideoTracks()[0];
+      const have = track && track.getSettings ? track.getSettings().frameRate : 0;
+      if (track && (!have || have > 31)) {
+        track.applyConstraints({ frameRate: { ideal: 30, max: 30 } }).catch(() => {});
+        this._say('Камера плохо видит тебя', 0, 'Снизил частоту камеры до 30 к/с — так она ловит больше света. Если не помогло: свет спереди, без окна за спиной.');
+        setTimeout(() => this._say(''), 5000);
+      }
+    } catch { /* the camera does not allow it: nothing to do */ }
   }
 
   // frames per second of this camera's detector (for the F3 overlay)
