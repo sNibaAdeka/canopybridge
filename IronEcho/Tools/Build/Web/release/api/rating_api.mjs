@@ -4,7 +4,7 @@
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { cleanNick, nickKey, ratingAfter, RATING_START, isLadder, isLevel, PROVISIONAL_GAMES } from '../lib/ratingrules.js';
-import { parseReplay, replayBout, REPLAY_MAX_ROWS } from '../lib/replay.js';
+import { parseReplay, replayBout, REPLAY_MAX_ROWS, REPLAY_ROW } from '../lib/replay.js';
 
 export const MIN_BOUT_GAP_MS = 15000;   // one rated bout per player per 15 s: a real bout is longer than that
 export const MAX_BODY_BYTES = 3_500_000; // below the 4.5 MB limit of a Vercel function
@@ -100,7 +100,7 @@ export function createRatingApi(deps) {
     if (!player) return fail(403, 'unknown_player');
     if (body.length === 0 || body.length > MAX_BODY_BYTES) return fail(400, 'bad_size');
     let raw;
-    try { raw = zlib.gunzipSync(body, { maxOutputLength: REPLAY_MAX_ROWS * 18 + 8192 }); } catch { return fail(400, 'bad_replay'); }
+    try { raw = zlib.gunzipSync(body, { maxOutputLength: REPLAY_MAX_ROWS * REPLAY_ROW + 8192 }); } catch { return fail(400, 'bad_replay'); }
     let parsed;
     try { parsed = parseReplay(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)); } catch (e) { return fail(400, 'bad_replay', { detail: e.message }); }
     const h = parsed.header;
