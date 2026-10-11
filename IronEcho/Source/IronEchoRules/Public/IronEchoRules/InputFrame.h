@@ -49,6 +49,7 @@ namespace IronEchoCore
 		float MoveForward = 0.0f;   // -1..1, + = toward the opponent
 		float MoveLateral = 0.0f;   // -1..1, + = circle to the player's right
 		float BlockAmount = 0.0f;   // 0..1
+		float DuckAmount = 0.0f;    // 0..1 (1.7): how far the head has dropped, calibrated (1 = a full duck)
 		Vec3 HandPos[2];            // arm lengths, origin shoulder centre, body frame (X fwd, Y right, Z up)
 		float HandExtension[2] = {0.0f, 0.0f};
 		float HandConfidence[2] = {0.0f, 0.0f};
@@ -79,6 +80,7 @@ namespace IronEchoCore
 	struct FighterIntent
 	{
 		bool bBlock = false;
+		bool bDuck = false;       // 1.7: drop the head under a punch (DuckDepthMeters)
 		DodgeDir Dodge = DodgeDir::None;
 		float LeanLateral = 0.0f; // continuous: moves the head off the centre line (HeadSlipMeters per unit)
 		float MoveForward = 0.0f; // -1..1, + = step toward the opponent, - = step back
@@ -94,7 +96,7 @@ namespace IronEchoCore
 			}
 			Punches[PunchCount].PunchHand = InHand;
 			Punches[PunchCount].Strength = Strength;
-			Punches[PunchCount].Zone = (Kind == AttackKind::Punch && Zone == PunchZone::Leg) ? PunchZone::Body : Zone; // no low punches
+			Punches[PunchCount].Zone = (Kind != AttackKind::Kick && Zone == PunchZone::Leg) ? PunchZone::Body : Zone; // only kicks go low
 			Punches[PunchCount].Kind = Kind;
 			++PunchCount;
 			return true;
@@ -107,6 +109,8 @@ namespace IronEchoCore
 		float BlockExit = 0.45f;
 		float DodgeEnter = 0.55f;
 		float DodgeExit = 0.40f;
+		float DuckEnter = 0.60f;
+		float DuckExit = 0.40f;
 		float MinPunchConfidence = 0.50f;
 		// Camera stepping: lean the torso toward the screen to step in, away to step back (hysteresis).
 		float StepEnter = 0.55f;
@@ -128,6 +132,7 @@ namespace IronEchoCore
 	private:
 		IntentConfig Config;
 		bool bBlocking = false;
+		bool bDucking = false;
 		DodgeDir CurrentDodge = DodgeDir::None;
 		int32_t CurrentStep = 0; // -1 back, 0, +1 in (camera stepping)
 	};

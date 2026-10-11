@@ -36,7 +36,7 @@ const STANCE_TURN = -22 + -8; // yaw + twist of the default stance (POSE_DEFAULT
 export const POSE_DEFAULTS = {
   lead_hand: [0.30, 0.10, 1.50], rear_hand: [0.22, -0.09, 1.49], crouch: 0.06, yaw: -22, lean: 8, twist: -8,
   nod: 10, lateral: 0, lead_foot: [0.24, 0.17], rear_foot: [-0.22, -0.15], foot_yaw: [10, 35], elbow_out: 0.25,
-  lead_extended: 0, rear_extended: 0, lead_elbow: 0, rear_elbow: 0, head_turn: 0, head_tilt: 0, side_bend: 0, body_x: 0,
+  lead_extended: 0, rear_extended: 0, lead_elbow: 0, rear_elbow: 0, lead_hook: 0, rear_hook: 0, head_turn: 0, head_tilt: 0, side_bend: 0, body_x: 0,
 };
 
 const DEG = Math.PI / 180;
@@ -171,8 +171,9 @@ export function computePose(p, memo = null, dt = 1 / 60) {
   for (const b of ['spine_02', 'spine_03', 'clavicle_l', 'clavicle_r', 'neck_01']) D[b] = tChest;
   D.head = tHead;
 
-  const arms = [['l', 1, p.lead_hand, p.lead_extended, p.lead_elbow || 0], ['r', -1, p.rear_hand, p.rear_extended, p.rear_elbow || 0]];
-  for (const [side, s, target, ext, elbowStrike] of arms) {
+  const arms = [['l', 1, p.lead_hand, p.lead_extended, p.lead_elbow || 0, p.lead_hook || 0],
+    ['r', -1, p.rear_hand, p.rear_extended, p.rear_elbow || 0, p.rear_hook || 0]];
+  for (const [side, s, target, ext, elbowStrike, hookAmount] of arms) {
     const sh = vHead(`upperarm_${side}`).applyMatrix4(tChest);
     const a = boneLen(`upperarm_${side}`);
     const b = boneLen(`lowerarm_${side}`);
@@ -188,10 +189,14 @@ export function computePose(p, memo = null, dt = 1 / 60) {
     // An elbow strike turns the point of the elbow out to the side, then forward at chin height, as a real one swings: two turns of
     // about 90 degrees each. One turn straight from "down and back" to "forward and up" is near 180 degrees and its sign flips.
     const strike = Math.max(0, Math.min(1, elbowStrike));
-    const turns = strike > 0 ? [[V(0.1, s, 0.1), Math.min(1, strike * 2)], [V(0.75, s * 0.55, 0.25), Math.max(0, strike * 2 - 1)]] : null;
+    const hook = Math.max(0, Math.min(1, hookAmount));
+    const turns = [];
+    if (strike > 0) turns.push([V(0.1, s, 0.1), Math.min(1, strike * 2)], [V(0.75, s * 0.55, 0.25), Math.max(0, strike * 2 - 1)]);
+    // a hook (1.7) raises the elbow out to the side, level with the glove: one turn of about 90 degrees from "down"
+    if (hook > 0) turns.push([V(0.1, s, 0.45), hook]);
     // (the strike's own turns replace the raised-glove one: the glove by the temple is part of the strike, not a high guard)
     const prevN = memo ? memo[side] : null;
-    const [elbow, wrist, bend] = twoBone(sh, reach, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp) * (1 - strike), turns,
+    const [elbow, wrist, bend] = twoBone(sh, reach, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp) * (1 - Math.max(strike, hook)), turns.length ? turns : null,
       prevN, ELBOW_TURN_RATE * Math.max(1 / 240, Math.min(0.1, dt)));
     if (memo) memo[side] = bend.clone();
     const [fUp, fLo] = chainFrames(sh, elbow, wrist, wrist.clone().sub(sh).normalize().cross(bend).negate());

@@ -75,6 +75,10 @@ namespace IronEchoCore
 		Snap.bDodgeEffective = false;
 		Snap.LeanLateral = 0.0f;
 		Snap.HeadOffset = 0.0f;
+		Snap.bDucking = false;
+		Snap.DuckHeldTicks = 0;
+		Snap.bDuckEffective = false;
+		Snap.HeadDrop = 0.0f;
 		Snap.LegSlowTicksLeft = 0;
 		Snap.Location = Location;
 		Snap.Facing = Vec2{Location.X > 0.0f ? -1.0f : 1.0f, 0.0f};
@@ -101,9 +105,13 @@ namespace IronEchoCore
 		Snap.RoundKnockdownsSuffered = 0;
 	}
 
-	void Fighter::NoteDodge()
+	void Fighter::NoteDodge(bool bDucked)
 	{
 		++Snap.DodgesMade;
+		if (bDucked)
+		{
+			++Snap.DucksMade;
+		}
 		++Snap.RoundDefenses;
 	}
 
@@ -142,6 +150,8 @@ namespace IronEchoCore
 		Snap.Health = 0.0f;
 		Snap.Dodge = DodgeDir::None;
 		Snap.bDodgeEffective = false;
+		Snap.bDucking = false;
+		Snap.bDuckEffective = false;
 		Events.Push(MakeEvent(CombatEventType::KnockedOut, Tick));
 	}
 
@@ -282,7 +292,7 @@ namespace IronEchoCore
 			return true;
 		case ActionState::Attack:
 			// Combo cancel: another move may interrupt the recovery of a hand strike (the other hand, or any other kind of
-			// strike, e.g. jab -> elbow with the same arm). A kick's or a knee's recovery cannot be cancelled: one leg.
+			// strike, e.g. jab -> elbow or jab -> hook with the same arm). A kick's or a knee's recovery cannot be cancelled: one leg.
 			return Snap.Stage == AttackStage::Recovery && !IsLegStrike(Snap.AttackType)
 				&& (Snap.AttackHand != InHand || Kind != Snap.AttackType);
 		case ActionState::HitStun:
@@ -311,10 +321,10 @@ namespace IronEchoCore
 		Snap.State = ActionState::Attack;
 		Snap.Stage = AttackStage::Windup;
 		Snap.AttackHand = InHand;
-		// an elbow always goes to the head, a knee always to the body; a punch cannot go to the legs
-		Snap.AttackZone = Kind == AttackKind::Elbow ? PunchZone::Head
+		// an elbow and an uppercut always go to the head, a knee always to the body; only a kick goes to the legs
+		Snap.AttackZone = (Kind == AttackKind::Elbow || Kind == AttackKind::Uppercut) ? PunchZone::Head
 			: Kind == AttackKind::Knee ? PunchZone::Body
-			: (Kind == AttackKind::Punch && Zone == PunchZone::Leg) ? PunchZone::Body : Zone;
+			: (Kind != AttackKind::Kick && Zone == PunchZone::Leg) ? PunchZone::Body : Zone;
 		Snap.AttackType = Kind;
 		Snap.AttackId = NextAttackId++;
 		Snap.bAttackResolved = false;
@@ -339,6 +349,14 @@ namespace IronEchoCore
 		else if (Kind == AttackKind::Knee)
 		{
 			++Snap.KneesThrown;
+		}
+		else if (Kind == AttackKind::Hook)
+		{
+			++Snap.HooksThrown;
+		}
+		else if (Kind == AttackKind::Uppercut)
+		{
+			++Snap.UppercutsThrown;
 		}
 		SpendStamina(Spec.StaminaCost, Tick, Events);
 		Events.Push(MakeEvent(CombatEventType::AttackStarted, Tick));
@@ -394,6 +412,38 @@ namespace IronEchoCore
 			{
 				Snap.bDodgeEffective = false;
 			}
+		}
+
+		// ---- duck overlay (1.7): the head drops under a punch; stunned, the fighter stands up ----
+		const bool bWantDuck = Snap.State != ActionState::HitStun && Intent.bDuck;
+		if (bWantDuck != Snap.bDucking)
+		{
+			Snap.bDucking = bWantDuck;
+			Snap.DuckHeldTicks = 0;
+			Snap.bDuckEffective = false;
+			if (bWantDuck)
+			{
+				bDuckWeak = Snap.Stamina < Config.DodgeEntryStaminaCost;
+				if (!bDuckWeak)
+				{
+					SpendStamina(Config.DodgeEntryStaminaCost, Tick, Events);
+					Snap.bDuckEffective = true;
+				}
+				Events.Push(MakeEvent(CombatEventType::DuckStarted, Tick));
+			}
+			else
+			{
+				Events.Push(MakeEvent(CombatEventType::DuckEnded, Tick));
+			}
+		}
+		else if (Snap.bDucking && ++Snap.DuckHeldTicks > Config.DodgeMaxEffectiveTicks)
+		{
+			Snap.bDuckEffective = false;
+		}
+		{
+			const float Wanted = Snap.bDucking ? Config.DuckDepthMeters * (bDuckWeak ? 0.5f : 1.0f) : 0.0f;
+			const float MaxStep = Config.DuckSpeed * Dt;
+			Snap.HeadDrop += Clamp(Wanted - Snap.HeadDrop, -MaxStep, MaxStep);
 		}
 
 		// ---- the head: the lean moves it off the centre line at a finite speed (a late slip does not get there) ----
@@ -486,6 +536,10 @@ namespace IronEchoCore
 		{
 			return Config.Knees[HandIndex(InHand)];
 		}
+		if (Kind == AttackKind::Uppercut)
+		{
+			return Config.Uppercuts[HandIndex(InHand)];
+		}
 		if (Kind == AttackKind::Kick)
 		{
 			AttackSpec Spec = Config.Kicks[HandIndex(InHand)];
@@ -500,8 +554,8 @@ namespace IronEchoCore
 			}
 			return Spec;
 		}
-		AttackSpec Spec = Config.Attacks[HandIndex(InHand)];
-		if (Zone == PunchZone::Body || Zone == PunchZone::Leg)
+		AttackSpec Spec = Kind == AttackKind::Hook ? Config.Hooks[HandIndex(InHand)] : Config.Attacks[HandIndex(InHand)];
+		if (Zone == PunchZone::Body || Zone == PunchZone::Leg) // a body shot (straight or hook): shorter, weaker, dearer
 		{
 			Spec.ReachMeters += Config.BodyReachDelta;
 			Spec.Damage *= Config.BodyDamageFactor;
@@ -549,7 +603,7 @@ namespace IronEchoCore
 		{
 			++Snap.PunchesLanded;
 			++Snap.RoundPunchesLanded;
-			if (Snap.AttackZone == PunchZone::Body && Snap.AttackType == AttackKind::Punch)
+			if (Snap.AttackZone == PunchZone::Body && (Snap.AttackType == AttackKind::Punch || Snap.AttackType == AttackKind::Hook))
 			{
 				++Snap.BodyPunchesLanded;
 			}
@@ -564,6 +618,14 @@ namespace IronEchoCore
 			else if (Snap.AttackType == AttackKind::Knee)
 			{
 				++Snap.KneesLanded;
+			}
+			else if (Snap.AttackType == AttackKind::Hook)
+			{
+				++Snap.HooksLanded;
+			}
+			else if (Snap.AttackType == AttackKind::Uppercut)
+			{
+				++Snap.UppercutsLanded;
 			}
 			if (bCounter)
 			{
@@ -621,6 +683,8 @@ namespace IronEchoCore
 		{
 			Snap.Dodge = DodgeDir::None;
 			Snap.bDodgeEffective = false;
+			Snap.bDucking = false;
+			Snap.bDuckEffective = false;
 			if (Config.bKnockdowns)
 			{
 				Snap.State = ActionState::KnockedDown;
@@ -651,6 +715,12 @@ namespace IronEchoCore
 		}
 		Snap.Dodge = DodgeDir::None;
 		Snap.bDodgeEffective = false;
+		if (Snap.bDucking)
+		{
+			Events.Push(MakeEvent(CombatEventType::DuckEnded, Tick));
+		}
+		Snap.bDucking = false; // the punch straightens the fighter up (HeadDrop returns at DuckSpeed)
+		Snap.bDuckEffective = false;
 		return Applied;
 	}
 

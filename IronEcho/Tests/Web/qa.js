@@ -293,8 +293,8 @@ async function animation(browser) {
     };
     const script = (k) => {
       const t = k / 60;
-      const s = { status: 7, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, moveForward: 0, moveSide: 0 };
-      const ph = Math.floor(t / 1.5) % 7;
+      const s = { status: 7, lean: 0, leanForward: 0, block: 0, duck: 0, punchMask: 0, kickMask: 0, moveForward: 0, moveSide: 0 };
+      const ph = Math.floor(t / 1.5) % 8;
       if (ph === 0 && k % 22 === 0) s.punchMask = (k / 22) % 2 ? 2 : 1;
       if (ph === 1) s.block = 1;
       if (ph === 2) { s.moveForward = 1; s.moveSide = 0.5; }
@@ -303,6 +303,8 @@ async function animation(browser) {
       if (ph === 5) { if (k % 18 === 0) s.punchMask = [1, 2, 4, 8][(k / 18) % 4]; s.moveSide = -0.6; }
       // close range (1.6): walk in, then elbows and knees, both sides
       if (ph === 6) { s.moveForward = 1; if (k % 30 === 0) { const m = [16, 32, 16, 32][(k / 30) % 4]; if ((k / 30) % 4 < 2) s.punchMask = m; else s.kickMask = m; } }
+      // hooks and uppercuts (1.7), with ducks in between
+      if (ph === 7) { s.moveForward = 0.5; if (k % 24 === 0) s.punchMask = [64, 128, 1024, 2048, 256, 512][(k / 24) % 6]; s.duck = Math.sin(t * 5) > 0.6 ? 1 : 0; }
       return s;
     };
     for (let k = 0; k < 1800; k++) {

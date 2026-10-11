@@ -9,11 +9,18 @@ const BODY_LEFT = 4;   // jab to the body
 const BODY_RIGHT = 8;  // cross to the body
 const ELBOW_LEFT = 16;  // lead elbow (1.6)
 const ELBOW_RIGHT = 32; // rear elbow
+const HOOK_LEFT = 64;   // lead hook (1.7)
+const HOOK_RIGHT = 128; // rear hook
+const HOOK_BODY_LEFT = 256;
+const HOOK_BODY_RIGHT = 512;
+const UPPER_LEFT = 1024; // lead uppercut
+const UPPER_RIGHT = 2048;
 // kick mask: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick, 16 lead knee, 32 rear knee
 
 export const KEY_HELP = [
-  ['W / S', 'шаг вперёд / назад'], ['A / D', 'кружить влево / вправо'], ['J / K', 'джеб / кросс в голову'],
-  ['Shift+J / K', 'в корпус (или N / M)'], ['U / I', 'удар ногой (Shift — по ногам)'], ['Y / O', 'локоть (вблизи)'], ['H / L', 'колено (вблизи)'], ['Q / E', 'уклон'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
+  ['W / S', 'шаг вперёд / назад'], ['A / D', 'кружить влево / вправо'], ['J / K', 'джеб / кросс'], ['U / I', 'хук левой / правой'],
+  ['N / M', 'апперкот (вблизи)'], ['Shift', '+ J / K / U / I — в корпус'], [', / .', 'удар ногой (Shift — по ногам)'], ['Y / O', 'локоть (вблизи)'],
+  ['H / L', 'колено (вблизи)'], ['Q / E', 'уклон'], ['C', 'нырок (держать)'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
 ];
 const MOVE_KEYS = { KeyW: 'fwd', ArrowUp: 'fwd', KeyS: 'back', KeyA: 'left', KeyD: 'right' };
 
@@ -22,6 +29,8 @@ export class ManualInput {
     this.mask = 0;
     this.kickMask = 0;
     this.blockKeys = new Set();
+    this.duckKeys = new Set();
+    this.touchDuck = false;
     this.leftHeld = false;
     this.rightHeld = false;
     this.move = new Set();
@@ -37,14 +46,17 @@ export class ManualInput {
       const body = e.shiftKey;
       if (k === 'KeyJ' || k === 'KeyF') { this.mask |= body ? BODY_LEFT : PUNCH_LEFT; e.preventDefault(); }
       else if (k === 'KeyK' || k === 'KeyG') { this.mask |= body ? BODY_RIGHT : PUNCH_RIGHT; e.preventDefault(); }
-      else if (k === 'KeyU') { this.kickMask |= body ? 4 : 1; e.preventDefault(); }
-      else if (k === 'KeyI') { this.kickMask |= body ? 8 : 2; e.preventDefault(); }
+      else if (k === 'KeyU') { this.mask |= body ? HOOK_BODY_LEFT : HOOK_LEFT; e.preventDefault(); }
+      else if (k === 'KeyI') { this.mask |= body ? HOOK_BODY_RIGHT : HOOK_RIGHT; e.preventDefault(); }
+      else if (k === 'KeyN') { this.mask |= UPPER_LEFT; e.preventDefault(); }
+      else if (k === 'KeyM') { this.mask |= UPPER_RIGHT; e.preventDefault(); }
+      else if (k === 'Comma') { this.kickMask |= body ? 4 : 1; e.preventDefault(); }
+      else if (k === 'Period') { this.kickMask |= body ? 8 : 2; e.preventDefault(); }
       else if (k === 'KeyY') { this.mask |= ELBOW_LEFT; e.preventDefault(); }
       else if (k === 'KeyO') { this.mask |= ELBOW_RIGHT; e.preventDefault(); }
       else if (k === 'KeyH') { this.kickMask |= 16; e.preventDefault(); }
       else if (k === 'KeyL') { this.kickMask |= 32; e.preventDefault(); }
-      else if (k === 'KeyN') { this.mask |= BODY_LEFT; e.preventDefault(); }
-      else if (k === 'KeyM') { this.mask |= BODY_RIGHT; e.preventDefault(); }
+      else if (k === 'KeyC') { this.duckKeys.add(k); e.preventDefault(); }
       else if (k === 'Space' || k === 'ArrowDown') { this.blockKeys.add(k); e.preventDefault(); }
       else if (k === 'KeyQ' || k === 'ArrowLeft') { this.leftHeld = true; e.preventDefault(); }
       else if (k === 'KeyE' || k === 'ArrowRight') { this.rightHeld = true; e.preventDefault(); }
@@ -54,13 +66,14 @@ export class ManualInput {
     const up = (e) => {
       const k = e.code;
       this.blockKeys.delete(k);
+      this.duckKeys.delete(k);
       if (k === 'KeyQ' || k === 'ArrowLeft') this.leftHeld = false;
       if (k === 'KeyE' || k === 'ArrowRight') this.rightHeld = false;
       if (MOVE_KEYS[k]) this.move.delete(MOVE_KEYS[k]);
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
-    window.addEventListener('blur', () => { this.blockKeys.clear(); this.move.clear(); this.leftHeld = this.rightHeld = false; });
+    window.addEventListener('blur', () => { this.blockKeys.clear(); this.duckKeys.clear(); this.move.clear(); this.leftHeld = this.rightHeld = false; });
     root.addEventListener('mousedown', (e) => {
       if (!this.enabled || e.target.closest('button, .panel')) return;
       if (e.button === 0) this.mask |= PUNCH_LEFT;
@@ -78,6 +91,9 @@ export class ManualInput {
       if (act === 'low' && on) this.kickMask |= 8;
       if (act === 'elbow' && on) this.mask |= ELBOW_RIGHT;
       if (act === 'knee' && on) this.kickMask |= 32;
+      if (act === 'hook' && on) this.mask |= HOOK_RIGHT;
+      if (act === 'upper' && on) this.mask |= UPPER_RIGHT;
+      if (act === 'duck') this.touchDuck = on;
       if (act === 'block') this.touchBlock = on;
       if (act === 'left') this.touchLeft = on;
       if (act === 'right') this.touchRight = on;
@@ -100,11 +116,13 @@ export class ManualInput {
     const left = this.leftHeld || this.touchLeft;
     const right = this.rightHeld || this.touchRight;
     const block = this.enabled && (this.blockKeys.size > 0 || this.touchBlock);
+    const duck = this.enabled && (this.duckKeys.size > 0 || this.touchDuck);
     const m = this.enabled ? this.move : new Set();
     return {
       status: STATUS_LIVE,
       lean: left && !right ? -1 : right && !left ? 1 : 0, // + = player's right (InputFrame.LeanLateral)
       block: block ? 1 : 0,
+      duck: duck ? 1 : 0,
       punchMask: mask,
       kickMask,
       confidence: 1,

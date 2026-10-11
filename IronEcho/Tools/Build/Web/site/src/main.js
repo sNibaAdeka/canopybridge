@@ -355,16 +355,24 @@ function onCombat(e, snap) {
     app.shake.add(target === me ? 0.45 * power : 0.18 * power);
     if (target === me) app.hud.flash('hit');
     if (playerActs) {
-      if (e.counter) app.hud.feed('КОНТРУДАР!', 'good');
+      if (e.throughGuard) app.hud.feed('АППЕРКОТ СКВОЗЬ БЛОК!', 'good');
+      else if (e.counter && e.kind === 5) app.hud.feed('АППЕРКОТ НАВСТРЕЧУ НЫРКУ!', 'good');
+      else if (e.counter) app.hud.feed('КОНТРУДАР!', 'good');
       else if (e.glancing) app.hud.feed('ВСКОЛЬЗЬ', '');
       else if (e.smothered) app.hud.feed('СЛИШКОМ БЛИЗКО — ОТОЙДИ', 'warn');
       else if (e.kind === 1 && e.zone === 2) app.hud.feed('ПО НОГАМ — ОН ХРОМАЕТ', 'good');
       else if (e.kind === 1) app.hud.feed('УДАР НОГОЙ!', 'good');
       else if (e.kind === 2) app.hud.feed('ЛОКТЕМ!', 'good');
       else if (e.kind === 3) app.hud.feed('КОЛЕНОМ В КОРПУС!', 'good');
+      else if (e.kind === 4 && e.dodge) app.hud.feed('ХУК ДОГНАЛ УКЛОН!', 'good');
+      else if (e.kind === 4) app.hud.feed(e.zone === 1 ? 'ХУК ПО ПЕЧЕНИ!' : 'ХУК!', 'good');
+      else if (e.kind === 5) app.hud.feed('АППЕРКОТ!', 'good');
       else if (e.zone === 1) app.hud.feed('В КОРПУС!', 'good');
       if (e.combo >= 2) app.hud.combo(e.combo);
-    } else if (e.counter) app.hud.feed('ПОЙМАЛ НА ВСТРЕЧНОМ', 'bad');
+    } else if (e.throughGuard) app.hud.feed('АППЕРКОТ ПРОШЁЛ СКВОЗЬ БЛОК — УКЛОНЯЙСЯ', 'bad');
+    else if (e.counter && e.kind === 5) app.hud.feed('НЫРНУЛ ПОД АППЕРКОТ — ОТ НЕГО УКЛОН', 'bad');
+    else if (e.kind === 4 && e.dodge) app.hud.feed('ХУК ДОГОНЯЕТ УКЛОН — НЫРЯЙ ИЛИ ЗАКРОЙСЯ', 'bad');
+    else if (e.counter) app.hud.feed('ПОЙМАЛ НА ВСТРЕЧНОМ', 'bad');
     else if (e.kind === 1 && e.zone === 2) app.hud.feed('ПО НОГАМ: ТЫ ЗАМЕДЛЕН', 'bad');
     else if (e.kind === 1) app.hud.feed('ПРОПУСТИЛ УДАР НОГОЙ', 'bad');
     else if (e.kind === 2) app.hud.feed('ПРОПУСТИЛ ЛОКОТЬ', 'bad');
@@ -389,7 +397,8 @@ function onCombat(e, snap) {
     return;
   }
   if (type === 'Dodged') {
-    app.hud.feed(playerActs ? 'СОПЕРНИК УКЛОНИЛСЯ' : 'УКЛОН!', playerActs ? '' : 'good');
+    if (e.ducked) app.hud.feed(playerActs ? 'СОПЕРНИК НЫРНУЛ — БЕЙ АППЕРКОТ' : 'НЫРОК!', playerActs ? '' : 'good');
+    else app.hud.feed(playerActs ? 'СОПЕРНИК УКЛОНИЛСЯ' : 'УКЛОН!', playerActs ? '' : 'good');
     return;
   }
   if (type === 'Whiffed' && playerActs) {
@@ -793,7 +802,7 @@ function versusSample() {
   const ctl = app.versus ? app.versus.ctl : 0;
   if (app.versus) app.versus.ctl = 0;
   return [f.status, f.confidence ?? 1, f.lean || 0, f.leanForward || 0, f.block || 0, f.punchMask || 0, f.kickMask || 0,
-    f.moveForward || 0, f.moveSide || 0, ctl];
+    f.moveForward || 0, f.moveSide || 0, ctl, f.duck || 0];
 }
 
 async function beginVersus(room, slot, start) {

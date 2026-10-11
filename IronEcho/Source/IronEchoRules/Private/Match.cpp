@@ -62,6 +62,8 @@ namespace IronEchoCore
 		case CombatEventType::InputDropped: return "InputDropped";
 		case CombatEventType::KnockedDown: return "KnockedDown";
 		case CombatEventType::GotUp: return "GotUp";
+		case CombatEventType::DuckStarted: return "DuckStarted";
+		case CombatEventType::DuckEnded: return "DuckEnded";
 		}
 		return "Unknown";
 	}

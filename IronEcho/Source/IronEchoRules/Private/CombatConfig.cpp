@@ -71,6 +71,29 @@ namespace IronEchoCore
 			Knee.ReachMeters = 1.18f;
 			Knee.KnockbackMeters = 0.16f;
 			Knee.HitStunTicks = SecondsToTicks(0.34);
+
+			// Hooks and uppercuts (1.7). A hook (reach 1.36-1.38 m) lands from the working distance (1.35 m) but not from a
+			// step back, where the straights still do; an uppercut (1.24-1.26 m) needs a step in. Both heavier than a straight
+			// of the same hand, a little slower to start and dearer.
+			AttackSpec& Hook = Config.Hooks[Index];
+			Hook.WindupTicks = SecondsToTicks(bRear ? 0.17 : 0.13);
+			Hook.ActiveTicks = SecondsToTicks(0.07);
+			Hook.RecoveryTicks = SecondsToTicks(bRear ? 0.32 : 0.26);
+			Hook.Damage = bRear ? 3.3f : 2.5f;
+			Hook.StaminaCost = bRear ? 12.0f : 9.0f;
+			Hook.ReachMeters = bRear ? 1.36f : 1.38f;
+			Hook.KnockbackMeters = bRear ? 0.12f : 0.08f;
+			Hook.HitStunTicks = SecondsToTicks(bRear ? 0.34 : 0.28);
+
+			AttackSpec& Upper = Config.Uppercuts[Index];
+			Upper.WindupTicks = SecondsToTicks(bRear ? 0.16 : 0.13);
+			Upper.ActiveTicks = SecondsToTicks(0.07);
+			Upper.RecoveryTicks = SecondsToTicks(bRear ? 0.32 : 0.28);
+			Upper.Damage = bRear ? 3.4f : 2.7f;
+			Upper.StaminaCost = bRear ? 12.0f : 9.0f;
+			Upper.ReachMeters = bRear ? 1.24f : 1.26f;
+			Upper.KnockbackMeters = bRear ? 0.12f : 0.08f;
+			Upper.HitStunTicks = SecondsToTicks(bRear ? 0.38 : 0.32);
 		}
 
 		return Config;
@@ -108,6 +131,11 @@ namespace IronEchoCore
 			Config.Knees[Index].WindupTicks = SecondsToTicks((Index == 0 ? JabWindup : CrossWindup) + 0.06);
 			Config.Elbows[Index].StaminaCost *= 0.75f;
 			Config.Knees[Index].StaminaCost *= 0.75f;
+			// Hooks and uppercuts: the arm has further to travel, the tell is a little longer than the straight's.
+			Config.Hooks[Index].WindupTicks = SecondsToTicks((Index == 0 ? JabWindup : CrossWindup) + 0.03);
+			Config.Uppercuts[Index].WindupTicks = SecondsToTicks((Index == 0 ? JabWindup : CrossWindup) + 0.04);
+			Config.Hooks[Index].StaminaCost *= 0.75f;
+			Config.Uppercuts[Index].StaminaCost *= 0.75f;
 		}
 		// The telegraphed windup is there for the human, not a choice of the bot: it would keep the bot out of
 		// regeneration (no regen while attacking) and starve it. Cheaper punches and faster regen compensate.
@@ -118,6 +146,7 @@ namespace IronEchoCore
 		// like a machine (otherwise the player's 0.09 s jab could never be slipped), and its own punches follow a
 		// human slip slowly (a slip made in time beats them, one held from long before does not).
 		Config.HeadSlipSpeed = 8.0f;
+		Config.DuckSpeed = 8.0f; // a machine snaps the head down as fast as it slips it
 		Config.AimTrackSpeed = 0.20f;
 		return Config;
 	}
@@ -161,6 +190,10 @@ namespace IronEchoCore
 			Config.KickChance = 0.06f;
 			Config.LegKickShare = 0.20f;
 			Config.ClinchStrikeChance = 0.20f;
+			Config.HookChance = 0.12f;
+			Config.UppercutChance = 0.15f;
+			Config.DuckShare = 0.25f;
+			Config.ReadHabitChance = 0.10f;
 			break;
 		case BotLevel::Normal:
 			break;
@@ -186,6 +219,10 @@ namespace IronEchoCore
 			Config.KickChance = 0.22f;
 			Config.LegKickShare = 0.45f;
 			Config.ClinchStrikeChance = 0.50f;
+			Config.HookChance = 0.28f;
+			Config.UppercutChance = 0.40f;
+			Config.DuckShare = 0.45f;
+			Config.ReadHabitChance = 0.80f;
 			break;
 		}
 		return Config;

@@ -110,6 +110,7 @@
     font: 800 14px/1 var(--display); letter-spacing: 0.08em; touch-action: none; }
   #pad button.big { width: 78px; height: 78px; font-size: 16px; }
   #pad .cluster.right { flex-wrap: wrap-reverse; justify-content: flex-end; max-width: 176px; }
+  #pad .cluster.left { flex-wrap: wrap-reverse; max-width: 230px; }
   #pad button.small { width: 52px; height: 52px; font-size: 11px; }
   #pad button.on { background: rgba(63,125,255,0.55); border-color: var(--blue); }
 
@@ -243,13 +244,13 @@
     <div id="count" hidden></div>
     <div id="getup" hidden><b>ДЕРЖИ БЛОК, ЧТОБЫ ВСТАТЬ</b><div class="gbar"><div id="getup-fill"></div></div></div>
     <div id="flash"></div>
-    <div id="help" hidden><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>ноги</span><span><kbd>J</kbd><kbd>K</kbd>удары</span><span><kbd>Shift</kbd>в корпус</span><span><kbd>U</kbd><kbd>I</kbd>ногой</span><span><kbd>Y</kbd><kbd>O</kbd>локоть</span><span><kbd>H</kbd><kbd>L</kbd>колено</span><span><kbd>Q</kbd><kbd>E</kbd>уклон</span><span><kbd>Пробел</kbd>блок</span><span><kbd>Esc</kbd>пауза</span></div>
+    <div id="help" hidden><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>ноги</span><span><kbd>J</kbd><kbd>K</kbd>прямые</span><span><kbd>U</kbd><kbd>I</kbd>хуки</span><span><kbd>N</kbd><kbd>M</kbd>апперкоты</span><span><kbd>Shift</kbd>в корпус</span><span><kbd>,</kbd><kbd>.</kbd>ногой</span><span><kbd>Y</kbd><kbd>O</kbd>локоть</span><span><kbd>H</kbd><kbd>L</kbd>колено</span><span><kbd>Q</kbd><kbd>E</kbd>уклон</span><span><kbd>C</kbd>нырок</span><span><kbd>Пробел</kbd>блок</span><span><kbd>Esc</kbd>пауза</span></div>
     <button id="pause-btn" type="button">ПАУЗА</button>
   </div>
 
   <div id="pad" hidden>
-    <div class="cluster"><button data-act="left" type="button">◀</button><button data-act="block" class="big" type="button">БЛОК</button><button data-act="right" type="button">▶</button></div>
-    <div class="cluster right"><button data-act="elbow" class="small" type="button">ЛОКОТЬ</button><button data-act="knee" class="small" type="button">КОЛЕНО</button><button data-act="low" class="small" type="button">НОГИ</button><button data-act="kick" class="small" type="button">НОГА</button><button data-act="jab" class="big" type="button">ДЖЕБ</button><button data-act="cross" class="big" type="button">КРОСС</button></div>
+    <div class="cluster left"><button data-act="duck" class="small" type="button">НЫРОК</button><button data-act="left" type="button">◀</button><button data-act="block" class="big" type="button">БЛОК</button><button data-act="right" type="button">▶</button></div>
+    <div class="cluster right"><button data-act="elbow" class="small" type="button">ЛОКОТЬ</button><button data-act="knee" class="small" type="button">КОЛЕНО</button><button data-act="low" class="small" type="button">НОГИ</button><button data-act="kick" class="small" type="button">НОГА</button><button data-act="hook" class="small" type="button">ХУК</button><button data-act="upper" class="small" type="button">АППЕР</button><button data-act="jab" class="big" type="button">ДЖЕБ</button><button data-act="cross" class="big" type="button">КРОСС</button></div>
   </div>
 
   <div id="menu" class="panel">
@@ -287,6 +288,7 @@
     <h3 class="side-h">Как драться</h3>
     <ul class="tips">
       <li><b>Уклон — в последний миг.</b> Визор вспыхнул, плечо ушло вниз — удар летит. Убери голову с линии прямо перед ударом: ранний уклон удар догонит.</li>
+      <li><b>Ни одна защита не спасает от всего.</b> Хук — дугой сбоку: от уклона не уйти, только нырнуть или закрыться. Апперкот — снизу: половина проходит сквозь блок, нырок в него — вдвойне больно, спасает уклон. Нырок уводит голову от прямых и хуков. Бот запоминает, как ты защищаешься, и бьёт то, что это пробивает.</li>
       <li><b>Держи дистанцию.</b> Полная сила — на вытянутой руке; вплотную удар вязнет, издалека не достаёт. Прижали к канатам — уходи вбок.</li>
       <li><b>Работай по корпусу.</b> От удара в корпус не уклониться, он отнимает дыхание. Против закрытого блока — самое то.</li>
       <li><b>Ноги длиннее рук.</b> Удар ногой достаёт дальше джеба и бьёт сильнее, но замах долгий, а после удара не отменить. Низкий удар по ногам нельзя закрыть блоком руками — он замедляет соперника.</li>
@@ -294,10 +296,12 @@
     <div class="keys">
       <kbd>W / S</kbd><span>шаг вперёд / назад · <b>A / D</b> — кружить по рингу</span>
       <kbd>J / K</kbd><span>джеб (быстрый) / кросс (сильный) в голову</span>
-      <kbd>Shift + J / K</kbd><span>те же удары в корпус (или <b>N / M</b>)</span>
-      <kbd>U / I</kbd><span>удар ногой — передней / задней (<b>Shift</b> — по ногам, замедляет)</span>
+      <kbd>U / I</kbd><span>хук левой / правой — дугой сбоку, пробивает уклон</span>
+      <kbd>N / M</kbd><span>апперкот левой / правой — вблизи, снизу сквозь блок</span>
+      <kbd>Shift</kbd><span>+ <b>J / K / U / I</b> — тот же удар в корпус</span>
+      <kbd>, / .</kbd><span>удар ногой — передней / задней (<b>Shift</b> — по ногам, замедляет)</span>
       <kbd>Y / O · H / L</kbd><span>вплотную: локоть в голову · колено в корпус</span>
-      <kbd>Q / E</kbd><span>уклон влево / вправо (держать)</span>
+      <kbd>Q / E</kbd><span>уклон влево / вправо (держать) · <b>C</b> — нырок (держать)</span>
       <kbd>Пробел</kbd><span>блок; при нокдауне — держать, чтобы встать</span>
       <kbd>Мышь</kbd><span>ЛКМ — джеб, ПКМ — кросс · <b>Esc</b> — пауза · <b>Enter</b> — в ринг</span>
     </div>

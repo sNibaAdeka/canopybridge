@@ -18,7 +18,7 @@ globalThis.IRONECHO_CORE_WASM_B64 = B64;
 const imp = (dir, f) => import(pathToFileURL(path.join(dir, f)));
 const { loadCore } = await imp(SRC, 'core.js');
 const rules = await imp(SRC, 'ratingrules.js');
-const { BoutRecorder, parseReplay, replayBout } = await imp(SRC, 'replay.js');
+const { BoutRecorder, parseReplay, replayBout, REPLAY_ROW } = await imp(SRC, 'replay.js');
 const { RatingClient, ratingCoreId, ratingGzip } = await imp(SRC, 'rating.js');
 const { createRatingApi, MIN_BOUT_GAP_MS } = await imp(API, 'rating_api.mjs');
 const { MemoryStore } = await imp(API, 'rating_store.mjs');
@@ -79,7 +79,7 @@ const same = (a, b) => { const x = a.stateWords(); const y = b.stateWords(); ret
 check('replaying the recording on a fresh core ends in exactly the recorded final state', rr.ok && rr.finished && same(rec.core, replayCore), `${rr.winner} by ${rr.method}, round ${rr.round}`);
 const gz = await ratingGzip(bytes);
 check('a whole bout is a small upload (gzip)', gz.length < 150000, `${rec.recorder.rows} rows, ${bytes.length} B raw, ${gz.length} B gzip`);
-const cut = new Uint8Array(bytes.subarray(0, 12 + JSON.stringify({ ...rec.recorder.header, rows: 0 }).length + 18 * 300));
+const cut = new Uint8Array(bytes.subarray(0, 12 + JSON.stringify({ ...rec.recorder.header, rows: 0 }).length + REPLAY_ROW * 300));
 check('a truncated file is refused by the parser', (() => { try { parseReplay(cut); return false; } catch { return true; } })());
 
 // ------------------------------------------------------------------ server + client
@@ -163,7 +163,7 @@ const flip = lossRec.recorder.bytes();
 const parsedLoss = parseReplay(flip);
 const noPunches = new BoutRecorder({ v: 1, core: coreId, level: 0, seed: loss.seed, roundSeconds: 45, ladder: 'keys' });
 noPunches.buf = new Uint8Array(lossRec.recorder.buf); noPunches.view = new DataView(noPunches.buf.buffer); noPunches.rows = lossRec.recorder.rows;
-for (let i = 0; i < noPunches.rows; i++) noPunches.view.setUint8(i * 18 + 2, 0); // remove every punch
+for (let i = 0; i < noPunches.rows; i++) noPunches.view.setUint16(i * REPLAY_ROW + 2, 0, true); // remove every punch
 const tamper = await send(B, await ratingGzip(noPunches.bytes()));
 check('an edited recording is judged by what it replays to, not by what was claimed', tamper.ok === false ? ['not_finished', 'bad_replay'].includes(tamper.error) : tamper.result !== 'win', JSON.stringify({ r: tamper.result, e: tamper.error }));
 

@@ -81,6 +81,8 @@ namespace IronEchoCore
 	};
 
 	// A hand strike or a leg strike (1.4), and the close-range strikes (1.6): an elbow (to the head) and a knee (to the body).
+	// Hooks and uppercuts (1.7): a hook swings in from the side (it catches a slip, a duck goes under it), an uppercut rises
+	// from below (it splits a high guard and punishes a duck, a slip takes the head off its line). Punch = a straight.
 	// Left/Right of Hand is the lead / rear limb in every case.
 	enum class AttackKind : uint8_t
 	{
@@ -88,6 +90,8 @@ namespace IronEchoCore
 		Kick = 1,
 		Elbow = 2,
 		Knee = 3,
+		Hook = 4,
+		Uppercut = 5,
 	};
 
 	// Strikes thrown with a leg: the fighter stands on one leg (no cancel out of the recovery, hardly any movement).

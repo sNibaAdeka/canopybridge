@@ -30,6 +30,10 @@ namespace IronEchoCore
 		// close, inside the punches' sweet spot), fast and heavy; the elbow can be slipped and blocked, the knee only blocked.
 		AttackSpec Elbows[2];  // [0] lead arm, [1] rear arm
 		AttackSpec Knees[2];   // [0] lead leg, [1] rear leg
+		// Hooks and uppercuts (1.7): shorter than the straights, heavier. A hook lands from the working distance, an uppercut
+		// only a step inside it.
+		AttackSpec Hooks[2];      // [0] lead hook, [1] rear hook
+		AttackSpec Uppercuts[2];  // [0] lead uppercut, [1] rear uppercut
 
 		float StaminaRegenPerSecond = 14.0f;
 		int32_t StaminaRegenDelayTicks = SecondsToTicks(0.5);
@@ -44,8 +48,22 @@ namespace IronEchoCore
 		int32_t CoverUpTicks = SecondsToTicks(0.10);
 
 		int32_t WhiffPenaltyTicks = SecondsToTicks(0.10); // extra recovery after a dodged / missed punch
-		int32_t DodgeMaxEffectiveTicks = SecondsToTicks(0.90); // holding a slip longer stops evading
+		int32_t DodgeMaxEffectiveTicks = SecondsToTicks(0.90); // holding a slip (or a duck) longer stops evading
 		float DodgeEntryStaminaCost = 3.0f;
+
+		// ---- duck and the shape of a punch's path (1.7) ----
+		// A duck drops the head DuckDepthMeters at DuckSpeed. The miss test of a head shot measures the head's offset from the
+		// punch's line across (a slip) and down (a duck); a hook's path sweeps across (lateral offsets count HookLateralScale
+		// times less: a slip does not get out of it), an uppercut's rises (vertical offsets count UppercutVerticalScale times less:
+		// a duck does not get out of it). A punch follows a duck only as fast as a slip (AimTrackSpeed): a late duck beats it.
+		float DuckDepthMeters = 0.30f;
+		float DuckSpeed = 3.5f;              // m/s: a keyboard duck takes ~0.09 s (a camera duck is already real motion)
+		float DuckMoveFactor = 0.50f;        // movement speed while ducked
+		float HookLateralScale = 2.5f;
+		float UppercutVerticalScale = 3.0f;
+		// An uppercut into a raised guard: this fraction of it comes through between the gloves (no stamina drain, a shorter
+		// stun); into a ducking head it is a counter hit.
+		float UppercutThroughGuardFactor = 0.50f;
 
 		// A punch started without enough stamina is an arm punch: slow, weak, short stun, and a guard absorbs it
 		// cheaply (block drain scales with the punch's damage), so an exhausted flurry cannot break a guard.
@@ -227,6 +245,17 @@ namespace IronEchoCore
 		float LegKickShare = 0.35f;
 		// Close range (1.6): when the foe is inside elbow reach, the share of planned punches that become an elbow or a knee.
 		float ClinchStrikeChance = 0.35f;
+		// Hooks and uppercuts (1.7): share of planned head punches that are hooks (from the working distance) and, when the foe
+		// is inside uppercut reach, uppercuts. Defence: the share of reactions to a straight that are a duck instead of a slip,
+		// and against a hook the bot ducks or blocks (a slip would not get out of it).
+		float HookChance = 0.22f;
+		float UppercutChance = 0.30f;
+		float DuckShare = 0.40f;
+		// Reading the player (1.7): the bot keeps a running tally of how the player defends its head shots (block, slip, duck)
+		// and, with this chance per planned head punch, throws the one that beats the habit: an uppercut against a guard or a
+		// duck, a hook against a slip. HabitMemory is the weight of the past in the tally (per defended punch).
+		float ReadHabitChance = 0.45f;
+		float HabitMemory = 0.80f;
 		// Offence: body shots, more of them against a guard.
 		float BodyShotChance = 0.12f;
 		float BodyVsGuardBonus = 0.30f;

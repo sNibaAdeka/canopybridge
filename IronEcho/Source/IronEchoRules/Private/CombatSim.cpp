@@ -109,6 +109,15 @@ namespace IronEchoCore
 		G.Offset = AbsValue(Dir.Cross(Rel));
 		G.bInReach = G.Along > 0.0f && G.Along <= Spec.ReachMeters;
 		const bool bHead = Zone == PunchZone::Head;
+		if (bHead)
+		{
+			// The head's offset from the punch's path, across (slip) and down (duck, 1.7). A hook's path sweeps across, an
+			// uppercut's rises: the offset along the sweep counts that many times less.
+			const AttackKind Kind = A.Snapshot().AttackType;
+			const float Across = G.Offset / (Kind == AttackKind::Hook ? AC.HookLateralScale : 1.0f);
+			const float Down = (D.Snapshot().HeadDrop - AimDrop[SlotIndex(Attacker)]) / (Kind == AttackKind::Uppercut ? AC.UppercutVerticalScale : 1.0f);
+			G.Offset = Vec2{Across, Down}.Length();
+		}
 		G.bClean = G.Offset <= (bHead ? DC.HeadHitRadius : DC.BodyHitRadius);
 		G.bOnLine = G.Offset <= (bHead ? DC.HeadGlanceRadius : DC.BodyGlanceRadius);
 		const float SweetStart = Spec.ReachMeters - AC.SweetSpotMeters;
@@ -152,11 +161,13 @@ namespace IronEchoCore
 		const float Dt = static_cast<float>(kTickSeconds);
 		const FighterSnapshot& D = Get(Target).Snapshot();
 		const float HeadOffset = S.AttackZone == PunchZone::Head ? D.HeadOffset : 0.0f;
+		const float HeadDrop = S.AttackZone == PunchZone::Head ? D.HeadDrop : 0.0f;
 		const bool bNew = S.AttackId != AimedAttackId[Index];
 		if (bNew)
 		{
 			AimedAttackId[Index] = S.AttackId;
 			AimSlip[Index] = HeadOffset;
+			AimDrop[Index] = HeadDrop; // a duck already made when the punch starts is aimed at
 		}
 		else if (S.Stage != AttackStage::Windup || S.StageTicksLeft <= C.AimCommitTicks)
 		{
@@ -167,6 +178,7 @@ namespace IronEchoCore
 			// The punch turns with the target's body at once, but follows a head slip only slowly.
 			const float MaxStep = C.AimTrackSpeed * Dt;
 			AimSlip[Index] += Clamp(HeadOffset - AimSlip[Index], -MaxStep, MaxStep);
+			AimDrop[Index] += Clamp(HeadDrop - AimDrop[Index], -MaxStep, MaxStep);
 		}
 		// Lead a moving target by the time left until the punch lands.
 		const float ToContact = static_cast<float>(S.Stage == AttackStage::Windup ? S.StageTicksLeft : 0) * Dt;
@@ -196,22 +208,37 @@ namespace IronEchoCore
 			}
 			// Missed. In reach but off the line: the defender's slip or side step made it miss.
 			const FighterSnapshot& D = Defender.Snapshot();
-			const bool bEvaded = G.bInReach && (D.Dodge != DodgeDir::None || AbsValue(D.SpeedSide) > 0.30f);
+			// over a ducked head, or under a head that came up after the punch was aimed at it ducked (bob and weave)
+			Result.bDucked = A.AttackZone == PunchZone::Head
+				&& AbsValue(D.HeadDrop - AimDrop[SlotIndex(A.Slot)]) > 0.5f * Defender.GetConfig().DuckDepthMeters;
+			const bool bEvaded = G.bInReach && (D.Dodge != DodgeDir::None || AbsValue(D.SpeedSide) > 0.30f || Result.bDucked);
 			Result.Outcome = bEvaded ? AttackOutcome::Dodged : AttackOutcome::Whiffed;
 			return Result;
 		}
 
+		const FighterConfig& AC = Attacker.GetConfig();
+		const bool bUppercut = A.AttackType == AttackKind::Uppercut; // always to the head
 		Result.bGlancing = !G.bClean;
 		Result.bSmothered = G.Power < 0.85f;
-		Result.Power = G.Power * (Result.bGlancing ? Attacker.GetConfig().GlancingDamageFactor : 1.0f);
+		Result.Power = G.Power * (Result.bGlancing ? AC.GlancingDamageFactor : 1.0f);
 		if (Defender.IsBlocking() && A.AttackZone != PunchZone::Leg) // hands do not cover the legs
 		{
+			if (bUppercut)
+			{
+				// It comes up between the gloves: part of it lands, the guard pays nothing (it never touched the gloves).
+				Result.Outcome = AttackOutcome::Hit;
+				Result.bThroughGuard = true;
+				Result.Power *= AC.UppercutThroughGuardFactor;
+				return Result;
+			}
 			const float Drain = Defender.BlockDrain(Attacker.CurrentAttackDamage(false), Spec.Damage, A.AttackZone);
 			Result.Outcome = Defender.CanAffordBlock(Drain) ? AttackOutcome::Blocked : AttackOutcome::GuardBroken;
 			return Result;
 		}
 		Result.Outcome = AttackOutcome::Hit;
-		Result.bCounter = Defender.IsWindingUp();
+		// A counter hit: into a windup, or an uppercut into a head that ducked down onto it.
+		const FighterSnapshot& D = Defender.Snapshot();
+		Result.bCounter = Defender.IsWindingUp() || (bUppercut && D.HeadDrop > 0.5f * Defender.GetConfig().DuckDepthMeters);
 		return Result;
 	}
 
@@ -247,6 +274,7 @@ namespace IronEchoCore
 				Broken.Type = CombatEventType::GuardBroken;
 				Events.Push(Broken);
 			}
+			Event.Dodge = Defender.Snapshot().Dodge; // the defender's slip at the moment the punch caught it (1.7: a hook does)
 			const float Damage = Attacker.CurrentAttackDamage(Result.bCounter) * Result.Power;
 			const int32_t FullStun = Attacker.CurrentAttackHitStun();
 			const int32_t Stun = (std::max)(1, static_cast<int32_t>(std::lround(static_cast<double>(FullStun) * Result.Power)));
@@ -267,6 +295,7 @@ namespace IronEchoCore
 			Event.bCounterHit = Result.bCounter;
 			Event.bGlancing = Result.bGlancing;
 			Event.bSmothered = Result.bSmothered;
+			Event.bThroughGuard = Result.bThroughGuard;
 			Event.Power = Result.Power;
 			if (Result.bGlancing)
 			{
@@ -283,8 +312,9 @@ namespace IronEchoCore
 		case AttackOutcome::Dodged:
 			Event.Type = CombatEventType::Dodged;
 			Event.Dodge = Defender.Snapshot().Dodge;
+			Event.bDucked = Result.bDucked;
 			Event.Power = 0.0f;
-			Defender.NoteDodge();
+			Defender.NoteDodge(Result.bDucked);
 			break;
 		case AttackOutcome::Whiffed:
 			Event.Type = CombatEventType::Whiffed;
@@ -341,6 +371,10 @@ namespace IronEchoCore
 				case ActionState::Attack: Factor = IsLegStrike(S.AttackType) ? C.KickMoveFactor : C.AttackMoveFactor; break;
 				case ActionState::Block: Factor = C.BlockMoveFactor; break;
 				default: Factor = 0.0f; break; // stunned: the legs belong to the punch that landed
+				}
+				if (S.bDucking)
+				{
+					Factor *= C.DuckMoveFactor; // bent at the knees
 				}
 				if (S.GassedTicksLeft > 0)
 				{

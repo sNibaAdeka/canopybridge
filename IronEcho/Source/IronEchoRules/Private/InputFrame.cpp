@@ -78,6 +78,10 @@ namespace IronEchoCore
 		}
 		Intent.bBlock = bBlocking;
 
+		// Duck (1.7), with hysteresis like the block.
+		bDucking = Frame.DuckAmount >= (bDucking ? Config.DuckExit : Config.DuckEnter);
+		Intent.bDuck = bDucking;
+
 		// Footwork: a direct source wins; otherwise the camera's forward lean steps in or out (hysteresis).
 		const float Fwd = Frame.LeanForward;
 		if (CurrentStep == 0)
@@ -97,6 +101,7 @@ namespace IronEchoCore
 	void IntentMapper::Reset()
 	{
 		bBlocking = false;
+		bDucking = false;
 		CurrentDodge = DodgeDir::None;
 		CurrentStep = 0;
 	}

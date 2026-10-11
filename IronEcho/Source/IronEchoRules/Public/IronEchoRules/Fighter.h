@@ -63,6 +63,11 @@ namespace IronEchoCore
 		bool bMoving = false;
 		bool bOnRopes = false;        // within MovementConfig.RopeMargin of a rope: no room to back off
 		float HeadOffset = 0.0f;      // m, head off the centre line to the fighter's right (the real slip)
+		// Duck (1.7): an overlay like the slip. HeadDrop is how far the head is below its standing height (the real duck).
+		bool bDucking = false;
+		int32_t DuckHeldTicks = 0;
+		bool bDuckEffective = false;
+		float HeadDrop = 0.0f;
 		PunchZone AttackZone = PunchZone::Head;
 		AttackKind AttackType = AttackKind::Punch; // hand or leg strike (1.4)
 		int32_t LegSlowTicksLeft = 0;              // > 0: legs hurt, movement slowed (1.4)
@@ -74,6 +79,11 @@ namespace IronEchoCore
 		int32_t ElbowsLanded = 0;
 		int32_t KneesThrown = 0;
 		int32_t KneesLanded = 0;
+		int32_t HooksThrown = 0;      // 1.7; also counted in PunchesThrown / PunchesLanded
+		int32_t HooksLanded = 0;
+		int32_t UppercutsThrown = 0;
+		int32_t UppercutsLanded = 0;
+		int32_t DucksMade = 0;        // punches that went over this fighter's ducked head (also in DodgesMade)
 		int32_t GlancingHits = 0;     // this fighter's punches that only grazed
 		// Statistics for the current round / match.
 		float RoundDamageDealt = 0.0f;
@@ -179,7 +189,7 @@ namespace IronEchoCore
 			Snap.LegSlowTicksLeft = (std::min)(Snap.LegSlowTicksLeft + Ticks, Config.LegSlowMaxTicks);
 		}
 		void ClearRoundStats();
-		void NoteDodge();
+		void NoteDodge(bool bDucked = false);
 
 		// Knockdown resolution (driven by Match).
 		void GetUp(int32_t Tick, CombatEventBuffer& Events);
@@ -211,5 +221,6 @@ namespace IronEchoCore
 		int32_t GassedUntilTick = -1000000;
 		int32_t AttackLockedUntilTick = -1000000; // cover-up keeps the rest of the hit stun for punches
 		bool bSlipWeak = false; // the slip started without the stamina to pay for it: half a slip
+		bool bDuckWeak = false; // the same for a duck: half the depth
 	};
 }

@@ -3,10 +3,15 @@
 //
 // Every call is quantised before it reaches the core (so recording and replaying see identical numbers): dt in 1/8192 s, the analogue
 // inputs in 1/1000. Layout of a recording (little endian, then gzip on the wire):
-//   'IER1' | u32 headerLength | header JSON (utf-8) | u32 rowCount | rowCount x 18 bytes
-//   row: u8 op (0 frame, 1 pause, 2 resume) | u8 status | u8 punchMask | u8 kickMask | u16 dt | i16 x 6: confidence, lean, leanForward, block, moveForward, moveSide
-export const REPLAY_MAGIC = 'IER1';
-export const REPLAY_ROW = 18;
+//   'IER2' | u32 headerLength | header JSON (utf-8) | u32 rowCount | rowCount x 22 bytes
+//   row: u8 op (0 frame, 1 pause, 2 resume) | u8 status | u16 punchMask | u8 kickMask | u8 0 | u16 dt
+//        | i16 x 7: confidence, lean, leanForward, block, moveForward, moveSide, duck
+// (IER2 since 1.7: hooks and uppercuts need 12 punch bits, the duck an analogue input. A recording only ever replays on the core build
+// that made it, so the older format is simply not accepted.)
+export const REPLAY_MAGIC = 'IER2';
+export const REPLAY_ROW = 22;
+export const PUNCH_MASK_MAX = 4095;
+export const KICK_MASK_MAX = 63;
 export const REPLAY_MAX_ROWS = 80000; // ~22 minutes at 60 frames per second (a long bout is ~6): longer ones are not rated, and the server never replays more
 export const DT_UNIT = 8192;
 
@@ -20,9 +25,9 @@ export function quantizeFrame(dt, input) {
     u,
     dt: u / DT_UNIT,
     status: clampInt(input.status | 0, 0, 7),
-    punch: clampInt((input.punchMask ?? 0) | 0, 0, 63),
-    kick: clampInt((input.kickMask ?? 0) | 0, 0, 63),
-    q: [input.confidence ?? 1, input.lean ?? 0, input.leanForward ?? 0, input.block ?? 0, input.moveForward ?? 0, input.moveSide ?? 0].map(q16),
+    punch: clampInt((input.punchMask ?? 0) | 0, 0, PUNCH_MASK_MAX),
+    kick: clampInt((input.kickMask ?? 0) | 0, 0, KICK_MASK_MAX),
+    q: [input.confidence ?? 1, input.lean ?? 0, input.leanForward ?? 0, input.block ?? 0, input.moveForward ?? 0, input.moveSide ?? 0, input.duck ?? 0].map(q16),
   };
   return f;
 }
@@ -30,7 +35,7 @@ export function quantizeFrame(dt, input) {
 // Back to the numbers the core receives (the same function runs on the page and on the server).
 export function frameArgs(f) {
   return { dt: f.u / DT_UNIT, status: f.status, confidence: f.q[0] / 1000, lean: f.q[1] / 1000, leanForward: f.q[2] / 1000, block: f.q[3] / 1000,
-    punchMask: f.punch, moveForward: f.q[4] / 1000, moveSide: f.q[5] / 1000, kickMask: f.kick };
+    punchMask: f.punch, moveForward: f.q[4] / 1000, moveSide: f.q[5] / 1000, kickMask: f.kick, duck: f.q[6] / 1000 };
 }
 
 export class BoutRecorder {
@@ -58,10 +63,11 @@ export class BoutRecorder {
     const v = this.view;
     v.setUint8(o, op);
     v.setUint8(o + 1, f ? f.status : 0);
-    v.setUint8(o + 2, f ? f.punch : 0);
-    v.setUint8(o + 3, f ? f.kick : 0);
-    v.setUint16(o + 4, f ? f.u : 0, true);
-    for (let i = 0; i < 6; i++) v.setInt16(o + 6 + i * 2, f ? f.q[i] : 0, true);
+    v.setUint16(o + 2, f ? f.punch : 0, true);
+    v.setUint8(o + 4, f ? f.kick : 0);
+    v.setUint8(o + 5, 0);
+    v.setUint16(o + 6, f ? f.u : 0, true);
+    for (let i = 0; i < 7; i++) v.setInt16(o + 8 + i * 2, f ? f.q[i] : 0, true);
     this.rows++;
   }
 
@@ -96,8 +102,8 @@ export function parseReplay(bytes) {
 export function replayRow(parsed, i) {
   const v = parsed.view;
   const o = parsed.offset + i * REPLAY_ROW;
-  return { op: v.getUint8(o), status: v.getUint8(o + 1), punch: v.getUint8(o + 2), kick: v.getUint8(o + 3), u: v.getUint16(o + 4, true),
-    q: [0, 1, 2, 3, 4, 5].map((k) => v.getInt16(o + 6 + k * 2, true)) };
+  return { op: v.getUint8(o), status: v.getUint8(o + 1), punch: v.getUint16(o + 2, true), kick: v.getUint8(o + 4), u: v.getUint16(o + 6, true),
+    q: [0, 1, 2, 3, 4, 5, 6].map((k) => v.getInt16(o + 8 + k * 2, true)) };
 }
 
 // Replays a recording on a fresh core and reports how the bout ended. `core` is a Core (core.js) already loaded; never throws for bad data:
@@ -110,7 +116,7 @@ export function replayBout(core, parsed) {
   for (let i = 0; i < parsed.rows; i++) {
     const r = replayRow(parsed, i);
     if (r.op === 0) {
-      if (r.u < 1 || r.u > 2048 || r.status > 7 || r.punch > 63 || r.kick > 63) return { ok: false, error: 'bad frame ' + i };
+      if (r.u < 1 || r.u > 2048 || r.status > 7 || r.punch > PUNCH_MASK_MAX || r.kick > KICK_MASK_MAX) return { ok: false, error: 'bad frame ' + i };
       core.rawFrame(frameArgs(r));
     } else if (r.op === 1) core.pause();
     else if (r.op === 2) core.resume();

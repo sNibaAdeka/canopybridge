@@ -43,6 +43,13 @@ namespace IronEchoCore
 		StepOutRolledId = 0;
 		StepOutUntilTick = -1;
 		EscapeDir = 0;
+		for (float& H : Habits)
+		{
+			H = 0.0f;
+		}
+		HabitSeenAttackId = 0;
+		ShortPlanSinceTick = -1;
+		ComboKind = AttackKind::Punch;
 	}
 
 	int32_t BotBrain::DecideGetUpCount(int32_t KnockdownNumber)
@@ -89,13 +96,28 @@ namespace IronEchoCore
 			const float BlockChance = Clamp(Config.BlockChance + Read + Hurt, 0.0f, (std::max)(Config.MaxBlockChance, Config.BlockChance));
 			const float Roll = Rng.NextFloat01();
 			Defense Planned = Defense::None;
+			const bool bHeadShot = FoeSnap.AttackZone == PunchZone::Head;
+			const Defense Slip = Rng.Chance(0.5f) ? Defense::DodgeLeft : Defense::DodgeRight;
 			if (Roll < BlockChance)
 			{
-				Planned = Defense::Block;
+				// half an uppercut comes through a guard: against one, a guard is half the time a slip instead
+				Planned = (FoeSnap.AttackType == AttackKind::Uppercut && Rng.Chance(0.5f)) ? Slip : Defense::Block;
 			}
 			else if (Roll < BlockChance + Config.DodgeChance)
 			{
-				Planned = Rng.Chance(0.5f) ? Defense::DodgeLeft : Defense::DodgeRight;
+				// what gets out of each punch's path (1.7): a hook is ducked, an uppercut slipped, a straight either
+				if (bHeadShot && FoeSnap.AttackType == AttackKind::Hook)
+				{
+					Planned = Defense::Duck;
+				}
+				else if (bHeadShot && FoeSnap.AttackType != AttackKind::Uppercut && Rng.Chance(Config.DuckShare))
+				{
+					Planned = Defense::Duck;
+				}
+				else
+				{
+					Planned = Slip;
+				}
 			}
 
 			bReactionPending = Planned != Defense::None;
@@ -132,7 +154,12 @@ namespace IronEchoCore
 			NextAttackTick = Tick + Config.CounterDelayTicks;
 			PlannedHand = Rng.Chance(Config.CounterCrossChance) ? Hand::Right : Hand::Left;
 			PlannedZone = PunchZone::Head; // a counter goes straight back at the head
+			// up from a duck comes an uppercut or a hook when the foe is close enough, otherwise a straight
 			PlannedKind = AttackKind::Punch;
+			if (MySnap.HeadDrop > 0.05f && Sim.Gap() <= Me.SpecFor(PlannedHand, PunchZone::Head, AttackKind::Hook).ReachMeters)
+			{
+				PlannedKind = Sim.Gap() <= Me.SpecFor(PlannedHand, PunchZone::Head, AttackKind::Uppercut).ReachMeters ? AttackKind::Uppercut : AttackKind::Hook;
+			}
 		}
 		LastDefenses = Defenses;
 
@@ -171,6 +198,30 @@ namespace IronEchoCore
 			}
 		}
 
+		// ---- reading the player (1.7): how did he defend this head shot? Looked at on its last windup tick, before contact ----
+		if (MySnap.State == ActionState::Attack && MySnap.Stage == AttackStage::Windup && MySnap.StageTicksLeft <= 1
+			&& MySnap.AttackZone == PunchZone::Head && MySnap.AttackId != HabitSeenAttackId)
+		{
+			HabitSeenAttackId = MySnap.AttackId;
+			int32_t Seen = HabitTook;
+			if (FoeSnap.bDucking || FoeSnap.HeadDrop > 0.1f)
+			{
+				Seen = HabitDuck;
+			}
+			else if (FoeSnap.Dodge != DodgeDir::None || AbsValue(FoeSnap.HeadOffset) > 0.12f)
+			{
+				Seen = HabitSlip;
+			}
+			else if (FoeSnap.bBlocking)
+			{
+				Seen = HabitBlock;
+			}
+			for (int32_t Index = 0; Index < HabitCount; ++Index)
+			{
+				Habits[Index] = Habits[Index] * Config.HabitMemory + (Index == Seen ? 1.0f : 0.0f);
+			}
+		}
+
 		// ---- offence ----
 		const bool bFree = MySnap.State == ActionState::Guard || MySnap.State == ActionState::Block
 			|| (MySnap.State == ActionState::Attack && MySnap.Stage == AttackStage::Recovery);
@@ -186,6 +237,7 @@ namespace IronEchoCore
 				bAttackNow = true; // the fighter buffers it if it cannot start this very tick
 				AttackHand = ComboHand;
 				AttackZone = PunchZone::Head;
+				AttackType = ComboKind;
 			}
 		}
 		else if (Tick >= NextAttackTick && !bRetreating && (ActiveDefense == Defense::None || bFoeGassed))
@@ -202,6 +254,20 @@ namespace IronEchoCore
 			}
 			PunchZone Zone = PlannedZone;
 			AttackKind Kind = PlannedKind;
+			// A hook or an uppercut has a shorter reach than the straight: the footwork steps in for it, but the bot does not stand
+			// waiting. A hook out of reach becomes the straight at once; an uppercut gets a short step in (0.4 s), then the same.
+			if (Kind == AttackKind::Hook || Kind == AttackKind::Uppercut)
+			{
+				if (ShortPlanSinceTick < 0)
+				{
+					ShortPlanSinceTick = Tick;
+				}
+				const bool bOut = Sim.Gap() > Me.SpecFor(Choice, Zone, Kind).ReachMeters;
+				if (bOut && (Kind == AttackKind::Hook || Tick - ShortPlanSinceTick > SecondsToTicks(0.4)))
+				{
+					Kind = AttackKind::Punch;
+				}
+			}
 			// The foe stands just out of punching reach but inside a kick's: a kick is the answer.
 			if (Kind == AttackKind::Punch && Sim.Gap() > Me.SpecFor(Choice, Zone).ReachMeters
 				&& Sim.Gap() <= Me.SpecFor(Hand::Right, PunchZone::Body, AttackKind::Kick).ReachMeters && MySnap.Stamina >= 16.0f && Rng.Chance(0.6f))
@@ -215,6 +281,12 @@ namespace IronEchoCore
 			{
 				Kind = Rng.Chance(0.5f) ? AttackKind::Elbow : AttackKind::Knee;
 				Zone = Kind == AttackKind::Elbow ? PunchZone::Head : PunchZone::Body;
+			}
+			// Inside uppercut reach: some straights to the head come up from below instead (1.7).
+			if (Kind == AttackKind::Punch && Zone == PunchZone::Head && Sim.Gap() <= Me.SpecFor(Choice, PunchZone::Head, AttackKind::Uppercut).ReachMeters
+				&& Rng.Chance(Config.UppercutChance))
+			{
+				Kind = AttackKind::Uppercut;
 			}
 			const AttackSpec Spec = Me.SpecFor(Choice, Zone, Kind);
 			const bool bFoeCommitted = FoeSnap.State == ActionState::Attack && FoeSnap.Stage != AttackStage::Recovery;
@@ -230,6 +302,9 @@ namespace IronEchoCore
 					bComboQueued = true;
 					ComboHand = OtherHand(Choice);
 					ComboTick = Tick + Spec.WindupTicks + Spec.ActiveTicks;
+					// the classic one-two-hook: sometimes the second punch of the combo is a hook (if it reaches)
+					ComboKind = (Sim.Gap() <= Me.SpecFor(ComboHand, PunchZone::Head, AttackKind::Hook).ReachMeters && Rng.Chance(Config.HookChance))
+						? AttackKind::Hook : AttackKind::Punch;
 				}
 				int32_t Interval = Rng.RangeInclusive(Config.AttackIntervalMinTicks, Config.AttackIntervalMaxTicks);
 				if (bFoeGassed)
@@ -241,6 +316,7 @@ namespace IronEchoCore
 					Interval = static_cast<int32_t>(static_cast<float>(Interval) * Config.HurtIntervalScale);
 				}
 				NextAttackTick = Tick + Interval;
+				ShortPlanSinceTick = -1;
 				PlanNext();
 				bGuardRolled = false;
 				ActiveDefense = Defense::None;
@@ -261,6 +337,10 @@ namespace IronEchoCore
 			Intent.bBlock = true;
 		}
 
+		if (ActiveDefense == Defense::Duck)
+		{
+			Intent.bDuck = true;
+		}
 		if (ActiveDefense == Defense::DodgeLeft)
 		{
 			Intent.Dodge = DodgeDir::Left;
@@ -289,6 +369,39 @@ namespace IronEchoCore
 		PlannedKind = AttackKind::Punch;
 		PlannedHand = Rng.Chance(Config.CrossChance) ? Hand::Right : Hand::Left;
 		PlannedZone = Rng.Chance(Config.BodyShotChance) ? PunchZone::Body : PunchZone::Head;
+		if (PlannedZone != PunchZone::Head)
+		{
+			return;
+		}
+		// Reading the player: the punch that beats how he defends (the footwork steps in for an uppercut's short reach).
+		const AttackKind Beater = HabitBeater();
+		if (Beater != AttackKind::Punch && Rng.Chance(Config.ReadHabitChance))
+		{
+			PlannedKind = Beater;
+		}
+		else if (Rng.Chance(Config.HookChance))
+		{
+			PlannedKind = AttackKind::Hook;
+		}
+	}
+
+	AttackKind BotBrain::HabitBeater() const
+	{
+		// a clear habit: seen at least twice lately and more often than taking the punch
+		int32_t Best = HabitTook;
+		for (int32_t Index = HabitBlock; Index < HabitCount; ++Index)
+		{
+			if (Habits[Index] > Habits[Best])
+			{
+				Best = Index;
+			}
+		}
+		if (Best == HabitTook || Habits[Best] < 1.5f)
+		{
+			return AttackKind::Punch;
+		}
+		// a guard and a duck are beaten by the uppercut, a slip by the hook
+		return Best == HabitSlip ? AttackKind::Hook : AttackKind::Uppercut;
 	}
 
 	void BotBrain::Footwork(const CombatSim& Sim, int32_t Tick, bool bRetreating, bool bWantsToAttack, FighterIntent& Intent)

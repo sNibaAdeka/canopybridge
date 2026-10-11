@@ -36,8 +36,8 @@ function springZ(x, v, target, omega, zeta, dt) {
 const noise = (t, f, ph) => 0.62 * Math.sin(t * f + ph) + 0.38 * Math.sin(t * f * 2.37 + ph * 1.9 + 1.1);
 
 const SCALARS = ['crouch', 'yaw', 'lean', 'twist', 'nod', 'lateral', 'elbow_out', 'lead_extended', 'rear_extended', 'lead_elbow', 'rear_elbow',
-  'head_turn', 'head_tilt', 'side_bend', 'body_x'];
-const OMEGA = { crouch: 13, yaw: 15, lean: 14, twist: 17, nod: 16, lateral: 13, elbow_out: 14, lead_elbow: 26, rear_elbow: 26, lead_extended: 40,
+  'lead_hook', 'rear_hook', 'head_turn', 'head_tilt', 'side_bend', 'body_x'];
+const OMEGA = { crouch: 13, yaw: 15, lean: 14, twist: 17, nod: 16, lateral: 13, elbow_out: 14, lead_elbow: 26, rear_elbow: 26, lead_hook: 26, rear_hook: 26, lead_extended: 40,
   rear_extended: 40, head_turn: 16, head_tilt: 14, side_bend: 14, body_x: 11 };
 const ZETA = { yaw: 0.62, twist: 0.58, lean: 0.7, body_x: 0.66, lateral: 0.75 }; // the rest: critically damped
 const HAND_OMEGA = 30;
@@ -357,6 +357,72 @@ export class FighterAnimator {
         T.side_bend = (hand === 0 ? 7 : -9) * load; // shoulder dip: part of the telegraph
         T.crouch += 0.03 * load;
       }
+    }
+
+    // hook and uppercut (1.7): one continuous path each, like the elbow's.
+    //  hook: guard -> cocked (elbow up and out, glove out at the side of the head) -> through, across the centre line at the target's
+    //        head (the arc that catches a slip); the hips and shoulders turn hard behind it.
+    //  uppercut: guard -> loaded (knees bend, the glove drops to the chest, the shoulder dips) -> up, under the target's chin.
+    if (f.stateName === 'Attack' && (f.kind === 4 || f.kind === 5)) {
+      const hook = f.kind === 4;
+      const leadHand = f.hand === 0;
+      const s = leadHand ? 1 : -1; // armature +y = own left: the lead (left) hand's side
+      const a = f.stageAlpha;
+      const L = this.isBot ? 0.6 : 0.35;
+      let cock = 0;
+      let pos = 0;
+      let back = 0;
+      if (f.stageName === 'Windup') { cock = smooth(Math.min(1, a / L)); pos = a > L ? easeOut((a - L) / (1 - L)) : 0; }
+      else if (f.stageName === 'Active') { cock = 1; pos = 1; }
+      else if (f.stageName === 'Recovery') { back = smooth(a); cock = 1; pos = 1; }
+      const big = this.isBot ? 1.0 : 0.5;
+      const load = f.stageName === 'Windup' && a <= L ? cock : 0;
+      this.telegraph = this.isBot ? load : 0;
+      const swing = pos * (1 - back);
+      const aimY = -clamp(f.aimSide || 0, -0.35, 0.35);
+      const body = f.zone === 1;
+      const path = (guard, cocked, through) => {
+        const strike = lerp3(lerp3(guard, cocked, cock), through, pos);
+        return back > 0 ? lerp3(through, guard, back) : strike;
+      };
+      let glove;
+      if (hook) {
+        const x = clamp((f.aimAlong ?? ctx.gap) - 0.50, 0.50, 0.84);
+        const z = body ? 1.14 : 1.55;
+        glove = path(leadHand ? lead : rear, [0.28, s * 0.40, z - 0.02], [x, -s * 0.06 + aimY, z]);
+        if (leadHand) T.lead_hook = cock * (1 - back); else T.rear_hook = cock * (1 - back);
+        T.yaw = lerp(T.yaw, leadHand ? -42 : 34, swing) + s * 12 * load * big;
+        T.twist = lerp(T.twist, leadHand ? -34 : 40, swing) + s * 14 * load * big;
+        T.lean = lerp(T.lean, 12, swing) + (body ? 10 * swing : 0);
+        T.crouch += (body ? 0.08 : 0.02) * swing + 0.02 * load;
+        T.head_turn = (leadHand ? 6 : -8) * swing;
+      } else {
+        const x = clamp((f.aimAlong ?? ctx.gap) - 0.58, 0.40, 0.70);
+        glove = path(leadHand ? lead : rear, [0.30, s * 0.12, 1.18], [x, -s * 0.02 + aimY, 1.64]);
+        T.crouch += 0.07 * cock * (1 - pos) - 0.02 * swing;        // sit down into it, then drive up through the legs
+        T.side_bend += s * 8 * cock * (1 - pos) * big;              // the shoulder dips on the punching side
+        T.yaw = lerp(T.yaw, leadHand ? -16 : 18, swing);
+        T.twist = lerp(T.twist, leadHand ? -14 : 24, swing) + s * 10 * load * big;
+        T.lean = lerp(T.lean, 18, cock * (1 - pos)) - 4 * swing;    // over the front knee, then up and a little back
+        T.nod = lerp(T.nod, 4, swing);
+      }
+      if (leadHand) { lead = glove; rear[2] += 0.04 * swing; } // the other glove stays on the chin
+      else {
+        rear = glove;
+        lead[2] += 0.04 * swing;
+        pivot = Math.max(pivot, swing);
+        heelR = Math.max(heelR, 0.06 * swing);
+      }
+      T.body_x = lerp(T.body_x, 0.06, swing);
+    }
+
+    // duck (1.7): the rules give the real head drop (m); knees and waist bend for it, the gloves stay at the face
+    const drop = clamp(f.headDrop || 0, 0, 0.4);
+    if (drop > 0.002 && this.fall < 0.02) {
+      T.crouch += 0.75 * drop;
+      T.lean += 70 * drop;
+      T.nod += 12 * drop;
+      for (const g of [lead, rear]) { g[2] -= 0.75 * drop; g[0] += 0.06 * drop; }
     }
 
     // a heavy hit knocks the stance back: the rear foot catches the fall, then the lead foot follows

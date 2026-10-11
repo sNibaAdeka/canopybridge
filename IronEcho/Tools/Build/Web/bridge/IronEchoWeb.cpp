@@ -33,10 +33,12 @@ namespace
 		"dodgeEffective", "lean", "x", "y", "faceX", "faceY", "speedForward", "speedSide", "moving", "onRopes", "headOffset", "zone",
 		"aimX", "aimY", "kind", "legSlow", "roundDamage", "totalDamage", "thrown", "landed", "punchesBlocked", "dodgesMade", "blocksMade",
 		"counterHits", "combo", "maxCombo", "knockdowns", "roundKnockdowns", "roundLanded", "roundDefenses", "bodyLanded",
-		"glancingHits", "kicksThrown", "kicksLanded", "elbowsThrown", "elbowsLanded", "kneesThrown", "kneesLanded"};
+		"glancingHits", "kicksThrown", "kicksLanded", "elbowsThrown", "elbowsLanded", "kneesThrown", "kneesLanded",
+		"ducking", "headDrop", "hooksThrown", "hooksLanded", "uppercutsThrown", "uppercutsLanded", "ducksMade"};
 	const char* const kCombatEventFields[] = {
 		"type", "actor", "target", "hand", "dodge", "counter", "tired", "damage", "targetHealthAfter",
-		"targetStaminaAfter", "attackId", "combo", "knockdownNumber", "tick", "zone", "glancing", "smothered", "power", "kind"};
+		"targetStaminaAfter", "attackId", "combo", "knockdownNumber", "tick", "zone", "glancing", "smothered", "power", "kind",
+		"ducked", "throughGuard"};
 	const char* const kMatchEventFields[] = {
 		"type", "phase", "previousPhase", "reason", "method", "hasWinner", "winner", "round", "countdownSeconds",
 		"scorePlayer", "scoreOpponent", "decision", "hasDowned", "downed", "tick"};
@@ -63,8 +65,8 @@ namespace
 	Match* Game = nullptr;
 	IntentMapper Mapper;
 	IntentMapper MapperOpponent; // Versus: the second human
-	// Versus input: per slot [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl]
-	constexpr int32_t kVersusFields = 10;
+	// Versus input: per slot [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl, duck]
+	constexpr int32_t kVersusFields = 11;
 	double VersusIn[2 * kVersusFields];
 	CombatEventBuffer CombatEvents;
 	MatchEventBuffer MatchEvents;
@@ -116,6 +118,8 @@ namespace
 			O[16] = E.bSmothered ? 1.0 : 0.0;
 			O[17] = E.Power;
 			O[18] = static_cast<double>(E.Kind);
+			O[19] = E.bDucked ? 1.0 : 0.0;
+			O[20] = E.bThroughGuard ? 1.0 : 0.0;
 			++CombatOutCount;
 		}
 		CombatEvents.Clear();
@@ -168,7 +172,9 @@ namespace
 			static_cast<double>(F.RoundPunchesLanded), static_cast<double>(F.RoundDefenses),
 			static_cast<double>(F.BodyPunchesLanded), static_cast<double>(F.GlancingHits),
 			static_cast<double>(F.KicksThrown), static_cast<double>(F.KicksLanded),
-			static_cast<double>(F.ElbowsThrown), static_cast<double>(F.ElbowsLanded), static_cast<double>(F.KneesThrown), static_cast<double>(F.KneesLanded)};
+			static_cast<double>(F.ElbowsThrown), static_cast<double>(F.ElbowsLanded), static_cast<double>(F.KneesThrown), static_cast<double>(F.KneesLanded),
+			F.bDucking ? 1.0 : 0.0, F.HeadDrop, static_cast<double>(F.HooksThrown), static_cast<double>(F.HooksLanded),
+			static_cast<double>(F.UppercutsThrown), static_cast<double>(F.UppercutsLanded), static_cast<double>(F.DucksMade)};
 		static_assert(sizeof(Values) / sizeof(Values[0]) == kFighterCount, "fighter layout");
 		for (int32_t Index = 0; Index < kFighterCount; ++Index)
 		{
@@ -289,7 +295,7 @@ namespace
 		W.Enum("phase", 8, [](int32_t I) { return MatchPhaseName(static_cast<MatchPhase>(I)); });
 		W.Enum("state", 7, [](int32_t I) { return ActionStateName(static_cast<ActionState>(I)); });
 		W.Enum("stage", 4, [](int32_t I) { return AttackStageName(static_cast<AttackStage>(I)); });
-		W.Enum("combatEvent", 19, [](int32_t I) { return CombatEventName(static_cast<CombatEventType>(I)); });
+		W.Enum("combatEvent", 21, [](int32_t I) { return CombatEventName(static_cast<CombatEventType>(I)); });
 		W.Enum("matchEvent", 8, [](int32_t I) { return MatchEventName(static_cast<MatchEventType>(I)); });
 		W.Enum("level", 3, [](int32_t I) { return BotLevelName(static_cast<BotLevel>(I)); }, false);
 		W.Raw("}}");
@@ -361,9 +367,30 @@ IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int3
 
 namespace
 {
+	// Hooks and uppercuts (1.7): punch mask bits 6 / 7 = lead / rear hook to the head, 8 / 9 = to the body, 10 / 11 = lead / rear
+	// uppercut.
+	void AddHooksAndUppercuts(InputFrame& Frame, int32_t PunchMask, float Confidence)
+	{
+		for (int32_t Bit = 6; Bit < 12; ++Bit)
+		{
+			if ((PunchMask & (1 << Bit)) == 0)
+			{
+				continue;
+			}
+			PunchIntent Strike;
+			Strike.PunchHand = Bit % 2 == 0 ? Hand::Left : Hand::Right;
+			Strike.Kind = Bit >= 10 ? AttackKind::Uppercut : AttackKind::Hook;
+			Strike.Zone = (Bit == 8 || Bit == 9) ? PunchZone::Body : PunchZone::Head;
+			Strike.Strength = 1.0f;
+			Strike.Confidence = Confidence;
+			Frame.AddPunch(Strike);
+		}
+	}
+
 	// Close range (1.6): bits 4 / 5 of the punch mask are the lead / rear elbow, of the kick mask the lead / rear knee.
 	void AddCloseRange(InputFrame& Frame, int32_t PunchMask, int32_t KickMask, float Confidence)
 	{
+		AddHooksAndUppercuts(Frame, PunchMask, Confidence);
 		for (int32_t Bit = 4; Bit < 6; ++Bit)
 		{
 			for (const bool bKnee : {false, true})
@@ -386,11 +413,12 @@ namespace
 
 // One render frame of input. Status: TrackingStatus (7 = Live). Lean/Block as in InputFrame (calibrated units).
 // PunchMask: bit 0 = left (jab), bit 1 = right (cross), bit 2 = left to the body, bit 3 = right to the body,
-// bit 4 = lead elbow, bit 5 = rear elbow (1.6); each set bit is one new strike this frame. KickMask: bit 0 = lead-leg kick
+// bit 4 = lead elbow, bit 5 = rear elbow (1.6), bits 6 / 7 = lead / rear hook, 8 / 9 = lead / rear hook to the body, 10 / 11 = lead /
+// rear uppercut (1.7); each set bit is one new strike this frame. KickMask: bit 0 = lead-leg kick
 // to the body, 1 = rear-leg kick to the body, 2 = lead-leg low kick, 3 = rear-leg low kick, 4 = lead knee, 5 = rear knee (1.6). MoveForward / MoveLateral: InputFrame footwork (-1..1; 0, 0 = the
-// camera's lean steps). Returns the number of 120 Hz ticks simulated.
+// camera's lean steps). DuckAmount: InputFrame.DuckAmount (0..1, 1.7). Returns the number of 120 Hz ticks simulated.
 IE_EXPORT(ie_frame) int32_t ie_frame(double DeltaSeconds, int32_t Status, double Confidence, double LeanLateral, double LeanForward,
-	double BlockAmount, int32_t PunchMask, double PunchConfidence, double MoveForward, double MoveLateral, int32_t KickMask)
+	double BlockAmount, int32_t PunchMask, double PunchConfidence, double MoveForward, double MoveLateral, int32_t KickMask, double DuckAmount)
 {
 	if (Game == nullptr)
 	{
@@ -404,6 +432,7 @@ IE_EXPORT(ie_frame) int32_t ie_frame(double DeltaSeconds, int32_t Status, double
 	Frame.BlockAmount = static_cast<float>(BlockAmount);
 	Frame.MoveForward = static_cast<float>(MoveForward);
 	Frame.MoveLateral = static_cast<float>(MoveLateral);
+	Frame.DuckAmount = static_cast<float>(DuckAmount);
 	for (int32_t Bit = 0; Bit < 4; ++Bit)
 	{
 		if ((PunchMask & (1 << Bit)) != 0)
@@ -474,6 +503,7 @@ namespace
 		Frame.BlockAmount = static_cast<float>(In[4]);
 		Frame.MoveForward = static_cast<float>(In[7]);
 		Frame.MoveLateral = static_cast<float>(In[8]);
+		Frame.DuckAmount = static_cast<float>(In[10]);
 		const int32_t Punches = static_cast<int32_t>(In[5]);
 		const int32_t Kicks = static_cast<int32_t>(In[6]);
 		for (int32_t Bit = 0; Bit < 4; ++Bit)

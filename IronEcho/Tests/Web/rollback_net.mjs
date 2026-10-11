@@ -24,14 +24,15 @@ function rng(seed) { let s = seed >>> 0; return () => { s = (Math.imul(s, 166452
 function scripted(slot, f) {
   const r = rng(f * 7919 + slot * 104729 + 17);
   const t = f / 60;
-  const punch = r() < 0.07 ? [1, 2, 4, 8][(r() * 4) | 0] : 0;
+  const punch = r() < 0.07 ? [1, 2, 4, 8, 64, 128, 256, 512, 1024, 2048][(r() * 10) | 0] : 0; // straights, hooks, uppercuts (1.7)
   const kick = r() < 0.02 ? [1, 2, 4, 8][(r() * 4) | 0] : 0;
   const block = Math.sin(t * (slot ? 1.3 : 0.9) + slot) > 0.55 ? 1 : 0;
   const lean = Math.round(Math.sin(t * 2.1 + slot * 2) * 40) / 100;
   const fwd = Math.sin(t * 0.6 + slot) > 0.2 ? 1 : (Math.sin(t * 0.6 + slot) < -0.6 ? -1 : 0);
-  return [7, 1, lean, 0, block, punch, kick, fwd, Math.round(Math.cos(t * 0.5) * 50) / 100, 0];
+  const duck = Math.sin(t * 1.7 + slot * 3) > 0.8 ? 1 : 0;
+  return [7, 1, lean, 0, block, punch, kick, fwd, Math.round(Math.cos(t * 0.5) * 50) / 100, 0, duck];
 }
-const NEUTRAL = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const NEUTRAL = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // 11 fields since 1.7 (duck last)
 
 // ---- a pair of rooms joined by a simulated, ordered, reliable network
 class Net {

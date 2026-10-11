@@ -65,9 +65,10 @@ export class Core {
     this.recorder = null; // a BoutRecorder (replay.js) set after init records every call below for the rating server
   }
 
-  // input: { status, lean, leanForward, block, punchMask, confidence, moveForward, moveSide }
-  // punchMask bits: 1 jab, 2 cross, 4 jab to the body, 8 cross to the body.
-  // kickMask bits: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick.
+  // input: { status, lean, leanForward, block, duck, punchMask, confidence, moveForward, moveSide }
+  // punchMask bits: 1 jab, 2 cross, 4 jab to the body, 8 cross to the body, 16 / 32 lead / rear elbow, 64 / 128 lead / rear hook,
+  // 256 / 512 lead / rear hook to the body, 1024 / 2048 lead / rear uppercut. duck: 0..1 (1 = a full duck).
+  // kickMask bits: 1 lead-leg mid kick, 2 rear-leg mid kick, 4 lead-leg low kick, 8 rear-leg low kick, 16 / 32 lead / rear knee.
   // Every call is quantised first (replay.js: dt in 1/8192 s, analogue inputs in 1/1000), so that a recording replays to the very same bout.
   frame(dt, input) {
     const q = quantizeFrame(dt, input);
@@ -76,16 +77,16 @@ export class Core {
   }
 
   rawFrame(a) {
-    return this.ex.ie_frame(a.dt, a.status, a.confidence, a.lean, a.leanForward, a.block, a.punchMask, 1.0, a.moveForward, a.moveSide, a.kickMask);
+    return this.ex.ie_frame(a.dt, a.status, a.confidence, a.lean, a.leanForward, a.block, a.punchMask, 1.0, a.moveForward, a.moveSide, a.kickMask, a.duck);
   }
 
   ringHalfSize() { return this.ex.ie_ring_half_size ? this.ex.ie_ring_half_size() : 2.95; }
 
   // Versus (online duel): one lockstep frame = two exact 120 Hz ticks with both players' inputs
-  // [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl].
+  // [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl, duck].
   versusStep(a, b) {
-    const v = new Float64Array(this.ex.memory.buffer, this.ex.ie_versus_input(), 20);
-    for (let i = 0; i < 10; i++) { v[i] = a[i] ?? 0; v[10 + i] = b[i] ?? 0; }
+    const v = new Float64Array(this.ex.memory.buffer, this.ex.ie_versus_input(), 22);
+    for (let i = 0; i < 11; i++) { v[i] = a[i] ?? 0; v[11 + i] = b[i] ?? 0; }
     return this.ex.ie_versus_step(2);
   }
 

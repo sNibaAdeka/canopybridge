@@ -28,6 +28,8 @@ namespace IronEchoCore
 		InputDropped,       // buffered punch expired
 		KnockedDown,        // health reached 0: down for the count (1.1)
 		GotUp,              // beat the count (1.1)
+		DuckStarted,        // 1.7
+		DuckEnded,
 	};
 
 	const char* CombatEventName(CombatEventType Type);
@@ -38,13 +40,15 @@ namespace IronEchoCore
 		FighterSlot Actor = FighterSlot::Player;   // contact events (Hit/Blocked/GuardBroken/Dodged/Whiffed): attacker; own-action events: the fighter itself
 		FighterSlot Target = FighterSlot::Opponent; // contact events: defender (draw impacts/reactions on Target)
 		Hand AttackHand = Hand::Left;
-		DodgeDir Dodge = DodgeDir::None;
+		DodgeDir Dodge = DodgeDir::None;            // Dodged / HitConfirmed: the defender's slip; DodgeStarted / Ended: the fighter's own
 		bool bCounterHit = false;
 		bool bTired = false;
 		PunchZone Zone = PunchZone::Head; // attack events: where it was aimed (1.2)
 		AttackKind Kind = AttackKind::Punch; // attack events: hand or leg (1.4)
 		bool bGlancing = false;           // contact events: the glove only grazed the target (1.2)
 		bool bSmothered = false;          // contact events: too close, arm not extended (1.2)
+		bool bDucked = false;             // Dodged: the punch went over the defender's ducked head (1.7)
+		bool bThroughGuard = false;       // HitConfirmed: an uppercut that came up between the raised gloves (1.7)
 		float Power = 1.0f;               // contact events: fraction of the punch's full damage that landed (1.2)
 		float Damage = 0.0f;
 		float TargetHealthAfter = 0.0f;

@@ -57,6 +57,8 @@ namespace IronEchoCore
 			bool bCounter = false;
 			bool bGlancing = false;
 			bool bSmothered = false;
+			bool bDucked = false;
+			bool bThroughGuard = false;
 			float Power = 1.0f;
 		};
 
@@ -74,5 +76,6 @@ namespace IronEchoCore
 		bool bAssistBoth = false;
 		uint32_t AimedAttackId[2] = {0, 0};
 		float AimSlip[2] = {0.0f, 0.0f}; // how much of the target's head slip the aim has followed so far
+		float AimDrop[2] = {0.0f, 0.0f}; // how much of the target's duck the aim has followed so far (1.7)
 	};
 }

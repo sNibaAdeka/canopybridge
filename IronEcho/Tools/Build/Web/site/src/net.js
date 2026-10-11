@@ -15,8 +15,9 @@ const NET_FRAME = 1 / 60; // one lockstep frame = two 120 Hz core ticks
 const NET_HASH_EVERY = 120;
 // An input as both machines must see it: JSON turns -0 into 0 and NaN / Infinity into null on the way over, which would give the
 // two cores different bits for the same input (a false "desync"). Whatever is sampled is cleaned first, then sent and used.
-const netCleanInput = (d) => { const o = new Array(10); for (let i = 0; i < 10; i++) { const v = Number(d[i]); o[i] = Number.isFinite(v) && v !== 0 ? v : 0; } return o; };
-const NET_NEUTRAL = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // status 0 (not ready): what both sides assume before the first frame
+const NET_FIELDS = 11; // [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl, duck]
+const netCleanInput = (d) => { const o = new Array(NET_FIELDS); for (let i = 0; i < NET_FIELDS; i++) { const v = Number(d[i]); o[i] = Number.isFinite(v) && v !== 0 ? v : 0; } return o; };
+const NET_NEUTRAL = new Array(NET_FIELDS).fill(0); // status 0 (not ready): what both sides assume before the first frame
 
 function netLoadPeerJS() {
   if (globalThis.Peer) return Promise.resolve(globalThis.Peer);
@@ -222,8 +223,8 @@ export class NetRoom {
   }
 }
 
-// The lockstep engine. `sample()` returns this machine's input as 10 numbers
-// [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl];
+// The lockstep engine. `sample()` returns this machine's input as 11 numbers
+// [status, confidence, lean, leanForward, block, punchMask, kickMask, moveForward, moveSide, ctl, duck];
 // ctl bits: 1 pause, 2 resume, 4 rematch.
 export class NetLockstep {
   constructor({ core, room, slot, delay, sample, onDesync }) {
@@ -326,7 +327,7 @@ export function netChooseRollbackDelay(rttMs) {
 const NET_WINDOW = 8;      // frames the machine may play on a guess of the opponent's input before it waits for him
 const NET_SLOTS = 32;      // saved states (a ring; the window is far smaller)
 const NET_SYNC_DEAD = 1.5; // frames of lead over the opponent's clock that are tolerated before the clock is slowed a little
-const sameInput = (a, b) => { for (let i = 0; i < 10; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return false; return true; };
+const sameInput = (a, b) => { for (let i = 0; i < NET_FIELDS; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return false; return true; };
 
 // Deterministic rollback engine. Same surface as NetLockstep (update, frame, stalled, delay, hashes, ping) plus takeEvents().
 //  - frame = the next lockstep frame to simulate (2 core ticks). Frames < remoteNext have both real inputs.

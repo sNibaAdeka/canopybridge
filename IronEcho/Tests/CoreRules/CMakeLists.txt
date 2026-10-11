@@ -40,6 +40,7 @@ add_executable(CoreRulesTests
   TestMatch.cpp
   TestBot.cpp
   TestCloseRange.cpp
+  TestBoxingDepth.cpp
   TestBalance.cpp)
 target_link_libraries(CoreRulesTests PRIVATE IronEchoRulesCore)
 target_compile_definitions(CoreRulesTests PRIVATE IRONECHO_GOLDEN_DIR="${GOLDEN_DIR}")
