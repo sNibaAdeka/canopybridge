@@ -44,7 +44,8 @@ const STRIKE_CFG = { window: 0.30, minInterval: 0.35, minVisibility: 0.5, gapRes
   // an elbow strike is confirmed this long after it fires, unless the arm opened meanwhile (then it was the cocking of a hook)
   elbowConfirm: 0.10, elbowMaxOpen: 0.62, elbowMinAsym: 0.05,
   // a straight that fires while the glove swings OUT this fast relative to forward (or up to cockHold after) is the cocking of a hook
-  cockOut: 1.0, cockMinSpeed: 1.0, cockTravel: 0.12, cockHold: 0.15,
+  // (a straight never leaves the shoulder line: cockOutside, in arm lengths across the body, keeps depth-noise from being taken for a swing)
+  cockOut: 1.0, cockMinSpeed: 1.0, cockTravel: 0.12, cockOutside: 0.05, cockHold: 0.15,
   // a hand coming back to the guard from any strike rises too: an uppercut needs this long since the same hand's last strike
   upAfterStrike: 0.7 };
 // Duck (web, 1.7): how far the head has dropped. Best seen in the image (the world landmarks are centred on the hips, which go down
@@ -54,7 +55,14 @@ const STRIKE_CFG = { window: 0.30, minInterval: 0.35, minVisibility: 0.5, gapRes
 const DUCK_CFG = { fullTorso: 0.5, fullMetres: 0.25, followBelow: 0.35, followSeconds: 6 };
 // Personal block: the calibrated block pose (wrists relative to the head) against the neutral guard.
 const BLOCK_CAL = { minRise: 0.07, holdSeconds: 0.7, waitSeconds: 10, minDelta: 0.07 };
-const KEY_POINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24];
+// Does the camera see the player? The head, shoulders, elbows and wrists decide. The hips are NOT required (1.7.1): a webcam on a desk
+// rarely shows them, MediaPipe's world coordinates are centred on the (estimated) hips anyway, and a body that is "not seen" because
+// of its hips used to stall the calibration and pause the fight. The legs are judged on their own (kicks and knees need them only).
+const KEY_POINTS = [0, 11, 12, 13, 14, 15, 16];
+const PART_NAMES = [[[0], 'голова'], [[11, 12], 'плечи'], [[13, 14], 'локти'], [[15, 16], 'кисти']];
+// A frame or two without a pose (the model blinks all the time) or with a doubtful one does not end tracking: the last state is
+// kept and nothing is detected until the pose is lost for this long.
+const LOSS_HOLD = 0.35;
 const SHOULDER_I = [P.LS, P.RS];
 const ELBOW_I = [P.LE, P.RE];
 const WRIST_I = [P.LW, P.RW];
@@ -100,7 +108,9 @@ function bodyPose(world, t) {
   const mid = (a, b) => scale(add(p[a], p[b]), 0.5);
   return {
     t, p, vis,
-    hipMid: () => mid(P.LH, P.RH),
+    // MediaPipe's world landmarks are centred on the hips (the origin IS the hip midpoint). When the hips are not in the frame their
+    // reported positions are a guess that jitters; the origin itself is the steadier answer (a body "standing still" stayed unstable).
+    hipMid: () => (vis[P.LH] < 0.5 && vis[P.RH] < 0.5 ? [0, 0, 0] : mid(P.LH, P.RH)),
     shoulderMid: () => mid(P.LS, P.RS),
     head: () => scale(add(add(p[P.NOSE], p[P.LEAR]), p[P.REAR]), 1 / 3),
     armLength: (side) => norm(sub(p[ELBOW_I[side]], p[SHOULDER_I[side]])) + norm(sub(p[WRIST_I[side]], p[ELBOW_I[side]])),
@@ -158,7 +168,10 @@ class PunchDetector {
     const windowMin = Math.min(...this.history.filter((s) => t - s[0] <= c.progressWindow).map((s) => s[1]));
     // a punch is a rise over consecutive frames; one frame of depth noise jumps and falls back
     const n = this.history.length;
-    const rising = this.history[n - 1][1] > this.history[n - 2][1] && this.history[n - 2][1] > this.history[n - 3][1];
+    // Two rising steps in a row (one frame of depth noise jumps and falls back). On a slow pose stream (under ~22 frames a second) a
+    // fast punch gives only two frames of rise, so there the last step plus the progress over the window is what counts.
+    const slow = t - this.history[n - 2][0] > 0.045 && this.history[n - 1][0] - this.history[n - 3][0] > 0.09;
+    const rising = this.history[n - 1][1] > this.history[n - 2][1] && (slow || this.history[n - 2][1] > this.history[n - 3][1]);
     if (rising && extVel >= L.extVel && fwdVel >= L.fwdVel && extension >= guardExtension + L.above
       && extension - windowMin >= L.progress) {
       this.armed = false;
@@ -278,6 +291,7 @@ class HandStrikeDetector {
     this.dip = guardUp - minUp;
     this.otherUp = otherUp;
     this.t = t;
+    this.inward = rel[1]; // + = across the body, - = outside the shoulder line
     if (this._swingingOut()) this.cockAt = t;
     if (t - this.firedAt < c.minInterval) return null;
     const kind = this.shape();
@@ -299,9 +313,35 @@ class HandStrikeDetector {
   // the glove swinging out to the side right now (the cocking of a hook): only the motion itself, never the remembered cockAt
   _swingingOut() {
     const c = STRIKE_CFG;
-    return -this.v[1] >= Math.max(c.cockMinSpeed, c.cockOut * this.v[0]) && this.outTravel >= c.cockTravel;
+    return -this.v[1] >= Math.max(c.cockMinSpeed, c.cockOut * this.v[0]) && this.outTravel >= c.cockTravel && this.inward < c.cockOutside;
   }
 }
+
+// Knee strike when the feet are out of the frame (1.7.1): only the knee is seen, so a fast rise of the knee is all there is to go on.
+// (A kick lifts the knee as well; it needs the ankle to be told apart, and without the ankle there is no kick to tell.)
+KickDetector.prototype.updateKneeOnly = function updateKneeOnly(t, rise, visibility) {
+  const c = KICK_CFG;
+  if (visibility < c.minVisibility || !Number.isFinite(rise)) { this.reset(); return null; }
+  this.history.push([t, 0, rise]);
+  while (this.history.length && t - this.history[0][0] > 0.4) this.history.shift();
+  if (this.pending) {
+    const p = this.pending;
+    p.rise = Math.max(p.rise, rise);
+    if (t - p.t0 >= c.kneeSettle) { this.pending = null; return p.rise >= c.kneeMinRise ? 'knee' : null; }
+    return null;
+  }
+  if (!this.armed) { if (rise < c.rearm) this.armed = true; return null; }
+  if (this.history.length < 3 || t - this.firedAt < c.minInterval) return null;
+  const ref = this.history.find((s) => t - s[0] <= 0.12 && s[0] < t) || this.history[this.history.length - 2];
+  const dt = t - ref[0];
+  if (dt <= 1e-4) return null;
+  if (rise >= c.kneeLift && (rise - ref[2]) / dt >= c.kneeSpeed) {
+    this.armed = false;
+    this.firedAt = t;
+    this.pending = { t0: t, peak: 0, top: rise, rise, lift: 0, ahead: 1 };
+  }
+  return null;
+};
 
 class ElbowDetector {
   constructor(side) { this.side = side; this.reset(); this.firedAt = -1e9; }
@@ -355,6 +395,7 @@ export class PoseProcessor {
     this.lastOther = [-1e9, -1e9]; // when each hand last threw a hook, an uppercut or an elbow (no straight right after one)
     this.lastElbow = [-1e9, -1e9];
     this.pendingElbow = [null, null]; // { t, open }: an elbow strike waiting to be told from a hook (1.7)
+    this.lastSeen = undefined; // the last frame with a good pose (loss hold)
     this.duck = 0;
     this.ducks = [];          // [t] each time the duck goes past 0.6 (tests)
     this.elbowDetectors = [new ElbowDetector(0), new ElbowDetector(1)];
@@ -385,10 +426,11 @@ export class PoseProcessor {
   // image (optional): the same frame's image landmarks ({x, y} normalised); they show a duck best.
   process(world, t, image = null) {
     if (!world) {
+      if (this._holding(t)) return;
       this.status = this.cal ? 3 : 6; // NoPerson
       this.confidence = 0;
       this._resetMotion();
-      if (!this.cal) this._say('Не вижу тебя', 0, 'Встань в кадр целиком: голова, руки, бёдра.');
+      if (!this.cal) this._say('Не вижу тебя', 0, 'Встань в кадр: голова, плечи, руки. Больше света, без окна за спиной.');
       return;
     }
     const pose = bodyPose(world, t);
@@ -399,10 +441,12 @@ export class PoseProcessor {
       if (!this.cal) return; // like the tracker, the frame that completes calibration is already processed live
     }
     if (this.confidence < MIN_CONFIDENCE) {
+      if (this._holding(t)) return;
       this.status = 4; // LowConfidence
       this._resetMotion();
       return;
     }
+    this.lastSeen = t;
     this.status = 7; // Live
     const c = this.cal;
     const head = pose.head();
@@ -492,6 +536,11 @@ export class PoseProcessor {
     this.lastOther[side] = t;
   }
 
+  // True while a short loss of the pose is being bridged (the player was Live a moment ago).
+  _holding(t) {
+    return !!this.cal && this.status === 7 && this.lastSeen !== undefined && t - this.lastSeen < LOSS_HOLD;
+  }
+
   // 0 = standing, 1 = a full duck (the head about a quarter of a metre lower).
   _duck(pose, head, hips) {
     const c = this.cal;
@@ -531,7 +580,9 @@ export class PoseProcessor {
     const lifts = [0, 1].map((s) => (pose.p[ANKLE_I[s]][2] - hip[2]) - this.cal.legBase[s]);
     const rises = [0, 1].map((s) => (close ? (pose.p[KNEE_I[s]][2] - hip[2]) - this.cal.kneeBase[s] : 0));
     for (const side of [0, 1]) {
-      const vis = Math.min(pose.vis[ANKLE_I[side]], pose.vis[KNEE_I[side]], pose.vis[HIP_I[side]]);
+      // the hip is not required (1.7.1): a desk webcam hardly ever shows it, and the hip height is the model's own estimate anyway
+      const kneeVis = pose.vis[KNEE_I[side]];
+      const vis = Math.min(pose.vis[ANKLE_I[side]], kneeVis);
       seen += vis;
       // A kick lifts one leg; a duck (1.7) bends both knees, and in the hip-centred world both feet come up together. What both legs
       // share (beyond the standing leg's own small dip) is the body going down, not a leg strike.
@@ -542,7 +593,9 @@ export class PoseProcessor {
       const kneeP = pose.p[KNEE_I[side]];
       const ankleP = pose.p[ANKLE_I[side]];
       const ahead = close ? (ankleP[0] - kneeP[0]) + 0.6 * Math.abs(ankleP[1] - kneeP[1]) : null;
-      const kind = this.kickDetectors[side].update(t, lift, vis, rise, ahead);
+      let kind;
+      if (vis < KICK_CFG.minVisibility && close && kneeVis >= KICK_CFG.minVisibility) kind = this.kickDetectors[side].updateKneeOnly(t, rise, kneeVis);
+      else kind = this.kickDetectors[side].update(t, lift, vis, rise, ahead);
       if (kind) {
         // 1 / 2 mid kick, 4 / 8 low kick, 16 / 32 knee: lead (left) / rear (right)
         this.kickMask |= (kind === 'mid' ? 1 : kind === 'low' ? 4 : 16) << side;
@@ -588,7 +641,12 @@ export class PoseProcessor {
     this.status = 6;
     const visible = this.confidence >= CAL_CFG.minVisibility;
     if (this.step === 'neutral') {
-      if (!visible) { this.window = []; this._say(STEPS.neutral, 0, 'Нужно видеть голову, плечи, локти, кисти и бёдра.'); return; }
+      if (!visible) {
+        this.window = [];
+        const missing = PART_NAMES.filter(([idx]) => idx.some((i) => pose.vis[i] < 0.5)).map(([, name]) => name);
+        this._say(STEPS.neutral, 0, `Нужно видеть голову, плечи, локти и кисти${missing.length ? `. Не видно: ${missing.join(', ')}` : ''}. Встань в кадр по центру, добавь света.`);
+        return;
+      }
       this.window.push(pose);
       while (this.window.length && pose.t - this.window[0].t > CAL_CFG.neutralSeconds) this.window.shift();
       const heads = this.window.map((q) => sub(q.head(), q.hipMid()));
@@ -606,6 +664,9 @@ export class PoseProcessor {
         this.kneeBase = [0, 1].map((s) => median(this.neutral.map((q) => q.p[KNEE_I[s]][2] - q.hipMid()[2])));
         this.legLen = [0, 1].map((s) => median(this.neutral.map((q) => norm(sub(q.p[KNEE_I[s]], q.p[HIP_I[s]])) + norm(sub(q.p[ANKLE_I[s]], q.p[KNEE_I[s]])))));
         this.elbowBase = [0, 1].map((s) => median(this.neutral.map((q) => q.p[ELBOW_I[s]][2] - q.p[SHOULDER_I[s]][2])));
+        // how much of the legs the camera sees: both knees, both ankles (0..1)
+        this.kneesSeen = median(this.neutral.map((q) => Math.min(q.vis[KNEE_I[0]], q.vis[KNEE_I[1]])));
+        this.anklesSeen = median(this.neutral.map((q) => Math.min(q.vis[ANKLE_I[0]], q.vis[ANKLE_I[1]])));
         const imgs = this.neutral.filter((q) => q.img);
         this.neutralImg = imgs.length >= 3 ? { headY: median(imgs.map((q) => q.img.headY)), torso: median(imgs.map((q) => q.img.torso)) } : null;
         this.holdStart = null;
@@ -764,6 +825,8 @@ export class PoseProcessor {
       kneeBase: this.kneeBase,
       legLen: this.legLen,
       elbowBase: this.elbowBase,
+      kneesSeen: this.kneesSeen,
+      anklesSeen: this.anklesSeen,
       // 1.7: the guard's wrist height over its own shoulder (arm lengths), the head over the hips (m), the stance in the image
       guardUp: [0, 1].map((s) => median(ps.map((q) => (q.p[WRIST_I[s]][2] - q.p[SHOULDER_I[s]][2]) / arm[s]))),
       headUp: median(ps.map((q) => q.head()[2] - q.hipMid()[2])),
@@ -774,8 +837,10 @@ export class PoseProcessor {
     };
     this.detectors.forEach((d, s) => d.setLimits(this.cal.punchLimits[s]));
     this._resetMotion();
-    this._say('Готово! Бой начинается', 100, 'Прямой — резко к экрану (ниже плеч — в корпус). Хук — дугой сбоку, локоть вверх. Апперкот — снизу вверх под подбородок. Нырок — присесть, голову вниз. Вплотную: локоть, колено. Блок — руки к лицу. Уклон — голову в сторону. Наклон к экрану — шаг вперёд.');
-    setTimeout(() => this._say(''), 2600);
+    const legsNote = this.kneesSeen < 0.5 ? ' Ног не видно: колени и удары ногами выключены (отойди дальше, чтобы были видны колени и стопы).'
+      : this.anklesSeen < 0.5 ? ' Стоп не видно: колени работают, удары ногами выключены.' : '';
+    this._say('Готово! Бой начинается', 100, `Прямой — резко к экрану (ниже плеч — в корпус). Хук — дугой сбоку, локоть вверх. Апперкот — снизу вверх под подбородок. Нырок — присесть, голову вниз. Вплотную: локоть, колено. Блок — руки к лицу. Уклон — голову в сторону. Наклон к экрану — шаг вперёд.${legsNote}`);
+    setTimeout(() => this._say(''), legsNote ? 6000 : 2600);
   }
 
   poll() {
@@ -813,7 +878,8 @@ class PoseTap {
     v.muted = true;
     v.playsInline = true;
     try { await v.play(); } catch { /* the first frame event starts it */ }
-    if (!this.detector) this.detector = await this.host._makeDetector();
+    // the phone's detector always runs the plain model: with "high accuracy" (3x slower) two detectors starve the game of the GPU
+    if (!this.detector) this.detector = await this.host._makeDetector('full');
     if (this.active) return;
     this.active = true;
     const loop = (now, meta) => {
@@ -1006,7 +1072,7 @@ export class CameraInput {
 
   async _makeLandmarker(model = this.model) {
     const options = (delegate) => ({ baseOptions: { modelAssetPath: MODELS[model], delegate }, runningMode: 'VIDEO', numPoses: 1,
-      minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.4 });
+      minPoseDetectionConfidence: 0.35, minPosePresenceConfidence: 0.3, minTrackingConfidence: 0.3 });
     try {
       return await this.vision.PoseLandmarker.createFromOptions(this.fileset, options('GPU'));
     } catch {
@@ -1279,21 +1345,21 @@ export class CameraInput {
       tip = 'Тебя не видно: встань в кадр целиком, включи свет';
     } else {
       const vis = (i) => lm[i].visibility ?? 1;
-      const keys = [0, 11, 12, 13, 14, 15, 16, 23, 24];
-      const mean = keys.reduce((a, i) => a + vis(i), 0) / keys.length;
+      const mean = KEY_POINTS.reduce((a, i) => a + vis(i), 0) / KEY_POINTS.length;
       const ys = lm.filter((l) => (l.visibility ?? 1) > 0.5).map((l) => l.y);
       const xs = lm.filter((l) => (l.visibility ?? 1) > 0.5).map((l) => l.x);
       const height = ys.length ? Math.max(...ys) - Math.min(...ys) : 0;
-      const hipsSeen = vis(23) > 0.5 && vis(24) > 0.5;
       const wristsSeen = vis(15) > 0.5 && vis(16) > 0.5;
+      const kneesSeen = vis(25) > 0.5 && vis(26) > 0.5;
+      const anklesSeen = vis(27) > 0.5 && vis(28) > 0.5;
       if (mean < 0.5) { level = 'bad'; tip = 'Плохо видно: больше света, без окна за спиной'; }
-      else if (!hipsSeen) { level = 'warn'; tip = 'Отойди дальше: в кадре нужны бёдра'; }
       else if (!wristsSeen) { level = 'warn'; tip = 'Кисти выпали из кадра: отойди или встань по центру'; }
       else if (height < 0.42) { level = 'warn'; tip = 'Подойди ближе: ты слишком мелкий в кадре'; }
       else if (xs.length && (Math.min(...xs) < 0.04 || Math.max(...xs) > 0.96)) { level = 'warn'; tip = 'Встань по центру кадра'; }
       else if (mean < 0.7) { level = 'warn'; tip = 'Видимость средняя: добавь света'; }
       else if (inferMs > 45) { level = 'warn'; tip = `Трекер тормозит (${Math.round(inferMs)} мс): выбери «Обычная» точность`; }
-      else if (!this.proc.legsVisible && this.proc.cal) { tip = 'Ноги не видны: удары ногами выключены (отойди на 3 м)'; }
+      else if (!kneesSeen && this.proc.cal) { tip = 'Ног не видно: колени и удары ногами выключены (отойди дальше)'; }
+      else if (!anklesSeen && this.proc.cal) { tip = 'Стоп не видно: удары ногами выключены, колени работают'; }
     }
     return { level, tip };
   }
@@ -1309,7 +1375,10 @@ export class CameraInput {
     }
     this.quality = { level, tip };
     this.qbox.className = `cam-q ${level}`;
-    this.qbox.querySelector('span').textContent = tip;
+    // the numbers that decide whether the camera can be played with: frames a second the game really gets, ms per detection, where it runs
+    const mode = this.detector ? `${this.detector.mode === 'worker' ? this.detector.delegate : 'основной поток'}` : '';
+    const fps = this.fps ? ` · ${Math.round(this.fps)} к/с · ${Math.round(this.inferMs)} мс${mode ? ' · ' + mode : ''}` : '';
+    this.qbox.querySelector('span').textContent = tip + fps;
   }
 
   _process(captureTime) {

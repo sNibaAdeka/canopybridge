@@ -245,6 +245,10 @@ namespace IronEchoCore
 			{
 				Recovery += IsLegStrike(Snap.AttackType) ? Config.KickWhiffPenaltyTicks : Config.WhiffPenaltyTicks;
 			}
+			if (bLunged)
+			{
+				Recovery += Config.LungeRecoveryTicks; // overextended: the step in has to be walked back
+			}
 			Snap.Stage = AttackStage::Recovery;
 			Snap.StageTicksTotal = Recovery;
 			Snap.StageTicksLeft = Recovery;
@@ -329,6 +333,7 @@ namespace IronEchoCore
 		Snap.AttackId = NextAttackId++;
 		Snap.bAttackResolved = false;
 		Snap.bAttackTired = bTired;
+		bLunged = false;
 		int32_t Windup = Spec.WindupTicks;
 		if (bTired)
 		{

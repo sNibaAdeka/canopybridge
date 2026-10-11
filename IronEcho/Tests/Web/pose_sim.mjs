@@ -6,6 +6,9 @@
 //  - occlusion: a forearm pointing at the camera hides the elbow behind the glove; MediaPipe then reports the elbow with low visibility
 //    and a wandering position;
 //  - noise: a few mm side to side, centimetres in depth; 30 frames per second with timestamp jitter and dropped frames.
+//  - view: what is in the frame. 'full' (all of it), 'upper' (a webcam on a desk: the hips and legs are out of the frame, MediaPipe still
+//    reports positions for them but with a low visibility and a wandering position), 'kneesOnly' (the feet are cut off: knees seen, ankles not).
+//  - flicker: the model loses the person for a frame now and then (and for three frames in a row now and then): `world` is null.
 // Each frame also carries the image landmarks (normalised x, y as PoseLandmarker's `landmarks`): a pinhole camera 2.3 m in front of
 // the hips at chest height. The image is what a duck shows best (the whole body goes down; the world landmarks are centred on the hips).
 //
@@ -103,6 +106,7 @@ export function* stream(script, faults = {}) {
   const r = rng(f.seed);
   const gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += r(); return (u - 3) / 0.7071; };
   const fid = [[0, 0, 0], [0, 0, 0]];
+  let burst = 0;
   const frames = Math.ceil(script.duration * f.fps) + 1;
   for (let i = 0; i < frames; i++) {
     const t = i / f.fps;
@@ -110,6 +114,10 @@ export function* stream(script, faults = {}) {
     if (script.fidgetAmount) for (const s of [0, 1]) for (let k = 0; k < 3; k++) fid[s][k] = 0.92 * fid[s][k] + 0.08 * script.fidgetAmount * 2.2 * gauss();
     if (f.drop && r() < f.drop) continue;
     const ts = f.start + t + (f.jitterMs ? (r() - 0.5) * 2 * f.jitterMs / 1000 : 0);
+    if (f.flicker) {
+      if (burst > 0) { burst--; yield { t: ts, world: null, image: null }; continue; }
+      if (r() < f.flicker) { burst = r() < 0.25 ? 2 : 0; yield { t: ts, world: null, image: null }; continue; }
+    }
     const fr = frame(script, t, f, gauss, fid);
     yield { t: ts, world: fr.world, image: fr.image };
   }
@@ -202,6 +210,11 @@ function frame(script, t, f, gauss, fid) {
     P[17 + side] = add(add(wrist, mul(u, 0.07)), [0, sy * 0.02, 0]);
     P[19 + side] = add(wrist, mul(u, 0.08));
     P[21 + side] = add(add(wrist, mul(u, 0.05)), [0, -sy * 0.02, 0]);
+  }
+  // ---- what is in the frame ----
+  if (f.view === 'upper' || f.view === 'kneesOnly') {
+    const hidden = f.view === 'upper' ? [23, 24, 25, 26, 27, 28, 29, 30, 31, 32] : [23, 24, 27, 28, 29, 30, 31, 32];
+    for (const i of hidden) { vis[i] = 0.05 + 0.1 * gauss() ** 2 * 0.2; P[i] = add(P[i], [gauss() * 0.04, gauss() * 0.04, gauss() * 0.06]); }
   }
   // ---- MediaPipe faults ----
   if (f.depth !== 1) {

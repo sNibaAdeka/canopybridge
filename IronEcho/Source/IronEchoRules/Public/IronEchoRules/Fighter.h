@@ -190,6 +190,8 @@ namespace IronEchoCore
 		}
 		void ClearRoundStats();
 		void NoteDodge(bool bDucked = false);
+		// The current elbow / knee stepped in (CombatSim): the recovery will be longer.
+		void NoteLunge() { bLunged = true; }
 
 		// Knockdown resolution (driven by Match).
 		void GetUp(int32_t Tick, CombatEventBuffer& Events);
@@ -222,5 +224,6 @@ namespace IronEchoCore
 		int32_t AttackLockedUntilTick = -1000000; // cover-up keeps the rest of the hit stun for punches
 		bool bSlipWeak = false; // the slip started without the stamina to pay for it: half a slip
 		bool bDuckWeak = false; // the same for a duck: half the depth
+		bool bLunged = false;   // the current attack stepped in (elbow / knee from beyond reach)
 	};
 }

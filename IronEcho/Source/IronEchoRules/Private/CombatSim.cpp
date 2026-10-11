@@ -399,6 +399,17 @@ namespace IronEchoCore
 			const float WantSide = Lat * C.CircleSpeed * Factor;
 			Forward[Index] = Approach(S.SpeedForward, WantForward, C.MoveAccel, C.MoveBrake, Dt);
 			Side[Index] = Approach(S.SpeedSide, WantSide, C.MoveAccel, C.MoveBrake, Dt);
+			// An elbow or a knee from beyond its reach steps in: a burst, not the walk's acceleration (the whole strike lasts 0.2 s)
+			if (!F.IsDown() && S.State == ActionState::Attack && (S.AttackType == AttackKind::Elbow || S.AttackType == AttackKind::Knee)
+				&& !S.bAttackResolved && (S.Stage == AttackStage::Windup || S.Stage == AttackStage::Active))
+			{
+				const float Reach = F.CurrentAttackSpec().ReachMeters;
+				if (GapNow > Reach - 0.03f && GapNow <= Reach + C.LungeRangeMeters)
+				{
+					Forward[Index] = (std::max)(Forward[Index], C.LungeSpeed);
+					F.NoteLunge();
+				}
+			}
 
 			const Vec2 Rel = Start[1 - Index] - Start[Index];
 			const float Radius = Rel.Length();

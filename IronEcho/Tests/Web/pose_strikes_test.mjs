@@ -21,6 +21,8 @@ const check = (name, ok, info = '') => { results.push(!!ok); console.log(`${ok ?
 
 // One session: calibration (with the punch step), then 104 strikes and ducks in random order, then 40 s of no strikes.
 function session(faults, seed) {
+  let notLive = 0;
+  let live = 0;
   const { script, end } = calibration(new Script(), { punches: true });
   const r = rng(seed * 977 + 3);
   const kinds = [];
@@ -54,7 +56,10 @@ function session(faults, seed) {
   script.idle(t, 1.0);
   script.fidget(0.03);
   const proc = new PoseProcessor(() => {}, {});
-  for (const fr of stream(script, { ...faults, seed })) proc.process(fr.world, fr.t, faults.noImage ? null : fr.image);
+  for (const fr of stream(script, { ...faults, seed })) {
+    proc.process(fr.world, fr.t, faults.noImage ? null : fr.image);
+    if (fr.t > end + 0.5 && fr.t < quiet) { live++; if (proc.status !== 7) notLive++; }
+  }
   // every detection as [t, side, kind]
   const det = [
     ...proc.punches.map(([pt, s]) => [pt, s, 'punch']),
@@ -75,13 +80,22 @@ function session(faults, seed) {
     else if (near.length) { const k = near[0][0][2]; tally[s.kind].wrong[k] = (tally[s.kind].wrong[k] || 0) + 1; used.add(near[0][1]); }
   }
   const extra = det.filter((d, i) => !used.has(i));
-  return { cal: !!proc.cal, tally, extra, quietFrom: quiet, quietFalse: extra.filter(([pt]) => pt >= quiet).length, script };
+  return { cal: !!proc.cal, tally, extra, quietFrom: quiet, quietFalse: extra.filter(([pt]) => pt >= quiet).length, script, notLive, live };
 }
 
 const SETS = [
   ['clean 60 fps', { fps: 60 }],
   ['webcam 30 fps, jitter, drops', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02 }],
   ['frontal: depth 0.6 + hidden elbow', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02, depth: 0.6, occlusion: true }],
+  // a slow machine, the "high accuracy" model, two cameras: the pose arrives at 15-20 frames per second
+  ['slow: 20 fps, jitter, drops', { fps: 20, jitterMs: 8, drop: 0.05, depthNoise: 0.02 }],
+  ['slow: 15 fps, jitter, drops', { fps: 15, jitterMs: 10, drop: 0.05, depthNoise: 0.02, floorDrop: 0.12 }],
+  // a webcam on a desk: hips and legs out of the frame (1.7.1). Kicks and knees are out of reach there; everything with the arms must work.
+  ['desk webcam: hips and legs not in frame', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02, view: 'upper', skip: ['knee', 'kick', 'low'] }],
+  // the feet cut off by the frame: knees still seen, so knees work (a kick cannot be told from a knee without the foot)
+  ['feet cut off: knees seen, ankles not', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02, view: 'kneesOnly', skip: ['kick', 'low'] }],
+  // the model loses the person for a frame now and then (and for three now and then): tracking must not drop and nothing may be missed
+  ['pose flickers: 6 % of frames lost', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02, flicker: 0.06 }],
   // two cameras fused: world landmarks only (the duck is read from the waist and the knees)
   ['fusion: no image landmarks', { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02, noImage: true }],
 ];
@@ -101,10 +115,14 @@ for (const [name, faults] of SETS) {
   console.log(`--- ${name}`);
   check(`${name}: calibration completes`, runs.every((r) => r.cal));
   for (const [k, v] of Object.entries(sum)) {
+    if ((faults.skip || []).includes(k)) continue;
     const rate = v.hit / v.of;
     const wrong = Object.entries(v.wrong).map(([w, n]) => `${n} as ${w}`).join(', ');
-    check(`${name}: ${k.padEnd(5)} detected ${v.hit}/${v.of}`, rate >= FLOOR[k], wrong || 'no confusions');
+    check(`${name}: ${k.padEnd(5)} detected ${v.hit}/${v.of}`, rate >= FLOOR[k] - (k === 'punch' ? 0 : faults.floorDrop || 0), wrong || 'no confusions');
   }
+  const notLive = runs.reduce((a, r) => a + r.notLive, 0);
+  const liveFrames = runs.reduce((a, r) => a + r.live, 0);
+  check(`${name}: tracking stays Live through the strikes`, notLive <= 0.005 * liveFrames, `${notLive} of ${liveFrames} frames not Live`);
   const quietList = runs.flatMap((r, i) => r.extra.filter(([pt]) => pt >= r.quietFrom).map(([pt, s, k]) => { const a = r.script.actions.filter((x) => x.start <= pt).pop(); return `seed ${i + 1}: ${k}${s} at ${pt.toFixed(2)} s, ${a ? `${(pt - a.start).toFixed(2)} s into a ${a.kind}` : ''}`; }));
   check(`${name}: nothing fires while blocking, slipping, leaning, standing`, quietFalse === 0, `${quietFalse} in the quiet part${quietList.length ? ': ' + quietList.join(', ') : ''}, ${extra} unmatched in all`);
   check(`${name}: few extra detections during the strikes`, extra - quietFalse <= 6, `${extra - quietFalse}`);

@@ -236,9 +236,11 @@ function startBout(versus) {
   app.hud.show(true);
   const camSource = settings.control === 'phone' ? 'phone' : 'webcam';
   const useCamera = (settings.control === 'camera' || settings.control === 'phone') && typeof CameraInput !== 'undefined';
-  // second camera (web only): a phone next to the webcam, or two phones instead of it; 'fast' waits less for the phone's video
-  const second = settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage ? settings.camera2.replace('-fast', '') : 'off';
-  const secondWait = settings.camera2.endsWith('-fast') ? 0.06 : 0.18;
+  // second camera (web only): a phone next to the webcam, or two phones instead of it. The phone's video reaches the page 0.2-0.5 s after
+  // it was filmed, so every moment of the output that waits for it is a delay added to every punch: by default the wait is short (0.05 s,
+  // the phone is merged only when its frames are that fresh); '-precise' (the old 0.18 s default) waits longer for a better merge.
+  const second = settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage ? settings.camera2.replace(/-(fast|precise)$/, '') : 'off';
+  const secondWait = settings.camera2.endsWith('-precise') ? 0.18 : 0.05;
   const cameraKey = `${camSource}|${second}|${secondWait}`;
   if (app.cameraInput && (!useCamera || app.cameraInput.key !== cameraKey || app.cameraInput.model !== settings.tracking)) {
     app.cameraInput.stop();

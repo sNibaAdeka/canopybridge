@@ -1,5 +1,6 @@
-// Close range 1.6: elbows (to the head) and knees (to the body). They land only when the fighters are close, hit harder than a
-// straight from there, the elbow can be slipped and blocked, the knee only blocked; a knee leaves the fighter on one leg.
+// Close range 1.6: elbows (to the head) and knees (to the body). They land only when the fighters are close (1.7.1: or one step away:
+// they lunge in), hit harder than a straight from there, the elbow can be slipped and blocked, the knee only blocked; a knee leaves
+// the fighter on one leg.
 #include "TestFramework.h"
 
 #include "IronEchoRules/BotBrain.h"
@@ -129,7 +130,7 @@ IE_TEST(CloseRange_SpecsAreShortFastAndHeavy)
 	}
 }
 
-IE_TEST(CloseRange_ElbowLandsInTheClinchNotFromTheWorkingDistance)
+IE_TEST(CloseRange_ElbowLandsInTheClinchAndSteppingInFromTheWorkingDistance)
 {
 	Ring* R = nullptr;
 	const float Close = Throw(1.05f, Hand::Right, AttackKind::Elbow, PunchZone::Head, Idle(), &R);
@@ -139,9 +140,40 @@ IE_TEST(CloseRange_ElbowLandsInTheClinchNotFromTheWorkingDistance)
 	IE_EXPECT_EQ(R->P().ElbowsThrown, 1);
 	IE_EXPECT_EQ(R->P().ElbowsLanded, 1);
 	IE_EXPECT_EQ(R->P().PunchesThrown, 1); // every strike counts in the totals
-	Throw(MovementConfig().EngageDistance, Hand::Right, AttackKind::Elbow, PunchZone::Head, Idle(), &R);
+	// from the working distance (1.35 m, 13 cm beyond the reach) the body steps in and the elbow lands
+	const float Stepped = Throw(MovementConfig().EngageDistance, Hand::Right, AttackKind::Elbow, PunchZone::Head, Idle(), &R);
+	IE_EXPECT(Stepped > 0.0f);
+	IE_EXPECT_EQ(R->Count(CombatEventType::HitConfirmed), 1);
+	IE_EXPECT(R->Sim.Gap() < MovementConfig().EngageDistance - 0.05f); // it ended up in the foe's face
+	// from further away than the step covers it only whiffs (and the step is wasted)
+	Throw(MakeDefaultFighterConfig().Elbows[1].ReachMeters + MakeDefaultFighterConfig().LungeRangeMeters + 0.15f, Hand::Right, AttackKind::Elbow, PunchZone::Head, Idle(), &R);
 	IE_EXPECT_EQ(R->Count(CombatEventType::HitConfirmed), 0);
 	IE_EXPECT_EQ(R->Count(CombatEventType::Whiffed), 1);
+}
+
+IE_TEST(CloseRange_TheStepInCostsRecoveryAndAStraightDoesNotStepIn)
+{
+	const FighterConfig C = MakeDefaultFighterConfig();
+	// recovery length of the same elbow thrown from the clinch and from the working distance (both land)
+	auto RecoveryTicks = [&](float Gap) {
+		Ring R(At(Gap));
+		R.Step(Strike(Hand::Right, AttackKind::Elbow), Idle());
+		int32_t Ticks = 0;
+		while (R.P().Stage != AttackStage::Recovery && Ticks++ < 200)
+		{
+			R.Step(Idle(), Idle());
+		}
+		return R.P().StageTicksTotal;
+	};
+	const int32_t FromClinch = RecoveryTicks(1.05f);
+	const int32_t Stepping = RecoveryTicks(1.35f);
+	IE_EXPECT_EQ(Stepping - FromClinch, C.LungeRecoveryTicks);
+	// a straight never steps in: the player's own walk is the only way to close the gap
+	Ring S(At(1.45f)); // beyond the cross's sweet range, inside its reach 1.45 m: standing still
+	const float Before = S.Sim.Gap();
+	S.Step(Strike(Hand::Right, AttackKind::Punch), Idle());
+	S.Run(SecondsToTicks(0.3), Idle(), Idle());
+	IE_EXPECT(S.Sim.Gap() > Before - 0.1f);
 }
 
 IE_TEST(CloseRange_InTheClinchAnElbowOutHitsASmotheredCross)
@@ -182,8 +214,11 @@ IE_TEST(CloseRange_KneeGoesToTheBodyCannotBeSlippedButCanBeBlocked)
 	IE_EXPECT_EQ(R->P().KneesLanded, 1);
 	Throw(1.05f, Hand::Right, AttackKind::Knee, PunchZone::Body, Guard(), &R);
 	IE_EXPECT_EQ(R->Count(CombatEventType::Blocked), 1);
+	// from the working distance the knee steps in and lands; from further than the step covers it whiffs
 	Throw(MovementConfig().EngageDistance, Hand::Right, AttackKind::Knee, PunchZone::Body, Idle(), &R);
-	IE_EXPECT_EQ(R->Count(CombatEventType::Whiffed), 1); // out of knee reach
+	IE_EXPECT_EQ(R->Count(CombatEventType::HitConfirmed), 1);
+	Throw(C.Knees[1].ReachMeters + C.LungeRangeMeters + 0.15f, Hand::Right, AttackKind::Knee, PunchZone::Body, Idle(), &R);
+	IE_EXPECT_EQ(R->Count(CombatEventType::Whiffed), 1);
 }
 
 IE_TEST(CloseRange_JabIntoElbowCancelsButAKneeIsOnOneLeg)

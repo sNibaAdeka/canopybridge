@@ -25,7 +25,7 @@ function poseWorkerMain() {
         const fileset = await vision.FilesetResolver.forVisionTasks(m.wasm);
         const make = (delegate) => vision.PoseLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: m.model, delegate }, runningMode: 'VIDEO', numPoses: 1,
-          minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.4, minTrackingConfidence: 0.4 });
+          minPoseDetectionConfidence: 0.35, minPosePresenceConfidence: 0.3, minTrackingConfidence: 0.3 });
         let delegate = 'GPU';
         try { lm = await make('GPU'); } catch { delegate = 'CPU'; lm = await make('CPU'); }
         self.postMessage({ t: 'ready', delegate });

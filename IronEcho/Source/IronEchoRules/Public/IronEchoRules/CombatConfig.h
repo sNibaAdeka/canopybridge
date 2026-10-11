@@ -123,6 +123,12 @@ namespace IronEchoCore
 		float LegSlowFactor = 0.55f;         // movement speed multiplier while slowed
 		int32_t KickWhiffPenaltyTicks = SecondsToTicks(0.22);
 		float KneeBodyStaminaDamage = 10.0f; // defender's stamina lost to a full clean knee (1.6)
+		// An elbow or a knee thrown from beyond its reach steps in (1.7.1): the body bursts forward at LungeSpeed while the strike winds
+		// up and is active, as long as the foe is within LungeRangeMeters of the reach. Without it they only landed in a clinch and
+		// a player at the working distance could never use them. The step is not free: a lunged strike recovers LungeRecoveryTicks longer.
+		float LungeSpeed = 2.6f;             // m/s
+		float LungeRangeMeters = 0.34f;      // beyond reach + this, the strike simply whiffs
+		int32_t LungeRecoveryTicks = SecondsToTicks(0.10);
 
 		// ---- footwork (1.2) ----
 		float StepForwardSpeed = 1.50f;      // m/s
