@@ -43,6 +43,9 @@ const FUSION_CFG = {
   waitBudget: 0.15,       // s: how long the output may wait for the other camera
   buffer: 12.0,           // s of frames kept
   emitEvery: 0.012,       // s: no more than ~80 fused skeletons per second
+  blendIn: 0.6,           // s: B's share grows from 0 to 1 this slowly when the cameras start to agree (a sudden jump of a few
+                          //    centimetres in one frame looks like a punch to the detectors)
+  blendOut: 0.3,          // s: ... and falls this fast when they stop agreeing
 };
 
 const fuseLerp = (a, b, k) => a + (b - a) * k;
@@ -142,11 +145,32 @@ export class PoseFusion {
     this.lastLearn = -1e9;
     this.aliveA = false;
     this.aliveB = false;
+    this.blend = 0;                // 0..1: how much of the merged skeleton is used instead of A alone
+    this.enabledB = true;          // false: camera B is ignored completely (the game gave up on the second camera)
+    this.info = { mode: 'a', offsetMs: 0, rmsCm: null, usable: false, angleDeg: null };
+  }
+
+  // The game gives the second camera up (it never matched, or it slows the computer down): drop everything of B at once, so
+  // nothing waits for it and nothing of it is mixed in. Enabling it again starts the fit from scratch.
+  setSecondEnabled(on) {
+    if (on === this.enabledB) return;
+    this.enabledB = on;
+    this.b = [];
+    this.S = new Array(9).fill(0);
+    this.alignN = 0;
+    this.R = null;
+    this.rms = null;
+    this.usable = false;
+    this.offset = 0;
+    this.offsetKnown = false;
+    this.lastTimeEstimate = -1e9;
+    this.lastLearn = -1e9;
+    this.aliveB = false;
     this.info = { mode: 'a', offsetMs: 0, rmsCm: null, usable: false, angleDeg: null };
   }
 
   pushA(t, world) { this._push(this.a, t, world); this._step(); }
-  pushB(t, world) { this._push(this.b, t, world); this._step(); }
+  pushB(t, world) { if (!this.enabledB) return; this._push(this.b, t, world); this._step(); }
 
   _push(buf, t, world) {
     if (buf.length && t <= buf[buf.length - 1].t) return; // clocks must go forward
@@ -335,15 +359,28 @@ export class PoseFusion {
   }
 
   _emit(t) {
+    const dt = Math.max(0, Math.min(0.1, t - this.lastOut));
     this.lastOut = t;
     const wa = this.aliveA ? fuseSample(this.a, t) : null;
-    const wb = this.aliveB ? fuseSample(this.b, t - this.offset) : null;
+    const wb = this.aliveB && this.R ? fuseSample(this.b, t - this.offset) : null;
+    const C = this.cfg;
+    // B's share follows "the cameras agree" smoothly in both directions; while it is below 1 the output is A mixed with the merge
+    const want = wa && wb && this.usable ? 1 : 0;
+    if (want > this.blend) this.blend = Math.min(1, this.blend + dt / C.blendIn);
+    else if (want < this.blend) this.blend = Math.max(0, this.blend - dt / C.blendOut);
     let world = null;
     let mode = 'a';
-    if (wa && wb && this.usable) { world = this._merge(wa, wb); mode = 'ab'; }
-    else if (wa) { world = wa; mode = 'a'; }
+    if (wa && wb && this.blend > 0) {
+      const merged = this._merge(wa, wb);
+      world = this.blend >= 1 ? merged : wa.map((p, i) => ({
+        x: fuseLerp(p.x, merged[i].x, this.blend), y: fuseLerp(p.y, merged[i].y, this.blend), z: fuseLerp(p.z, merged[i].z, this.blend),
+        visibility: fuseLerp(p.visibility ?? 1, merged[i].visibility ?? 1, this.blend),
+      }));
+      mode = 'ab';
+    } else if (wa) { world = wa; mode = 'a'; }
     else if (wb && this.usable) { world = wb.map((p) => fuseApply(this.R, p)); mode = 'b'; }
     this.info.mode = mode;
+    this.info.blend = this.blend;
     this.onFused(t, world, this.info);
   }
 }

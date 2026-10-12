@@ -56,15 +56,16 @@ function view(truth, R, mirror = false) {
   });
 }
 
-function run({ seconds = 24, bGoesAwayAt = null, mirrored = false, waitBudget = 0.5 }) {
+function run({ seconds = 24, bGoesAwayAt = null, mirrored = false, waitBudget = 0.5, onTime = null }) {
   const out = [];
-  const fusion = new PoseFusion((t, world, info) => out.push({ t, world, mode: info.mode }), { waitBudget });
+  const fusion = new PoseFusion((t, world, info) => out.push({ t, world, mode: info.mode, blend: info.blend }), { waitBudget });
   const events = [];
   for (let k = 0; k < seconds * 60; k++) events.push({ t: k / 60, cam: 'A' });
   for (let k = 0; k < seconds * 30; k++) events.push({ t: k / 30 + 0.004 * gauss(), cam: 'B' });
   // delivery order: A arrives 15 ms after capture, B 120 ms after its capture (the phone stream)
   const delivery = events.map((e) => ({ ...e, at: e.t + (e.cam === 'A' ? 0.015 : 0.12) })).sort((a, b) => a.at - b.at);
   for (const e of delivery) {
+    if (onTime) onTime(e.at, fusion);
     const truth = body(e.t);
     if (e.cam === 'A') fusion.pushA(e.t, view(truth, new Array(9).fill(0).map((_, i) => (i % 4 === 0 ? 1 : 0))));
     else {
@@ -142,6 +143,34 @@ const check = (name, ok, detail) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${nam
   const { out, fusion } = run({ mirrored: true });
   const fusedShare = out.filter((o) => o.t > 10 && o.mode === 'ab').length / out.filter((o) => o.t > 10).length;
   check('mirrored stream rejected', fusedShare < 0.1, `fit rms ${(fusion.info.rmsCm ?? -1).toFixed(1)} cm, fused share ${(fusedShare * 100).toFixed(0)}%`);
+}
+
+// 5. joining is gradual: B's share rises over ~0.6 s instead of jumping, so the skeleton does not lurch (a lurch reads as a punch)
+{
+  const { out } = run({});
+  const ramp = out.filter((o) => o.blend > 0 && o.blend < 1);
+  const first = out.find((o) => o.blend > 0);
+  check('the merge fades in over about half a second', ramp.length >= 25 && first && first.blend <= 0.12, `${ramp.length} frames in the ramp, first share ${first ? first.blend.toFixed(3) : '-'}`);
+  let worst = 0;
+  for (let i = 1; i < out.length; i++) if (out[i].blend !== undefined && out[i - 1].blend !== undefined) worst = Math.max(worst, Math.abs(out[i].blend - out[i - 1].blend));
+  check('the share never steps by more than 0.15 in one frame', worst <= 0.15, `largest step ${worst.toFixed(3)}`);
+}
+
+// 6. the game can give the second camera up and later try again
+{
+  let off = false;
+  let on = false;
+  let keptWhileOff = -1;
+  const { out, fusion } = run({ seconds: 36, onTime: (at, f) => {
+    if (off && !on && at > 20 && keptWhileOff < 0) keptWhileOff = f.b.length + (f.R ? 1 : 0);
+    if (!off && at > 14) { off = true; f.setSecondEnabled(false); }
+    if (!on && at > 22) { on = true; f.setSecondEnabled(true); }
+  } });
+  const dead = out.filter((o) => o.t > 14.3 && o.t < 21.9);
+  check('after setSecondEnabled(false) the output is camera A alone', dead.length > 300 && dead.every((o) => o.mode === 'a' && o.blend === 0), `${dead.length} frames, modes ${[...new Set(dead.map((o) => o.mode))]}`);
+  check('nothing of B is kept while it is off', keptWhileOff === 0, `${keptWhileOff} frames/rotations kept`);
+  const back = out.filter((o) => o.t > 33 && o.mode === 'ab').length / Math.max(1, out.filter((o) => o.t > 33).length);
+  check('enabled again, the cameras are matched from scratch', back > 0.7, `${(back * 100).toFixed(0)}% merged in the last 3 s, fit ${(fusion.info.rmsCm ?? -1).toFixed(1)} cm`);
 }
 
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }

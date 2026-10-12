@@ -202,6 +202,35 @@ async function camera(browser) {
   check('camera: four leg kicks are detected (mid and low, both legs) and thrown', r.kicksDetected === '0mid,1mid,0low,1low' && r.kicksThrown >= 4 - refused,
     `${r.kicksDetected}; thrown ${r.kicksThrown}; states at the request: ${r.kickStates.join(', ')}`);
   check('camera: leaning toward the screen steps the robot in', r.peakLean >= 0.55 && r.stepIn > 0.3, `lean ${r.peakLean.toFixed(2)}, speed ${r.stepIn.toFixed(2)} m/s`);
+  // 1.6.2: the player walks out of the frame in the middle of the fight: after a second and a half the screen says so (with the likely
+  // reason), and the message goes away when he is back; the light advice tells a dark room from a window behind the player
+  const lost = await page.evaluate(async () => {
+    const cam = globalThis.IRONECHO_APP.cameraInput;
+    const frames = await (await fetch('/__synthetic.json')).json();
+    const live = frames.filter((f) => f.w).slice(-1)[0].w.map(([x, y, z, visibility]) => ({ x, y, z, visibility }));
+    cam.active = true; // the check above parked the camera; the watch runs again
+    cam.hold = false;
+    const msg = () => { const el = document.querySelector('#cam .cam-msg'); return el && !el.hidden ? el.querySelector('b').textContent : ''; };
+    const base = (cam.proc.lastSeen ?? 0) + 1;
+    for (let i = 0; i < 75; i++) cam._feed(null, base + i / 30);
+    cam._tick();
+    const early = msg();
+    await new Promise((r) => setTimeout(r, 1700));
+    cam._tick();
+    const gone = msg();
+    const status = cam.proc.status;
+    for (let i = 0; i < 6; i++) cam._feed(live, base + 3 + i / 30);
+    cam._tick();
+    const back = msg();
+    const tips = [];
+    for (const L of [{ centre: 0.1, edge: 0.3, mean: 0.2 }, { centre: 0.33, edge: 0.7, mean: 0.5 }, { centre: 0.27, edge: 0.3, mean: 0.28 }, { centre: 0.6, edge: 0.6, mean: 0.6 }]) { cam.light = L; tips.push(cam._lightTip()); }
+    cam.light = null;
+    cam.active = false;
+    return { early, gone, status, back, tips };
+  });
+  check('camera: a player who left the frame is told so after 1.5 s, not before', lost.early !== 'Не вижу тебя' && lost.gone === 'Не вижу тебя', `status ${lost.status}; at once "${lost.early}", after 1.7 s "${lost.gone}"`);
+  check('camera: the message goes away when he is back', lost.back === '', lost.back);
+  check('camera: the light advice tells dark from backlit from fine', /Темно/.test(lost.tips[0]) && /Свет сзади/.test(lost.tips[1]) && /Тусклый/.test(lost.tips[2]) && lost.tips[3] === '', lost.tips.join(' | '));
   check('camera: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
   await page.close();
 }

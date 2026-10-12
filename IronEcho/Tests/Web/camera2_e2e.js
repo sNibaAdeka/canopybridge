@@ -1,6 +1,8 @@
 // Second camera, end to end with real browser pages and a local PeerJS broker (no internet needed):
 //   1. webcam + one phone: the game opens a room and shows the QR/link, the "phone" page (site/phone.template.html) calls it
-//      over WebRTC, the game runs pose tracking on both streams and fuses them; the phone leaving is noticed;
+//      over WebRTC, the game runs pose tracking on both streams and fuses them; the fight never waits for the phone; when the
+//      two views do not match within the time limit (here 3 s; nobody stands in front of the fake cameras) the phone is let go
+//      (its detector stops, the fusion ignores it) and can be connected again; the phone leaving is noticed;
 //   2. two phones instead of the webcam: slot 1 is the main camera, slot 2 the second one.
 // The browsers use Chromium's fake camera (a moving test pattern: no person, so the check is the transport, the frame
 // loop and the plumbing; the fusion maths is checked by Tools/Build/Web/check/check_fusion.mjs).
@@ -103,9 +105,19 @@ async function startCamera(g, second) {
     const link = await startCamera(game, 'phone');
     check('the game shows a pairing link with a room code and slot 1', /\/phone\/\?cam=[A-Z2-9]{6}&slot=1$/.test(link.trim()), link.trim());
     check('the pairing panel has a QR code', await game.isVisible('#cam-link .pp-qr img'));
-    // with a second camera chosen the fight waits (calibration has not begun) until the phone is found and matched
-    const held = await game.evaluate(() => { const app = globalThis.IRONECHO_APP; const r = app.debugAdvance(4, () => app.currentInput()); return { phase: r.phase, status: app.currentInput().status, hold: app.cameraInput.hold }; });
-    check('the fight waits for the second camera (no countdown, calibration not started)', held.hold === true && held.status === 6 && held.phase === 'WaitingForPlayer', JSON.stringify(held));
+    // the fight does not wait for the phone: the webcam alone is enough to start (the old behaviour held it until both matched)
+    await game.evaluate(() => { globalThis.IRONECHO_APP.cameraInput.secondCfg.matchSeconds = 3; });
+    const held = await game.evaluate(() => { const app = globalThis.IRONECHO_APP; const c = app.cameraInput; app.debugAdvance(1, () => app.currentInput()); return { hold: c.hold, state: c.secondState }; });
+    check('the fight does not wait for the second camera', held.hold === false && held.state === 'waiting', JSON.stringify(held));
+    check('the panel says the fight goes on without the phone', (await game.textContent('#cam-link .pp-state')).includes('бой идёт без него'));
+    check('the brightness of the picture is measured (needs canvas read-back in a real browser)', await game.waitForFunction(() => { const l = globalThis.IRONECHO_APP.cameraInput.stats().light; return typeof l === 'number' && l >= 0 && l <= 100; }, null, { timeout: 30000 }).then(() => true, () => false));
+    // F4 saves the last seconds of what the camera gave the game (skeleton numbers only)
+    const [dl] = await Promise.all([game.waitForEvent('download', { timeout: 60000 }), game.keyboard.press('F4')]);
+    const dlPath = await dl.path();
+    const raw = fs.readFileSync(dlPath);
+    const text = raw[0] === 0x1f && raw[1] === 0x8b ? require('zlib').gunzipSync(raw).toString('utf8') : raw.toString('utf8');
+    const saved = JSON.parse(text);
+    check('F4 downloads the camera recording', /^ironecho-trace-\d+\.json(\.gz)?$/.test(dl.suggestedFilename()) && saved.format === 'ironecho-trace' && saved.meta && /версия/.test(saved.meta.game), `${dl.suggestedFilename()}, ${raw.length} bytes, game "${saved.meta && saved.meta.game}"`);
     const phone1 = await phonePage(browser, link.trim());
     check('the phone page reports it is on air', true, (await phone1.textContent('#st')).replace(/\s+/g, ' ').slice(0, 80));
     await game.waitForFunction(() => { const c = globalThis.IRONECHO_APP.cameraInput; return c && c.taps[1] && c.taps[1].total >= 4; }, null, { timeout: 240000 })
@@ -118,10 +130,21 @@ async function startCamera(g, second) {
     check('the phone preview box exists', await game.isVisible('#cam2'));
     const modes = await game.evaluate(() => { const c = globalThis.IRONECHO_APP.cameraInput; return { main: c.detector && c.detector.mode, phone: c.taps[1] && c.taps[1].detector && c.taps[1].detector.mode, delegate: c.detector && c.detector.delegate }; });
     check('pose detection runs in Web Workers (off the render thread), one per camera', modes.main === 'worker' && modes.phone === 'worker', JSON.stringify(modes));
-    // nobody stands in front of the fake cameras, so the two views never match: the fight stays held until the player skips the phone
-    check('the fight is still held (the cameras have not matched)', await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.hold === true));
-    await game.evaluate(() => { document.querySelector('#cam-link .pp-close').click(); });
-    check('"play without the second camera" releases the fight', await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.hold === false));
+    // nobody stands in front of the fake cameras, so the two views never match: after matchSeconds the phone is let go
+    await game.waitForFunction(() => globalThis.IRONECHO_APP.cameraInput.secondState === 'dropped', null, { timeout: 60000 })
+      .catch(async (e) => { console.log('  state at timeout:', JSON.stringify(await camState(game))); throw e; });
+    st = await camState(game);
+    check('the unmatched phone is dropped: its detector is gone and the fusion ignores it', !st.taps[1] && (await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.fusion.enabledB === false)), JSON.stringify(st.taps));
+    check('the fight was never held while this happened', await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.hold === false));
+    check('a message says why', (await game.textContent('.cam-toast')).includes('отключён'), (await game.textContent('.cam-toast')).slice(0, 90));
+    check('the phone preview is hidden and the panel offers "connect again"', !(await game.isVisible('#cam2')) && await game.isVisible('#cam-link .pp-retry'));
+    // (software rendering here: a detection takes seconds, so "still working" means the webcam keeps delivering results to the processor)
+    const t1 = await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.lastT);
+    check('the webcam keeps working alone', await game.waitForFunction((t) => { const c = globalThis.IRONECHO_APP.cameraInput; return c.active && c.lastT > t; }, t1, { timeout: 90000 }).then(() => true, () => false));
+    await game.evaluate(() => { document.querySelector('#cam-link .pp-retry').click(); });
+    await game.waitForFunction(() => { const c = globalThis.IRONECHO_APP.cameraInput; return c.secondState !== 'dropped' && c.taps[1] && c.taps[1].total >= 3; }, null, { timeout: 120000 });
+    check('"connect again" starts the phone over (detector back, fusion listening)', await game.evaluate(() => globalThis.IRONECHO_APP.cameraInput.fusion.enabledB === true));
+    await game.evaluate(() => { globalThis.IRONECHO_APP.cameraInput.secondCfg.matchSeconds = 600; });
     // the phone leaves
     await phone1.close();
     await game.waitForFunction(() => Object.keys(globalThis.IRONECHO_APP.cameraInput.streams).length === 0, null, { timeout: 60000 });
@@ -154,6 +177,7 @@ async function startCamera(g, second) {
     await game2.waitForFunction(() => { const f = globalThis.IRONECHO_APP.cameraInput.fusion; return f && f.a.length >= 3 && f.b.length >= 3; }, null, { timeout: 240000 });
     st = await camState(game2);
     check('phone 1 is the main camera, phone 2 the second', st.fusion.a >= 3 && st.fusion.b >= 3, JSON.stringify(st.fusion));
+    check('with two phones the fight starts as soon as the first one delivers (it does not wait for a match)', await game2.evaluate(() => globalThis.IRONECHO_APP.cameraInput.hold === false));
     check('the panel confirms both', (await game2.textContent('#cam-link')).includes('подключён'));
     check('no page errors (two phones)', !game2.errors.length && !pA.errors.length && !pB.errors.length, [...game2.errors, ...pA.errors, ...pB.errors].join(' | '));
   } finally {

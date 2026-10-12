@@ -17,7 +17,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.6.1"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.6.2"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
@@ -186,9 +186,9 @@ CAMERA_MENU = """<div class="opt" data-group="control"><span>Управлени�
       <button type="button" data-value="full">ОБЫЧНАЯ<small>быстрее</small></button>
       <button type="button" data-value="heavy">ВЫСОКАЯ<small>точнее, ~30 МБ</small></button>
     </div></div>
-    <div class="opt" data-group="camera2" hidden><span>Вторая камера</span><div class="seg">
+    <div class="opt" data-group="camera2" hidden><span>Вторая камера (опытная)</span><div class="seg">
       <button type="button" data-value="off">НЕТ<small>одна камера</small></button>
-      <button type="button" data-value="phone">+ ТЕЛЕФОН<small>без задержки</small></button>
+      <button type="button" data-value="phone">+ ТЕЛЕФОН<small>бой не ждёт, сам отключится</small></button>
       <button type="button" data-value="phone-precise">+ ТЕЛЕФОН<small>точнее, +0.2 с</small></button>
       <button type="button" data-value="phones">2 ТЕЛЕФОНА<small>без веб-камеры</small></button>
     </div></div>"""

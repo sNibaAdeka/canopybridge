@@ -189,6 +189,17 @@ function adaptResolution(dt) {
   if (fps < 48 && resScale > 0.6) resScale = Math.max(0.6, resScale - (fps < 30 ? 0.2 : 0.1));
   else if (fps > 58 && resScale < 1) resScale = Math.min(1, resScale + 0.05);
   if (resScale !== before) { applyPixelRatio(); resize(); }
+  // With the camera on, the pose detector shares the graphics card with the game. When even the lowest resolution cannot hold 40 fps,
+  // the shadow-heavy 'high' graphics step down to 'low' (once; the menu shows it and can put it back).
+  if (resScale <= 0.61 && fps < 40 && settings.quality === 'high' && app.cameraInput && app.cameraInput.active) lowerGraphicsForCamera(fps);
+}
+
+function lowerGraphicsForCamera(fps) {
+  settings.quality = 'low';
+  saveSettings();
+  for (const b of document.querySelectorAll('[data-group="quality"] button')) b.classList.toggle('sel', b.dataset.value === 'low');
+  applyQuality();
+  app.hud.banner('ГРАФИКА: ЛЁГКАЯ', `Камера и игра делят видеокарту (было ${Math.round(fps)} к/с). Вернуть можно в меню.`, 4, 'warn');
 }
 
 function resize() {
@@ -1087,12 +1098,16 @@ function perfOverlay(now, raw) {
     const st = c.stats();
     lines.push(`камера 1: ${st.fps.toFixed(0)} к/с, распознавание ${st.inferMs.toFixed(0)} мс, ${st.mode}, модель ${st.model}`);
     for (const [k, t] of Object.entries(st.taps)) lines.push(`телефон ${k}: ${t.fps.toFixed(0)} к/с, ${t.inferMs.toFixed(0)} мс, ${t.mode}`);
-    if (st.fusion) lines.push(`слияние: ${st.fusion.mode}${st.fusion.usable ? '' : ' (не сошлись)'}, сдвиг ${st.fusion.offsetMs.toFixed(0)} мс, согласие ${st.fusion.rmsCm === null ? '-' : st.fusion.rmsCm.toFixed(1) + ' см'}${st.hold ? ', БОЙ ЖДЁТ КАМЕРЫ' : ''}`);
+    if (st.fusion) lines.push(`слияние: ${st.fusion.mode}, доля 2-й камеры ${Math.round((st.fusion.blend || 0) * 100)}%, ${st.second}${st.secondReason ? ` (${st.secondReason})` : ''}, сдвиг ${st.fusion.offsetMs.toFixed(0)} мс, расхождение ${st.fusion.rmsCm === null ? '-' : st.fusion.rmsCm.toFixed(1) + ' см'}${st.hold ? ', БОЙ ЖДЁТ ПЕРВЫЙ ТЕЛЕФОН' : ''}`);
+    if (st.light !== null && st.light !== undefined) lines.push(`яркость кадра в центре: ${st.light} %`);
+    lines.push('F4 — сохранить последние 25 с камеры для разбора');
   }
   pv.el.textContent = lines.join('\n');
 }
 window.addEventListener('keydown', (e) => {
   if (e.code === 'F3') { e.preventDefault(); perfView.on = !perfView.on; if (perfView.el) perfView.el.hidden = !perfView.on; }
+  // F4: save the last 25 s of the camera's skeleton numbers for a bug report (Alt+F4 stays "close the window")
+  if (e.code === 'F4' && !e.altKey && app.cameraInput && app.cameraInput.saveTrace) { e.preventDefault(); app.cameraInput.saveTrace().catch((err) => console.error(err)); }
 });
 
 let last = performance.now();
