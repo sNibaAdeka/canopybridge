@@ -99,7 +99,8 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
 # the public GitHub repository. Lighter than Build/Web/public: /play is the single-file game (Build/Web/IronEcho-Public.html,
 # assets inlined; three.js/MediaPipe from their CDNs), the Windows app is in /download.
 VERCEL_JSON = {
-    "functions": {"api/ratings.mjs": {"maxDuration": 30, "memory": 1024}},  # replays a whole bout on the rules core: about a second
+    "functions": {"api/ratings.mjs": {"maxDuration": 30, "memory": 1024},  # replays a whole bout on the rules core: about a second
+                  "api/events.mjs": {"maxDuration": 10, "memory": 256}},       # anonymous telemetry batches
     "headers": [
         {"source": "/play/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}]},
         {"source": "/phone/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}, {"key": "Cache-Control", "value": "no-cache"}]},
@@ -124,12 +125,13 @@ def build_rating_server(here: Path, out_root: Path, out: Path, game: Path) -> No
     api, lib = out / "api", out / "lib"
     api.mkdir()
     lib.mkdir()
-    for name in ("ratings.mjs", "rating_api.mjs", "rating_store.mjs"):
+    for name in ("ratings.mjs", "rating_api.mjs", "rating_store.mjs", "events.mjs", "events_api.mjs", "events_store.mjs"):
         text = (here / "api" / name).read_text(encoding="utf-8").replace("'../site/src/", "'../lib/")
         (api / name).write_text(text, encoding="utf-8")
     (api / "core_build.mjs").write_text(f'export const CORE_WASM_B64 = "{b64}";\n', encoding="utf-8")
     shutil.copy2(here / "api" / "rating_schema.sql", out / "rating_schema.sql")
-    for name in ("core.js", "replay.js", "ratingrules.js", "rating.js"):
+    shutil.copy2(here / "api" / "events_schema.sql", out / "events_schema.sql")
+    for name in ("core.js", "replay.js", "ratingrules.js", "rating.js", "telemetry.js"):
         shutil.copy2(here / "site" / "src" / name, lib / name)
     # the page modules are ES modules: the function's package says so
     (out / "package.json").write_text(json.dumps({"name": "iron-echo-site", "private": True, "type": "module", "engines": {"node": "22.x"}}, indent=2) + "\n", encoding="utf-8")

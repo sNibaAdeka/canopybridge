@@ -401,6 +401,31 @@ export class TraceRecorder {
     this.tapeOpen = true;
     this.tapeEnd = Infinity;
     this.decisions = []; // what the game was told: { t, punch, kick }
+    this.session = null; // Collection Mode: every frame (≤ 31 a second) from beginSession() to endSession()
+  }
+
+  beginSession(maxSeconds = 900) {
+    this.session = { frames: [], decisions: [], maxSeconds, lastT: -Infinity };
+  }
+
+  endSession() {
+    const s = this.session;
+    this.session = null;
+    if (!s || !s.frames.length) return { t0: 0, seconds: 0, frames: [], decisions: [] };
+    const t0 = s.frames[0].t;
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    return { t0, seconds: s.frames[s.frames.length - 1].t - t0, frames: s.frames.map((f) => this._enc(f, t0)),
+      decisions: s.decisions.map((d) => ({ t: r3(d.t - t0), punch: d.punch, kick: d.kick, lag: d.lag })) };
+  }
+
+  _enc(f, t0) {
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    return f.a ? {
+      t: r3(f.t - t0),
+      w: Array.from({ length: 33 }, (_, i) => [r3(f.a[i * 4]), r3(f.a[i * 4 + 1]), r3(f.a[i * 4 + 2]), r2(f.a[i * 4 + 3])]),
+      i: f.a[132] < -5 ? null : Array.from({ length: 33 }, (_, k) => [r3(f.a[132 + k * 2]), r3(f.a[133 + k * 2])]),
+    } : { t: r3(f.t - t0), w: null, i: null };
   }
 
   add(t, world, image) {
@@ -415,6 +440,8 @@ export class TraceRecorder {
       }
     }
     const f = { t, a };
+    const s = this.session;
+    if (s && t - s.lastT >= 1 / 31 && (!s.frames.length || t - s.frames[0].t <= s.maxSeconds)) { s.frames.push(f); s.lastT = t; }
     if (this.tapeOpen) {
       if (!this.tape.length || (t <= this.tapeEnd && t - this.tape[0].t <= this.tapeSeconds)) this.tape.push(f);
       else this.tapeOpen = false;
@@ -427,18 +454,18 @@ export class TraceRecorder {
   // calibration is over: a second more goes on the tape, then it closes
   calibrated(t) { if (this.tapeEnd === Infinity) this.tapeEnd = t + 1; }
 
-  note(t, punch, kick) { this.decisions.push({ t, punch, kick }); }
+  // lag: seconds from the frame's capture to the moment the game took the decision (camera clock and page clock are the same timeline)
+  note(t, punch, kick, lag = null) {
+    const d = { t, punch, kick, lag: lag === null || !Number.isFinite(lag) ? null : Math.round(lag * 1000) / 1000 };
+    this.decisions.push(d);
+    if (this.session) this.session.decisions.push(d);
+  }
 
   build(meta = {}) {
     const r3 = (v) => Math.round(v * 1000) / 1000;
-    const r2 = (v) => Math.round(v * 100) / 100;
     const first = this.tape.length ? this.tape[0] : this.frames[0];
     const t0 = first ? first.t : 0;
-    const enc = (f) => (f.a ? {
-      t: r3(f.t - t0),
-      w: Array.from({ length: 33 }, (_, i) => [r3(f.a[i * 4]), r3(f.a[i * 4 + 1]), r3(f.a[i * 4 + 2]), r2(f.a[i * 4 + 3])]),
-      i: f.a[132] < -5 ? null : Array.from({ length: 33 }, (_, k) => [r3(f.a[132 + k * 2]), r3(f.a[133 + k * 2])]),
-    } : { t: r3(f.t - t0), w: null, i: null });
+    const enc = (f) => this._enc(f, t0);
     const tapeLast = this.tape.length ? this.tape[this.tape.length - 1].t : -Infinity;
     const ring = this.frames.filter((f) => f.t > tapeLast + 1e-6);
     return {
@@ -446,7 +473,7 @@ export class TraceRecorder {
       seconds: this.frames.length ? this.frames[this.frames.length - 1].t - this.frames[0].t : 0,
       tape: this.tape.map(enc),   // the start of the session, calibration included
       frames: ring.map(enc),      // then the last seconds (times continue the same clock; a gap is normal)
-      decisions: this.decisions.map((d) => ({ t: r3(d.t - t0), punch: d.punch, kick: d.kick })),
+      decisions: this.decisions.map((d) => ({ t: r3(d.t - t0), punch: d.punch, kick: d.kick, lag: d.lag })),
     };
   }
 }
@@ -1036,6 +1063,11 @@ export class CameraInput {
     this.lostShown = false;
     this.rec = new TraceRecorder(25);
     this.lastT = 0;
+    // anonymous statistics (main.js passes its telemetry track function): camera tried, calibrated, quality every 30 s
+    this.onEvent = typeof opts.onEvent === 'function' ? opts.onEvent : () => {};
+    this.startedAt = 0;
+    this.calibratedSent = false;
+    this.qualityAt = 0;
     this.taps = {};
     this.streams = {};
     this._ui();
@@ -1083,6 +1115,8 @@ export class CameraInput {
 
   async start() {
     this.box.hidden = false;
+    this.startedAt = performance.now();
+    this.onEvent('camera_try', { source: this.source, model: this.model, second: this.second });
     if (this.source === 'phone') {
       await this._pairPhone();
     } else if (this.second === 'phones') {
@@ -1360,6 +1394,12 @@ export class CameraInput {
     this._watchLight();
     this._watchLost();
     this._watchSecond();
+    const now = performance.now();
+    if (now - this.qualityAt > 30000) {
+      this.qualityAt = now;
+      this.onEvent('camera_quality', { fps: this.fps || 0, inferMs: this.inferMs || 0, light: this.light ? this.light.centre : -1, status: this.proc.status,
+        delegate: this.detector ? this.detector.delegate || '' : '', calibrated: !!this.proc.cal, second: this.secondState });
+    }
   }
 
   // Brightness of the picture. A dark room or a window behind the player is the most common reason for "the camera does not see me",
@@ -1670,7 +1710,15 @@ export class CameraInput {
     this.lastT = t;
     this.rec.add(t, world, image);
     this.proc.process(world, t, image);
-    if (this.proc.cal) this.rec.calibrated(t);
+    if (this.proc.cal) {
+      this.rec.calibrated(t);
+      if (!this.calibratedSent) {
+        this.calibratedSent = true;
+        const c = this.proc.cal;
+        this.onEvent('camera_calibrated', { ms: performance.now() - this.startedAt, punchCal: !!(c.punchLimits && c.punchLimits[0]), blockPose: !!c.blockPose,
+          knees: c.kneesSeen, ankles: c.anklesSeen, fps: this.fps || 0 });
+      }
+    }
   }
 
   // Many webcams cut the exposure when asked for 60 frames a second, and a dim room then gives a dark picture the model cannot read:
@@ -1720,8 +1768,16 @@ export class CameraInput {
   poll() {
     if (this.hold) return { status: 6, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, confidence: 0 }; // 6: calibrating
     const r = this.proc.poll();
-    if (r.punchMask || r.kickMask) this.rec.note(this.lastT, r.punchMask, r.kickMask);
+    // the decision is written with the capture time of the frame it came from and how long after that capture the game took it
+    if (r.punchMask || r.kickMask) this.rec.note(this.lastT, r.punchMask, r.kickMask, performance.now() / 1000 - this.lastT);
     return r;
+  }
+
+  // a new calibration from scratch (Collection Mode, before every condition)
+  recalibrate() {
+    this.proc = new PoseProcessor((title, progress, note) => this._say(title, progress, note));
+    this.lostShown = false;
+    this._say(STEPS.neutral, 0, 'Настройка камеры: стойка, блок, уклоны, удары в экран.');
   }
 
   // F4: save the last 25 seconds of what the camera gave the game (skeleton numbers only; a gzip file when the browser can, else plain JSON)

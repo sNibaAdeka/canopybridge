@@ -147,8 +147,8 @@ git status --short; git log --oneline | head -5
 ## 1.10 Files you will create (new, expected paths)
 
 ```
-IronEcho/Tools/Eval/eval_camera.mjs            evaluation harness (file 04)
-IronEcho/Tools/Eval/README.md
+IronEcho/Tools/Build/Eval/eval_camera.mjs            evaluation harness (file 04)
+IronEcho/Tools/Build/Eval/README.md
 IronEcho/Tests/Web/golden/*.json.gz            golden traces
 IronEcho/Docs/Testing/CAMERA_ACCURACY.md       generated table
 IronEcho/Docs/Testing/ONBOARDING_TESTS.md      onboarding timings

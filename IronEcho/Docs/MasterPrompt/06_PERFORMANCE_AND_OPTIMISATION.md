@@ -46,7 +46,7 @@ GPU class detection for telemetry: `WEBGL_debug_renderer_info` renderer string â
 - Budget file `Tests/Web/perf_budget.json` with maxima (e.g. `htmlBytes`, `menuReadyMs`, `frameMsP95`); CI fails if exceeded by > 10 %.
 
 ### 6.3.3 Manual traces
-- Chrome DevTools Performance trace of a 20 s bout (owner or tester machine); share the JSON. Look for long tasks, GC, GPU idle gaps. `Tools/Eval/trace_summary.mjs` can parse the trace and print long tasks (optional).
+- Chrome DevTools Performance trace of a 20 s bout (owner or tester machine); share the JSON. Look for long tasks, GC, GPU idle gaps. `Tools/Build/Eval/trace_summary.mjs` can parse the trace and print long tasks (optional).
 
 ## 6.4 Loading performance (workstream 4a)
 

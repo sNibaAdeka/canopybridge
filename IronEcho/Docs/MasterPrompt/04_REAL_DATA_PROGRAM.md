@@ -116,7 +116,7 @@ The recorder stores measured luma, estimated distance (body height fraction), an
 Target minimum for decisions: 8 participants, ≥ 3 camera models, ≥ 2 with glasses or loose clothing.
 Incentive: credit in the game ("Первопроходцы" list), early access, a special robot colourway. No money without owner's approval.
 
-## 4.4 Evaluation harness — spec (`Tools/Eval/eval_camera.mjs`)
+## 4.4 Evaluation harness — spec (`Tools/Build/Eval/eval_camera.mjs`)
 
 ### 4.4.1 Inputs
 - Folder of `ironecho-session-*.json(.gz)` and/or `ironecho-trace-*.json(.gz)` (traces without cues are evaluated only for false positives and loss).
@@ -144,7 +144,7 @@ Incentive: credit in the game ("Первопроходцы" list), early access,
 - A markdown file `Docs/Testing/CAMERA_ACCURACY.md` with: date, game version, git commit, participants (anonymous ids), table, top-3 failures with the worst timestamps and a link to plotting command.
 - Machine-readable `eval.json` for CI and plotting.
 
-### 4.4.5 Plotting helper (`Tools/Eval/plot_cue.py`)
+### 4.4.5 Plotting helper (`Tools/Build/Eval/plot_cue.py`)
 Given a session and a cue index, plot (matplotlib): wrist/elbow/shoulder image coordinates, world depth, speed, hand scale, and the detector states with the cue window highlighted. Use it for every failure analysis. Saves PNG to the scratchpad.
 
 ### 4.4.6 Tests for the evaluator
@@ -227,7 +227,7 @@ Decision matrix per strike (applied after table exists):
 2. Perform 20 slow-start, clear straight punches toward the screen with ~3 s rest.
 3. Send the video (or analyse it yourself by uploading to the scratchpad).
 
-### 4.8.3 Analysis script (`Tools/Eval/latency_from_video.py`)
+### 4.8.3 Analysis script (`Tools/Build/Eval/latency_from_video.py`)
 - Extract frames (ffmpeg), detect flash events (brightness jump in the screen region), detect punch onset (frame difference in the arm region exceeds threshold), compute the difference in frames × 1000/fps.
 - Output p50/p95 and histogram; compare with internal `decision_time - capture_time` from the game log to estimate the unmeasured portion (display + camera exposure).
 
@@ -245,8 +245,8 @@ In the game, each strike decision records: `captureTime` (video frame timestamp)
 
 - [ ] `collect.js` + protocol JSON + route, tested headless
 - [ ] session schema JSON (`Docs/Testing/session.schema.json`) + validator in the evaluator
-- [ ] `Tools/Eval/eval_camera.mjs` + README + unit tests
-- [ ] `Tools/Eval/plot_cue.py`, `latency_from_video.py`
+- [ ] `Tools/Build/Eval/eval_camera.mjs` + README + unit tests
+- [ ] `Tools/Build/Eval/plot_cue.py`, `latency_from_video.py`
 - [ ] one-page owner script for recording (file 11)
 - [ ] `CAMERA_ACCURACY.md` generated from real data
 - [ ] golden set + CI job

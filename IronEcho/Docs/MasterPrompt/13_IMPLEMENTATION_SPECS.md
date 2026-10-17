@@ -146,11 +146,11 @@ Full-screen overlay `#collect` with big text (≥ 48 px), progress bar, preview 
 3. Counterbalance: orders differ for participants 0..3 and cover all blocks.
 4. File size < 12 MB gz for 3 conditions of the synthetic fighter at 30 fps.
 
-## 13.4 `Tools/Eval/eval_camera.mjs`
+## 13.4 `Tools/Build/Eval/eval_camera.mjs`
 
 ### CLI
 ```
-node Tools/Eval/eval_camera.mjs <folder|file...> [--md Docs/Testing/CAMERA_ACCURACY.md] [--json out.json] [--condition A] [--participants p1,p2]
+node Tools/Build/Eval/eval_camera.mjs <folder|file...> [--md Docs/Testing/CAMERA_ACCURACY.md] [--json out.json] [--condition A] [--participants p1,p2]
                                 [--pose Tools/Build/Web/site/src/pose.js] [--calib synthetic|recorded]
 ```
 ### Core loop (pseudo)
@@ -186,7 +186,7 @@ Bootstrap CI: resample participants 1000× with seeded RNG.
 // runs the same evaluator on the segments, compares with expects (>= for hits, <= for FP)
 // prints a table, exits 1 on regression
 ```
-Update tool: `node Tools/Eval/golden_update.mjs --reason "…"` rewrites `expects` from the current build and appends the reason to `Tests/Web/golden/CHANGELOG.md`. Requires the owner's knowledge (state in the report).
+Update tool: `node Tools/Build/Eval/golden_update.mjs --reason "…"` rewrites `expects` from the current build and appends the reason to `Tests/Web/golden/CHANGELOG.md`. Requires the owner's knowledge (state in the report).
 
 ## 13.6 Service worker (`sw.js`)
 

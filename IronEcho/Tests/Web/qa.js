@@ -1,6 +1,6 @@
 // IRON ECHO release QA for the browser game (the same build is /play on the website and the Windows app).
 //
-//   node Tests/Web/qa.js [--only flows,ui,ring,camera,offline,animation,soak]
+//   node Tests/Web/qa.js [--only flows,ui,ring,camera,offline,animation,collect,soak]
 //
 // Needs Playwright with Chromium (NODE_PATH pointing at a node_modules that has `playwright`) and a built
 // Build/Web/standalone (Tools/Build/Web/build_web.py site). IRONECHO_STANDALONE overrides the folder;
@@ -34,7 +34,7 @@ function serve(port) {
 const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok: !!ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? `  (${info})` : ''}`); };
 
-async function open(browser, { width = 960, height = 540, blockExternal = true } = {}) {
+async function open(browser, { width = 960, height = 540, blockExternal = true, query = '' } = {}) {
   const page = await browser.newPage({ viewport: { width, height } });
   page.errors = [];
   page.external = [];
@@ -48,9 +48,9 @@ async function open(browser, { width = 960, height = 540, blockExternal = true }
       return r.abort();
     });
   }
-  await page.goto(`http://localhost:${PORT}/`);
+  await page.goto(`http://localhost:${PORT}/${query}`);
   await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
-  await page.click('[data-group="quality"] button[data-value="low"]');
+  if (!query) await page.click('[data-group="quality"] button[data-value="low"]');
   return page;
 }
 
@@ -386,6 +386,35 @@ async function animation(browser) {
   await page.close();
 }
 
+// 1.7: Collection Mode (?collect=1): consent before the camera, the form, the condition screen, recording, the session file
+async function collect(browser) {
+  const page = await open(browser, { query: '?collect=1' });
+  const title = () => page.evaluate(() => document.querySelector('#collect .cl-title') && document.querySelector('#collect .cl-title').textContent);
+  check('collect: opens with the consent screen, the camera is not touched before consent',
+    (await title()) === 'Помоги улучшить камеру' && await page.evaluate(() => !globalThis.IRONECHO_APP.cameraInput && document.querySelector('#menu').hidden));
+  await page.click('#collect button.primary');
+  await page.selectOption('#collect select[name="height"]', '175-190');
+  await page.click('#collect button.primary');
+  await page.waitForFunction(() => { const t = document.querySelector('#collect .cl-title'); return t && /Условие A/.test(t.textContent); }, null, { timeout: 300000 });
+  check('collect: after consent and the form the camera starts and condition A is offered',
+    await page.evaluate(() => { const c = globalThis.IRONECHO_APP.cameraInput; return !!(c && c.active); }), await title());
+  await page.click('#collect button.primary');
+  // software rendering here: a detection takes seconds, so wait for the first recorded frames rather than a fixed time
+  await page.waitForFunction(() => { const c = globalThis.IRONECHO_APP.cameraInput; return c.rec.session && c.rec.session.frames.length >= 2; }, null, { timeout: 120000 }).catch(() => {});
+  const rec = await page.evaluate(() => { const c = globalThis.IRONECHO_APP.cameraInput; return { session: !!c.rec.session, frames: c.rec.session ? c.rec.session.frames.length : 0, cuesHidden: document.querySelector('#collect .cl-cue').hidden }; });
+  check('collect: the condition starts a fresh calibration and records the session (no cues before calibration)', rec.session && rec.frames > 0 && rec.cuesHidden, JSON.stringify(rec));
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.evaluate(() => globalThis.IRONECHO_APP.collect._saveCondition([
+    { kind: 'hook', side: 'L', target: 'head', block: 'hook', t: performance.now() / 1000, dur: 1.4, hold: 0, status: 'ok' }]))]);
+  const raw = fs.readFileSync(await dl.path());
+  const data = JSON.parse((raw[0] === 0x1f && raw[1] === 0x8b ? require('zlib').gunzipSync(raw) : raw).toString('utf8'));
+  check('collect: the condition is saved as ironecho-session-…-A.json.gz (skeleton numbers, cues, participant answers only)',
+    /^ironecho-session-p_[0-9a-f]{6}-A\.json(\.gz)?$/.test(dl.suggestedFilename()) && data.format === 'ironecho-session' && data.participant.height === '175-190'
+    && data.cues.length === 1 && Array.isArray(data.frames) && !JSON.stringify(data).includes('data:image'), `${dl.suggestedFilename()}, ${raw.length} bytes, ${data.frames.length} frames`);
+  check('collect: the next condition is offered', /Условие B/.test(await title()));
+  check('collect: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
+  await page.close();
+}
+
 async function soak(browser) {
   const page = await open(browser, { width: 640, height: 360 });
   await page.click('#start');
@@ -420,6 +449,7 @@ const PORT = 8790 + Math.floor(Math.random() * 100);
     if (want('camera')) await camera(browser);
     if (want('offline')) await offline(browser);
     if (want('animation')) await animation(browser);
+    if (want('collect')) await collect(browser);
     if (want('soak')) await soak(browser);
   } finally {
     await browser.close();

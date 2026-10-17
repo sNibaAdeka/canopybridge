@@ -14,7 +14,7 @@ Goal: be able to measure the camera on real people and the product in the wild.
 | 1 | Fix stale test `check_fusion_session.mjs` (update scenario or delete) | green or removed | CI list |
 | 1–2 | Telemetry client + `api/events.mjs` + migration + test | `telemetry.js`, SQL, tests | `telemetry_test.mjs` green; manual POST 204 |
 | 2–3 | Collection Mode (UI + runner + protocol JSON + file writer) | `collect.js`, `collect_protocol.json` | `collect_test.mjs` green with synthetic fighter |
-| 3–4 | Evaluation harness (`eval_camera.mjs`) + schema + plotting | `Tools/Eval/*` | unit tests; synthetic session yields expected recall |
+| 3–4 | Evaluation harness (`eval_camera.mjs`) + schema + plotting | `Tools/Build/Eval/*` | unit tests; synthetic session yields expected recall |
 | 4 | Latency test mode + internal timeline log + analysis script | `?latency=1`, `latency_from_video.py` | synthetic video test (generated frames with flash) yields known latency |
 | 5 | Health page skeleton, feedback button, flags.json | `/admin/health`, UI | manual run with synthetic events |
 | 5–6 | CI skeleton + `verify.py` | workflow, script | `verify.py --fast` green locally |

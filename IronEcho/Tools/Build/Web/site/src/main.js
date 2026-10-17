@@ -30,6 +30,29 @@ const app = {
   camPos: new THREE.Vector3(-4.5, 2.6, 2.6), camLook: new THREE.Vector3(0, 1.3, 0), loaded: false,
 };
 
+// ---------------------------------------------------------------- anonymous statistics (telemetry.js; Settings switch #tele)
+const PAGE_DEPS = globalThis.IRONECHO_DEPS || {};
+const tele = typeof Telemetry !== 'undefined'
+  ? new Telemetry({ version: PAGE_DEPS.version || '', endpoint: PAGE_DEPS.eventsApi || '', force: !!globalThis.IRONECHO_FORCE_TELEMETRY }) : null;
+const track = (type, props) => { if (tele) tele.track(type, props); };
+if (tele) {
+  tele.start();
+  track('page_open', { lang: (navigator.language || '').slice(0, 5), standalone: !!PAGE_DEPS.glb, touch: 'ontouchstart' in window });
+}
+// frame-rate samples during a bout, one event every 30 s
+const fpsStats = { frames: 0, time: 0, worst: 0, slow: 0, last: 0 };
+function sampleFps(raw) {
+  if (app.state !== 'playing' || document.hidden || raw > 0.5) return;
+  fpsStats.frames++;
+  fpsStats.time += raw;
+  fpsStats.worst = Math.max(fpsStats.worst, raw);
+  if (raw > 1 / 30) fpsStats.slow++;
+  if (fpsStats.time < 30) return;
+  track('fps_sample', { avg: fpsStats.frames / fpsStats.time, worstMs: fpsStats.worst * 1000, slowShare: fpsStats.slow / fpsStats.frames,
+    scale: resScale, tier: settings.quality, control: app.cameraInput && app.cameraInput.active ? 'camera' : 'keys', dpr: window.devicePixelRatio || 1 });
+  fpsStats.frames = fpsStats.time = fpsStats.worst = fpsStats.slow = 0;
+}
+
 app.viewSlot = 0;   // whose back the camera is behind: 0 = the first fighter (always, except as the guest of an online duel)
 app.versus = null;  // online duel: { room, slot, lock, ctl }
 const meKey = () => (app.viewSlot === 1 ? 'opponent' : 'player');
@@ -157,6 +180,14 @@ async function buildWorld() {
   window.addEventListener('resize', resize);
   resize();
   app.loaded = true;
+  if (tele) {
+    try {
+      const gl = app.renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      tele.setGpu(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    } catch { /* no renderer string */ }
+    track('game_loaded', { ms: performance.now(), cores: navigator.hardwareConcurrency || 0 });
+  }
 }
 
 // Graphics quality: pixel-ratio cap and shadowed spots; switchable live from the menu.
@@ -226,6 +257,10 @@ function startBout(versus) {
   if (online) app.core.init({ mode: 2, level: 1, seed, rounds: 0, roundSeconds });
   else app.core.init({ mode, level: settings.level, seed, rounds: 0, roundSeconds });
   ratingBegin(online, mode, seed, roundSeconds);
+  app.boutStartedAt = performance.now();
+  app.firstPunchSent = false;
+  track('bout_start', { mode: online ? 'online' : settings.mode, level: settings.level, online: !!online,
+    control: settings.control === 'camera' || settings.control === 'phone' ? 'camera' : ('ontouchstart' in window ? 'touch' : 'keys') });
   app.anim.opponent.isBot = !online; // a human opponent winds up like a human
   app.hud.setNames(online ? (app.viewSlot === 0 ? `${NAMES[0]} · ТЫ` : NAMES[0]) : NAMES[0],
     online ? (app.viewSlot === 1 ? `${NAMES[1]} · ТЫ` : NAMES[1]) : (app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][settings.level]}`));
@@ -261,13 +296,15 @@ function startBout(versus) {
   $('#pad').hidden = useCamera || !('ontouchstart' in window || navigator.maxTouchPoints > 0);
   app.cameraWanted = useCamera; // until the camera is up (permission, model, second phone) the fight must wait, not run on the keyboard
   if (useCamera && !app.cameraInput) {
-    app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait });
+    app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait, onEvent: track });
     app.cameraInput.key = cameraKey;
     app.cameraInput.start().catch((err) => {
       console.error(err);
       app.cameraInput.stop();
       app.cameraInput = null;
       app.cameraWanted = false;
+      const msg = String(err && err.name ? err.name : err);
+      track('camera_fail', { reason: /NotAllowed|Permission/i.test(msg) ? 'denied' : /NotReadable|TrackStart/i.test(msg) ? 'busy' : /NotFound|Overconstrained/i.test(msg) ? 'none' : 'other' });
       app.hud.banner('КАМЕРА НЕДОСТУПНА', String(err && err.message ? err.message : err).slice(0, 90) + ' — играю с клавиатуры', 4, 'warn');
     });
   }
@@ -345,6 +382,10 @@ function onCombat(e, snap) {
   const me = meKey();
   const playerActs = e.actor === app.viewSlot;
   const type = e.typeName;
+  if (type === 'AttackStarted' && playerActs && !app.firstPunchSent && app.boutStartedAt) {
+    app.firstPunchSent = true;
+    track('first_punch', { ms: performance.now() - app.boutStartedAt, kind: e.kind });
+  }
   if (type === 'AttackActive') {
     app.sound.whoosh(e.hand === 1 ? 1.1 : 0.85);
     return;
@@ -460,6 +501,12 @@ function onMatch(e, snap) {
     app.anim.player.outcome = m.hasWinner ? (m.winner === 0 ? 'win' : 'lose') : '';
     app.anim.opponent.outcome = m.hasWinner ? (m.winner === 1 ? 'win' : 'lose') : '';
     app.resultTimer = 2.6;
+    const me = snap[meKey()];
+    track('bout_end', { result: m.hasWinner ? (m.winner === app.viewSlot ? 'win' : 'loss') : 'draw', method: m.result, rounds: m.round,
+      seconds: (performance.now() - (app.boutStartedAt || performance.now())) / 1000, level: settings.level, online: !!app.versus,
+      control: app.cameraInput && app.cameraInput.active ? 'camera' : 'keys', thrown: me.thrown, landed: me.landed, knockdowns: snap[meKey() === 'player' ? 'opponent' : 'player'].knockdowns });
+    track('strike_use', { counts: { hooks: me.hooksThrown, uppercuts: me.uppercutsThrown, kicks: me.kicksThrown, elbows: me.elbowsThrown,
+      knees: me.kneesThrown, ducks: me.ducksMade, blocks: me.blocksMade, dodges: me.dodgesMade } });
     ratingFinish();
   } else if (type === 'Paused' && e.reason === 2) {
     app.hud.banner('ТРЕКИНГ ПОТЕРЯН', app.versus ? 'один из вас выпал из кадра' : 'встань в кадр', 2.0, 'warn');
@@ -1012,14 +1059,39 @@ const cameraPending = () => !!app.cameraWanted && !(app.cameraInput && app.camer
 function currentInput() {
   if (app.state !== 'playing') return { status: 7, lean: 0, block: 0, punchMask: 0 };
   if (cameraPending()) return CAMERA_PENDING;
-  return app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll();
+  if (!(app.cameraInput && app.cameraInput.active)) return app.input.poll();
+  const out = app.cameraInput.poll();
+  if (LATENCY_TEST && (out.punchMask || out.kickMask)) latencyFlash();
+  return out;
+}
+
+// ?latency=1: the moment the game accepts a strike from the camera, the top-left corner flashes white for two frames and clicks. A phone
+// filming the player and the screen at 60 fps then shows the whole delay: frames from the start of the movement to the flash
+// (Tools/Build/Eval/latency_from_video.py counts them).
+const LATENCY_TEST = new URLSearchParams(location.search).has('latency');
+let latencyEl = null;
+function latencyFlash() {
+  if (!latencyEl) {
+    latencyEl = document.createElement('div');
+    latencyEl.style.cssText = 'position:fixed;left:0;top:0;width:min(18vw,180px);height:min(18vw,180px);background:#fff;z-index:50;pointer-events:none';
+    document.body.appendChild(latencyEl);
+  }
+  latencyEl.hidden = false;
+  app.sound.ui();
+  requestAnimationFrame(() => requestAnimationFrame(() => { latencyEl.hidden = true; }));
+}
+if (LATENCY_TEST) {
+  const warn = document.createElement('div');
+  warn.textContent = 'Режим замера задержки: при каждом принятом ударе левый верхний угол вспыхивает белым. Если вспышки неприятны — закрой эту страницу.';
+  warn.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:50;max-width:92vw;padding:8px 14px;border-radius:6px;background:rgba(10,11,14,.9);color:#ffb020;font:600 13px Inter,system-ui,sans-serif;pointer-events:none';
+  document.body.appendChild(warn);
 }
 app.currentInput = currentInput;
 
 // One simulation + animation step (no rendering).
 function step(dt, input, now) {
   if (app.state === 'paused') return; // frozen frame behind the pause panel
-  if (app.state !== 'menu') {
+  if (app.state !== 'menu' && app.state !== 'collect') {
     if (app.versus) netStep(dt); else app.core.frame(dt, input);
     const snap = app.core.snapshot();
     smoothJumps(snap, dt);
@@ -1115,6 +1187,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const raw = (now - last) / 1000;
   perfOverlay(now, raw);
+  sampleFps(raw);
   const dt = Math.min(0.1, raw);
   last = now;
   if (!app.loaded || app.frozen) return;
@@ -1169,6 +1242,7 @@ function wireMenu() {
   for (const b of document.querySelectorAll('[data-group="control"] button')) b.addEventListener('click', syncCam2);
   syncCam2();
   $('#start').addEventListener('click', async () => {
+    track('cta_click', { where: 'menu', mode: settings.mode, control: settings.control });
     // once per page load: the table needs a name (automated browsers are not asked, unless a test forces it)
     if (rating.enabled && !rating.nick && settings.mode !== 'training' && !app.nickAsked && (!navigator.webdriver || globalThis.IRONECHO_FORCE_NICK_PROMPT)) {
       app.nickAsked = true;
@@ -1203,7 +1277,7 @@ function wireMenu() {
   $('#resume').addEventListener('click', resumeBout);
   $('#restart').addEventListener('click', () => startBout());
   $('#to-menu').addEventListener('click', toMenu);
-  $('#rematch').addEventListener('click', () => startBout());
+  $('#rematch').addEventListener('click', () => { track('rematch', {}); startBout(); });
   $('#to-online').addEventListener('click', openLobby);
   $('#on-back').addEventListener('click', closeLobby);
   $('#on-video').checked = settings.shareVideo !== false;
@@ -1217,6 +1291,12 @@ function wireMenu() {
     app.sound.setEnabled(!app.sound.enabled);
     $('#sound').textContent = app.sound.enabled ? 'Звук: вкл' : 'Звук: выкл';
   });
+  const teleBtn = $('#tele');
+  if (teleBtn) {
+    const syncTele = () => { teleBtn.hidden = !tele || !tele.endpoint; teleBtn.textContent = tele && tele.enabled ? 'Статистика: вкл' : 'Статистика: выкл'; };
+    teleBtn.addEventListener('click', () => { if (tele) tele.setEnabled(!tele.enabled); syncTele(); });
+    syncTele();
+  }
   $('#pause-btn').addEventListener('click', togglePause);
   for (const b of document.querySelectorAll('.fs-toggle')) b.addEventListener('click', toggleFullscreen);
   document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
@@ -1276,6 +1356,21 @@ offerCameraDownload();
 {
   const room = new URLSearchParams(location.search).get('room');
   if (room) { openLobby(); joinRoom(room); }
+}
+// ?collect=1: Collection Mode (collect.js): a guided recording of strikes for tuning the camera; no bout
+if (new URLSearchParams(location.search).has('collect') && typeof CollectMode !== 'undefined' && typeof CameraInput !== 'undefined') {
+  $('#menu').hidden = true;
+  app.state = 'collect';
+  app.collect = new CollectMode({
+    stage: $('#stage'), version: PAGE_DEPS.version || '', onEvent: track,
+    makeCamera: async () => {
+      const cam = new CameraInput('webcam', { model: settings.tracking, onEvent: track });
+      app.cameraInput = cam;
+      await cam.start();
+      return cam;
+    },
+  });
+  app.collect.start();
 }
 ensureWorld().catch((err) => {
   console.error(err);
