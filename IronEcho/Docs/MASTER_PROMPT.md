@@ -1,3 +1,5 @@
+> Superseded by `Docs/MasterPrompt/` (see INDEX.md). Kept for history.
+
 # IRON ECHO — Master Prompt for building the finished game
 
 Paste everything below the line into a fresh AI coding session (Claude Code, with this repository checked out) as the first message. It is self-contained. The owner is **Adyoka** (call them Адёка, reply in Russian unless asked otherwise). Companion documents: `IronEcho/Docs/DEMO_PLAN.md` (demo path), `IronEcho/PROJECT_STATE.md` (current truth), `IronEcho/CLAUDE.md` (rules, file ownership).

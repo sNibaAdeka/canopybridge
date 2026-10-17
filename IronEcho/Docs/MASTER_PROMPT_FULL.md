@@ -1,3 +1,5 @@
+> Superseded by `Docs/MasterPrompt/` (see INDEX.md). Kept for history.
+
 # IRON ECHO — FULL MASTER PROMPT (product, engineering, optimisation, UX, marketing)
 
 How to use: open a fresh Claude Code session in this repository and paste everything below the first horizontal rule as the first message. It is self-contained and supersedes `MASTER_PROMPT.md` (the short version). Companion files the AI must read first: `IronEcho/PROJECT_STATE.md`, `IronEcho/CLAUDE.md`, `IronEcho/Docs/DEMO_PLAN.md`, `IronEcho/Docs/Handoffs/LOCKS.md`.
