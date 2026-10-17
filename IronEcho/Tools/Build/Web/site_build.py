@@ -17,12 +17,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.7.0"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.7.1"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
 # the full game (everything the browser page runs), in bundling order
-GAME_BUNDLE = ["meshopt", "telemetry", "ratingrules", "replay", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "net", "rating", "camlink", "fusion", "poseworker", "pose", "collect", "main"]
+GAME_BUNDLE = ["meshopt", "telemetry", "ratingrules", "replay", "core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "tutorial", "net", "rating", "camlink", "fusion", "poseworker", "pose", "collect", "main"]
 # where the Windows app sends a phone to pair as a second camera (the phone needs an https page; the app's own server is http)
 PUBLIC_SITE = os.environ.get("IRONECHO_PUBLIC_URL", "https://iron-echo-boxing.vercel.app").rstrip("/")
 # the rating server (api/ratings on the public site); the Windows app and the downloadable pages rate through it too

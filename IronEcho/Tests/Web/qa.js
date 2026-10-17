@@ -1,6 +1,6 @@
 // IRON ECHO release QA for the browser game (the same build is /play on the website and the Windows app).
 //
-//   node Tests/Web/qa.js [--only flows,ui,ring,camera,offline,animation,collect,soak]
+//   node Tests/Web/qa.js [--only flows,ui,ring,camera,offline,animation,collect,onboarding,soak]
 //
 // Needs Playwright with Chromium (NODE_PATH pointing at a node_modules that has `playwright`) and a built
 // Build/Web/standalone (Tools/Build/Web/build_web.py site). IRONECHO_STANDALONE overrides the folder;
@@ -34,7 +34,7 @@ function serve(port) {
 const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok: !!ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? `  (${info})` : ''}`); };
 
-async function open(browser, { width = 960, height = 540, blockExternal = true, query = '' } = {}) {
+async function open(browser, { width = 960, height = 540, blockExternal = true, query = '', openSettings = true, init = null } = {}) {
   const page = await browser.newPage({ viewport: { width, height } });
   page.errors = [];
   page.external = [];
@@ -48,9 +48,11 @@ async function open(browser, { width = 960, height = 540, blockExternal = true, 
       return r.abort();
     });
   }
+  if (openSettings) await page.addInitScript(() => { globalThis.IRONECHO_OPEN_SETTINGS = true; }); // the tests pick settings directly
+  if (init) await page.addInitScript(init);
   await page.goto(`http://localhost:${PORT}/${query}`);
   await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
-  if (!query) await page.click('[data-group="quality"] button[data-value="low"]');
+  if (!query) await page.$eval('[data-group="quality"] button[data-value="low"]', (b) => b.click()); // works with the settings folded too
   return page;
 }
 
@@ -120,7 +122,9 @@ async function flows(browser) {
 
 async function ui(browser) {
   const page = await open(browser, { width: 1280, height: 720 });
-  check('menu fits a 1280x720 window without scrolling', await page.evaluate(() => { const m = document.querySelector('#menu'); return m.scrollHeight <= m.clientHeight + 2; }));
+  check('menu fits a 1280x720 window without scrolling', await page.evaluate(() => {
+    const d = document.querySelector('#menu-settings'); d.open = false; // as a player first sees it
+    const m = document.querySelector('#menu'); const fits = m.scrollHeight <= m.clientHeight + 2; d.open = true; return fits; }));
   check('favicon present', await page.evaluate(() => (document.querySelector('link[rel=icon]')?.href || '').startsWith('data:image/png')));
   check('Easy is the default opponent', await page.evaluate(() => document.querySelector('[data-group="level"] button.sel')?.dataset.value === '0'));
   await page.keyboard.press('Enter');
@@ -415,6 +419,73 @@ async function collect(browser) {
   await page.close();
 }
 
+// 1.7.1: one button first, the tutorial for a new player, the results screen, a returning player, the landing page's ?start=1
+const TUTOR = `(() => { const act = { jab: (i) => ({ punchMask: i % 40 === 0 ? 1 : 0 }), cross: (i) => ({ punchMask: i % 40 === 0 ? 2 : 0 }), block: () => ({ block: 1 }),
+    slip: (i) => ({ lean: i % 50 < 25 ? -1 : 0 }), hook: (i) => ({ punchMask: i % 50 === 0 ? 64 : 0 }), step: (i) => ({ moveForward: i % 120 < 60 ? -1 : 1 }) };
+  let last = null, i = 0;
+  return () => { const t = globalThis.IRONECHO_APP.tutorial; const s = t && !t.finished ? t.step : null; if (s !== last) { last = s; i = 0; }
+    return { status: 7, lean: 0, block: 0, punchMask: 0, kickMask: 0, moveForward: 0, moveSide: 0, confidence: 1, ...(s && act[s.id] ? act[s.id](i++) : {}) }; }; })()`;
+async function onboarding(browser) {
+  const page = await open(browser, { width: 1280, height: 720, openSettings: false, init: () => { globalThis.IRONECHO_FORCE_TUTORIAL = true; } });
+  const first = await page.evaluate(() => {
+    const vis = (el) => !!el && (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null); // content of a closed <details> counts as hidden
+    const big = [...document.querySelectorAll('#menu .go')].filter(vis).map((b) => b.id);
+    return { big, settingsOpen: document.querySelector('#menu-settings').open, now: document.querySelector('#menu-now').textContent,
+      level: vis(document.querySelector('[data-group="level"] button')), nick: vis(document.querySelector('#profile')), camLink: vis(document.querySelector('#to-camera')) };
+  });
+  check('onboarding: the first screen has one big button and the settings folded', first.big.join() === 'start' && !first.settingsOpen && !first.level, JSON.stringify(first));
+  check('onboarding: one line under it says what it starts', /Лёгкий соперник/.test(first.now) && /клавиатура/.test(first.now), first.now);
+  check('onboarding: no nickname field before the first bout; the camera is one link', !first.nick && first.camLink);
+  const cam2 = await page.evaluate(() => {
+    const pick = (v) => document.querySelector(`[data-group="control"] button[data-value="${v}"]`).click();
+    pick('camera'); const hidden = document.querySelector('[data-group="camera2"]').hidden; pick('keys'); return hidden; });
+  check('onboarding: the second camera is not offered without ?lab=1', cam2);
+  await page.click('#start');
+  await page.waitForSelector('#tut', { timeout: 30000 });
+  const t0 = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; return { training: a.training, step: a.tutorial && a.tutorial.step.id, card: document.querySelector('#tut .tut-t').textContent }; });
+  check('onboarding: a new player\'s first "В РИНГ" opens the tutorial on the heavy bag', t0.training && t0.step === 'jab' && t0.card === 'ДЖЕБ', JSON.stringify(t0));
+  const t1 = await page.evaluate((src) => {
+    const a = globalThis.IRONECHO_APP; const fn = eval(src); const passed = [];
+    const tut = a.tutorial; const onStep = tut.onStep; tut.onStep = (i, f) => { passed.push(tut.steps[i].id); onStep(i, f); };
+    for (let k = 0; k < 12 && !tut.finished; k++) a.debugAdvance(5, fn);
+    a.debugAdvance(3, fn); // "ГОТОВО", then the bout
+    return { passed, outcome: tut.outcome, cfg: a.boutCfg, training: a.training, left: !!a.tutorial, card: !!document.querySelector('#tut'), saved: localStorage.getItem('ironecho.tutorial') };
+  }, TUTOR);
+  check('onboarding: the scripted player passes all six steps', t1.passed.join(',') === 'jab,cross,block,slip,hook,step' && t1.outcome === 'done', t1.passed.join(','));
+  check('onboarding: then a short bout against Easy starts by itself', !t1.training && !t1.left && !t1.card && t1.cfg.mode === 'short' && t1.cfg.level === 0, JSON.stringify(t1.cfg));
+  check('onboarding: the tutorial is remembered as done', t1.saved === 'done');
+  const res = await page.evaluate((src) => {
+    const a = globalThis.IRONECHO_APP; const fn = eval(src);
+    for (let k = 0; k < 200 && a.state !== 'results'; k++) a.debugAdvance(5, fn);
+    const m = a.core.snapshot().match; const vis = (s) => !document.querySelector(s).hidden;
+    return { state: a.state, won: m.hasWinner && m.winner === 0, tip: vis('#res-tip') ? document.querySelector('#res-tip').textContent : '', chips: document.querySelectorAll('#results .res-chips span').length,
+      up: vis('#res-up'), nick: vis('#res-nick'), rating: a.rating.enabled };
+  }, PLAYER);
+  check('onboarding: results show one tip and the key numbers', res.state === 'results' && res.tip.length > 15 && res.chips >= 5, `${res.chips} chips; ${res.tip}`);
+  check('onboarding: "a stronger opponent" only after a win', res.up === res.won, JSON.stringify({ won: res.won, up: res.up }));
+  check('onboarding: the nickname card comes after the first finished bout', res.nick === res.rating, JSON.stringify({ nick: res.nick, rating: res.rating }));
+  await page.click('#res-menu');
+  check('onboarding: the menu now shows the nickname field', (await page.isVisible('#profile')) === res.rating);
+  await page.reload();
+  await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
+  await page.click('#start');
+  const again = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; return { state: a.state, training: a.training, tutorial: !!a.tutorial }; });
+  check('onboarding: a returning player goes straight into the bout', again.state === 'playing' && !again.training && !again.tutorial, JSON.stringify(again));
+  await page.evaluate(() => { document.querySelector('#pause-btn').click(); document.querySelector('#to-menu').click(); });
+  await page.click('#to-tutorial');
+  await page.waitForSelector('#tut', { timeout: 30000 });
+  await page.click('#tut .tut-skip');
+  const skipped = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; return { state: a.state, training: a.training, tutorial: !!a.tutorial, card: !!document.querySelector('#tut') }; });
+  check('onboarding: "Обучение" opens it again and "Пропустить" goes into a bout', skipped.state === 'playing' && !skipped.training && !skipped.tutorial && !skipped.card, JSON.stringify(skipped));
+  check('onboarding: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
+  await page.close();
+  const landing = await open(browser, { query: '?start=1', openSettings: false });
+  await landing.waitForFunction(() => globalThis.IRONECHO_APP.state === 'playing', null, { timeout: 60000 }).catch(() => {});
+  const l = await landing.evaluate(() => ({ state: globalThis.IRONECHO_APP.state, menu: !document.querySelector('#menu').hidden, search: location.search }));
+  check('onboarding: /play/?start=1 from the landing page goes straight into the ring', l.state === 'playing' && !l.menu && !/start/.test(l.search), JSON.stringify(l));
+  await landing.close();
+}
+
 async function soak(browser) {
   const page = await open(browser, { width: 640, height: 360 });
   await page.click('#start');
@@ -450,6 +521,7 @@ const PORT = 8790 + Math.floor(Math.random() * 100);
     if (want('offline')) await offline(browser);
     if (want('animation')) await animation(browser);
     if (want('collect')) await collect(browser);
+    if (want('onboarding')) await onboarding(browser);
     if (want('soak')) await soak(browser);
   } finally {
     await browser.close();

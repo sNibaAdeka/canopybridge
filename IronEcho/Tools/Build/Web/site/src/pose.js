@@ -1090,6 +1090,7 @@ export class CameraInput {
       #cam .cam-q.good i{background:#3ddc84}#cam .cam-q.warn i{background:#ffb020}#cam .cam-q.bad i{background:#ff4b3e}
       #cam .cam-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#3f7dff,#8fb3ff)}
       #cam.big{width:min(46vw,460px)}
+      #cam.small{width:min(17vw,170px);opacity:.85}#cam.small .cam-q span{display:none}
       #cam .cam-guide{position:absolute;inset:7% 27% 5% 27%;border:2px dashed rgba(143,179,255,.6);border-radius:10px;pointer-events:none}
       #cam .cam-guide span{position:absolute;left:50%;transform:translateX(-50%);padding:1px 6px;border-radius:3px;background:rgba(10,11,14,.7);color:#bcd0ff;font:700 10px/1.3 Inter,system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase}
       #cam .cam-guide span:first-child{top:-9px}#cam .cam-guide span:last-child{top:50%}
@@ -1390,6 +1391,8 @@ export class CameraInput {
     // until calibration is done the preview is larger and shows where to stand (head at the top of the frame, hips about half way)
     const calibrating = !this.proc.cal && !this.hold;
     this.box.classList.toggle('big', calibrating && this.second === 'off');
+    // in the fight the preview shrinks to a corner chip so the ring gets the screen; it grows back when the picture goes wrong
+    this.box.classList.toggle('small', !calibrating && !this.lostShown && this.qbox.classList.contains('good'));
     if (this.guide) this.guide.hidden = !calibrating;
     this._watchLight();
     this._watchLost();

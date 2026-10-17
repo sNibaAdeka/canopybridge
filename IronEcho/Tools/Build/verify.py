@@ -31,6 +31,7 @@ def suites(browser: bool) -> list[tuple[str, list[str], str | None]]:
         ("trace", ["node", "Tests/Web/trace_test.mjs"], None),
         ("collect", ["node", "Tests/Web/collect_eval_test.mjs"], None),
         ("telemetry", ["node", "Tests/Web/telemetry_test.mjs"], None),
+        ("tutorial", ["node", "Tests/Web/tutorial_test.mjs"], None),
         ("fusion", ["node", "Tools/Build/Web/check/check_fusion.mjs"], None),
         ("rating", ["node", "Tests/Web/rating_test.mjs"], None),
         ("store", ["node", "Tests/Web/rating_store_test.mjs"], None),

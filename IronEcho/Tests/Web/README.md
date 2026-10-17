@@ -76,3 +76,9 @@ IRONECHO_SYNTHETIC=Build/Web/check/synthetic_session.json node Tests/Web/qa.js  
 Статистика: `node Tests/Web/telemetry_test.mjs` (страница и сервер, без сети). Задержка по видео: `python Tools/Build/Eval/latency_from_video.py --selftest`.
 Всё быстрое одной командой: `python Tools/Build/verify.py` (`--browser` — с браузерными наборами); окружение — `Tools/Build/env.example.sh`.
 
+Простой старт (1.7.1): `node Tests/Web/tutorial_test.mjs` — обучение (`site/src/tutorial.js`) на настоящем ядре: скриптовый игрок делает то, что написано
+на карточке, и проходит все шаги; на сенсоре нет шага ногами; «Пропустить» и «Дальше»; совет экрана итогов (`resultTip`) для каждого случая.
+Группа `qa.js --only=onboarding`: первый экран (одна кнопка, настройки свёрнуты, нет второй камеры без `?lab=1`), обучение до конца → короткий бой → итоги
+с советом и карточкой ника → повторный визит без обучения → «Обучение» и «Пропустить» → `?start=1` с лендинга. Остальные браузерные тесты открывают
+настройки сами (`IRONECHO_OPEN_SETTINGS`), вторая камера — по адресу `?lab=1`.
+

@@ -10,15 +10,25 @@ import { Sparks, Shake } from './fx.js';
 import { Sound } from './audio.js';
 import { ManualInput } from './input.js';
 import { Hud } from './hud.js';
+import { Tutorial, TUTORIAL_KEY, resultTip } from './tutorial.js';
 
 const NAMES = ['FORGE 07', 'EMBER 13'];
 const PHASE_LABEL = { WaitingForPlayer: 'ПРИГОТОВЬСЯ', Paused: 'ПАУЗА' };
 const $ = (s) => document.querySelector(s);
 
-const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off', shareVideo: true }; // Easy first: new players lose ~94% on Normal
+const TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+// Easy first: new players lose ~94% on Normal. fsStart: "В РИНГ" also goes full screen (desktop yes, phones no)
+const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off', shareVideo: true, fsStart: !TOUCH };
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
 } catch { /* storage unavailable: defaults */ }
+const PAGE_QUERY = new URLSearchParams(location.search);
+const LAB = PAGE_QUERY.has('lab'); // ?lab=1: the experimental second camera
+if (!LAB) settings.camera2 = 'off';
+const pageStore = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
 const saveSettings = () => { try { localStorage.setItem('ironecho.settings', JSON.stringify(settings)); } catch { /* ignore */ } };
 
 const assetUrl = (name) => (globalThis.IRONECHO_ASSETS && globalThis.IRONECHO_ASSETS[name]) || `assets/${name}`;
@@ -244,26 +254,33 @@ function resize() {
 }
 
 // ---------------------------------------------------------------- flow
-function startBout(versus) {
+// cfg: { mode: 'bout' | 'short' | 'training', level } for this bout only (the tutorial, "a stronger opponent"); the menu's settings otherwise.
+// A rematch repeats the last bout's cfg.
+function startBout(versus, cfg) {
   const online = versus && versus.seed !== undefined ? versus : null; // (click handlers pass an Event: not a match)
   if (app.versus && !online) { app.versus.ctl |= 4; return; } // a rematch in an online duel goes through the lockstep
   if (app.builtQuality !== settings.quality) applyQuality(); // changed while the arena was still loading
   app.vis = null; // a new bout: the fighters start where the rules put them, no slide from the old positions
-  const mode = settings.mode === 'training' ? 1 : 0;
+  const bout = { mode: (cfg && cfg.mode) || settings.mode, level: cfg && cfg.level !== undefined ? cfg.level : settings.level, tutorial: !!(cfg && cfg.tutorial) };
+  if (!bout.tutorial) endTutorial(); // a bout that is not the tutorial's own ends it
+  app.boutCfg = bout;
+  const mode = bout.mode === 'training' ? 1 : 0;
   app.training = !online && mode === 1;
   ratingAbandon(); // the previous bout was left half way: that is a loss
-  const roundSeconds = online ? online.roundSeconds : settings.mode === 'short' ? 45 : 0;
+  const roundSeconds = online ? online.roundSeconds : bout.mode === 'short' ? 45 : 0;
+  app.roundLength = roundSeconds || 90;
   const seed = online ? online.seed : (Date.now() % 100000) + 1;
   if (online) app.core.init({ mode: 2, level: 1, seed, rounds: 0, roundSeconds });
-  else app.core.init({ mode, level: settings.level, seed, rounds: 0, roundSeconds });
+  else app.core.init({ mode, level: bout.level, seed, rounds: 0, roundSeconds });
   ratingBegin(online, mode, seed, roundSeconds);
   app.boutStartedAt = performance.now();
   app.firstPunchSent = false;
-  track('bout_start', { mode: online ? 'online' : settings.mode, level: settings.level, online: !!online,
-    control: settings.control === 'camera' || settings.control === 'phone' ? 'camera' : ('ontouchstart' in window ? 'touch' : 'keys') });
+  app.boutStats = { taken: { straight: 0, hook: 0, upper: 0, body: 0, kick: 0, elbow: 0, knee: 0 }, counters: 0, whiffs: 0, smothered: 0, gassed: 0 };
+  track('bout_start', { mode: online ? 'online' : bout.tutorial ? 'tutorial' : bout.mode, level: bout.level, online: !!online,
+    control: settings.control === 'camera' || settings.control === 'phone' ? 'camera' : (TOUCH ? 'touch' : 'keys') });
   app.anim.opponent.isBot = !online; // a human opponent winds up like a human
   app.hud.setNames(online ? (app.viewSlot === 0 ? `${NAMES[0]} · ТЫ` : NAMES[0]) : NAMES[0],
-    online ? (app.viewSlot === 1 ? `${NAMES[1]} · ТЫ` : NAMES[1]) : (app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][settings.level]}`));
+    online ? (app.viewSlot === 1 ? `${NAMES[1]} · ТЫ` : NAMES[1]) : (app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][bout.level]}`));
   app.hud.resetTrail('p');
   app.hud.resetTrail('o');
   app.hud.hideResults();
@@ -293,7 +310,9 @@ function startBout(versus) {
     app.cameraInput = null;
   }
   $('#help').hidden = useCamera;
-  $('#pad').hidden = useCamera || !('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  $('#help').classList.remove('dim');
+  app.helpTime = 0;
+  $('#pad').hidden = useCamera || !TOUCH;
   app.cameraWanted = useCamera; // until the camera is up (permission, model, second phone) the fight must wait, not run on the keyboard
   if (useCamera && !app.cameraInput) {
     app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait, onEvent: track });
@@ -362,6 +381,7 @@ function toggleFullscreen() {
 }
 
 function toMenu() {
+  endTutorial();
   ratingAbandon();
   if (app.versus) leaveOnline();
   app.state = 'menu';
@@ -371,9 +391,71 @@ function toMenu() {
   $('#help').hidden = true;
   $('#pad').hidden = true;
   $('#menu').hidden = false;
+  syncMenu();
+}
+
+// ---------------------------------------------------------------- tutorial (tutorial.js): first "В РИНГ" of a new player, or the menu link
+const tutorialSeen = () => !!pageStore.get(TUTORIAL_KEY);
+const controlKind = () => (settings.control === 'camera' || settings.control === 'phone' ? 'camera' : TOUCH ? 'touch' : 'keys');
+function startTutorial(where) {
+  endTutorial();
+  const startedAt = performance.now();
+  const t = new Tutorial({
+    control: controlKind(), root: $('#stage'),
+    onStep: () => app.sound.ui(),
+    onDone: () => {
+      pageStore.set(TUTORIAL_KEY, 'done');
+      track('tutorial', { result: 'done', seconds: (performance.now() - startedAt) / 1000, where, control: t.control });
+      app.hud.banner('ГОТОВО!', 'теперь — короткий бой', 1.6, 'good');
+      app.tutorialNext = 1.8; // seconds of the bag, then the bout
+    },
+    onSkip: (step) => {
+      pageStore.set(TUTORIAL_KEY, pageStore.get(TUTORIAL_KEY) || 'skipped');
+      track('tutorial', { result: 'skipped', step, seconds: (performance.now() - startedAt) / 1000, where, control: t.control });
+      startBout();
+    },
+  });
+  app.tutorial = t;
+  app.tutorialNext = 0;
+  startBout(null, { mode: 'training', level: 0, tutorial: true });
+}
+function endTutorial() {
+  if (!app.tutorial) return;
+  const t = app.tutorial;
+  app.tutorial = null;
+  app.tutorialNext = 0;
+  if (!t.finished) { t.finished = true; pageStore.set(TUTORIAL_KEY, pageStore.get(TUTORIAL_KEY) || 'skipped'); track('tutorial', { result: 'left', step: t.index }); }
+  t.destroy();
+}
+function tutorialStep(dt, snap) {
+  const t = app.tutorial;
+  if (!t) return;
+  if (app.tutorialNext > 0) {
+    app.tutorialNext -= dt;
+    if (app.tutorialNext <= 0) startBout(null, { mode: 'short', level: 0 });
+    return;
+  }
+  if (snap.match.phaseName === 'Training') t.update(dt, snap);
+  // while the camera calibrates its own message is on screen; with keys the card is there from the first frame
+  if (t.el) t.el.root.hidden = t.control === 'camera' && snap.match.phaseName !== 'Training' && !t.finished;
 }
 
 // ---------------------------------------------------------------- events
+// what went wrong in this bout, for the one tip on the results screen (tutorial.js resultTip)
+const TAKEN_KIND = { 0: 'straight', 1: 'kick', 2: 'elbow', 3: 'knee', 4: 'hook', 5: 'upper' };
+function countBout(e, playerActs, meHit) {
+  const st = app.boutStats;
+  if (!st) return;
+  if (e.typeName === 'HitConfirmed') {
+    if (meHit) {
+      const k = e.kind === 0 && e.zone === 1 ? 'body' : TAKEN_KIND[e.kind] || 'straight';
+      st.taken[k]++;
+      if (e.counter) st.counters++;
+    } else if (playerActs && e.smothered) st.smothered++;
+  } else if (e.typeName === 'Whiffed' && playerActs) st.whiffs++;
+  else if (e.typeName === 'StaminaExhausted' && e.actor === app.viewSlot) st.gassed++;
+}
+
 const slotKey = (slot) => (slot === 0 ? 'player' : 'opponent');
 
 function onCombat(e, snap) {
@@ -382,6 +464,8 @@ function onCombat(e, snap) {
   const me = meKey();
   const playerActs = e.actor === app.viewSlot;
   const type = e.typeName;
+  if (app.tutorial) app.tutorial.onCombat(e);
+  countBout(e, playerActs, target === me);
   if (type === 'AttackStarted' && playerActs && !app.firstPunchSent && app.boutStartedAt) {
     app.firstPunchSent = true;
     track('first_punch', { ms: performance.now() - app.boutStartedAt, kind: e.kind });
@@ -515,6 +599,27 @@ function onMatch(e, snap) {
   }
 }
 
+// ---------------------------------------------------------------- results screen
+// The core's numbers (hud.js), plus: one tip from what went wrong, "a stronger opponent" after a win, and after the first finished bout
+// the nickname card (the rating asks for a name only once the player has seen a whole bout).
+function showResults(snap) {
+  app.hud.results(snap, NAMES);
+  const m = snap.match;
+  const me = snap[meKey()];
+  const foe = snap[meKey() === 'player' ? 'opponent' : 'player'];
+  const won = m.hasWinner ? m.winner === app.viewSlot : null;
+  const cfg = app.boutCfg || { mode: settings.mode, level: settings.level };
+  const tip = app.versus ? '' : resultTip(app.boutStats || {}, me, foe, { won, level: cfg.level, camera: controlKind() === 'camera' });
+  $('#res-tip').textContent = tip;
+  $('#res-tip').hidden = !tip;
+  $('#res-up').hidden = !(!app.versus && won === true && cfg.level < 2);
+  pageStore.set('ironecho.boutsDone', String(boutsDone() + 1));
+  const askNick = rating.enabled && !rating.nick && !app.versus;
+  $('#res-nick').hidden = !askNick;
+  if (askNick) { $('#res-nick-note').textContent = ''; $('#res-nick-in').value = ''; }
+}
+const boutsDone = () => Number(pageStore.get('ironecho.boutsDone') || 0);
+
 // ---------------------------------------------------------------- rating
 // Solo bouts against the bot count in a table shared by everybody (server: api/ratings). The page only records the bout; the server plays the
 // recording again on its own copy of the rules core and rates what really happened.
@@ -605,22 +710,30 @@ function ratingFinish() {
 
 function wireRating() {
   const on = rating.enabled;
-  $('#profile').hidden = !on;
   $('#to-rating').hidden = !on;
   if (!on) return;
   $('#nick').value = rating.nick;
-  const claim = async () => {
-    const wanted = $('#nick').value;
-    if (!cleanNick(wanted)) { ratingNote('Ник: 3–16 символов — буквы, цифры, пробел, _ . -', 'bad'); return; }
-    ratingNote('Проверяю ник…');
+  // the menu's field and the card on the results screen
+  const claimFrom = (input, note) => async () => {
+    const wanted = input.value;
+    if (!cleanNick(wanted)) { note('Ник: 3–16 символов — буквы, цифры, пробел, _ . -', 'bad'); return; }
+    note('Проверяю ник…');
     const r = await rating.claim(wanted);
-    if (r.ok) { ratingNote(r.created ? 'Ник твой. Бои с ботом идут в рейтинг.' : 'Ник сохранён.', 'good'); $('#nick').value = r.nick; refreshProfile(); }
-    else ratingNote({ taken: 'Этот ник уже занят другим игроком.', invalid_nick: 'Ник: 3–16 символов — буквы, цифры, пробел, _ . -',
+    if (r.ok) {
+      note(r.created ? 'Ник твой. Бои с ботом идут в рейтинг.' : 'Ник сохранён.', 'good');
+      input.value = r.nick;
+      $('#nick').value = r.nick;
+      refreshProfile();
+      syncMenu();
+    } else note({ taken: 'Этот ник уже занят другим игроком.', invalid_nick: 'Ник: 3–16 символов — буквы, цифры, пробел, _ . -',
       network: 'Нет связи с сервером рейтинга.', not_configured: 'Рейтинг сейчас недоступен.', bad_secret: 'Профиль не совпал с сервером: введи код профиля заново.' }[r.error] || `Не получилось (${r.error}).`, 'bad');
   };
-  $('#nick-ok').addEventListener('click', claim);
-  $('#nick').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); claim(); } });
-  $('#nick').addEventListener('input', () => { $('#profile').classList.remove('flash'); });
+  const resNote = (text, cls = '') => { const el = $('#res-nick-note'); el.textContent = text; el.className = `note ${cls}`; };
+  for (const [input, ok, note] of [[$('#nick'), $('#nick-ok'), ratingNote], [$('#res-nick-in'), $('#res-nick-ok'), resNote]]) {
+    const claim = claimFrom(input, note);
+    ok.addEventListener('click', claim);
+    input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); claim(); } });
+  }
   $('#to-rating').addEventListener('click', openRating);
   $('#rt-back').addEventListener('click', () => { $('#rating').hidden = true; $('#menu').hidden = false; });
   for (const b of document.querySelectorAll('[data-group="ladder"] button')) {
@@ -1099,7 +1212,12 @@ function step(dt, input, now) {
     const ev = app.core.drainEvents();
     for (const e of ev.combat) onCombat(e, snap);
     for (const e of ev.match) onMatch(e, snap);
+    tutorialStep(dt, snap);
     const phase = snap.match.phaseName;
+    if (phase === 'Fighting' || phase === 'Training') {
+      app.helpTime = (app.helpTime || 0) + dt;
+      if (app.helpTime > 15) $('#help').classList.add('dim'); // the keys stay readable but leave the ring alone
+    }
     if (phase !== app.lastPhase) {
       if (PHASE_LABEL[phase] && phase !== 'Paused') app.hud.banner(PHASE_LABEL[phase], app.training ? 'тренировка' : '', 1.2);
       app.lastPhase = phase;
@@ -1108,7 +1226,7 @@ function step(dt, input, now) {
       app.resultTimer -= dt;
       if (app.resultTimer <= 0 && !app.resultsShown) {
         app.resultsShown = true;
-        app.hud.results(snap, NAMES);
+        showResults(snap);
         app.state = 'results';
       }
     }
@@ -1130,7 +1248,7 @@ function step(dt, input, now) {
     app.bag.update(dt);
     app.sparks.update(dt);
     app.shake.update(dt);
-    app.hud.update(snap, dt, app.training, settings.mode === 'short' ? 45 : 90);
+    app.hud.update(snap, dt, app.training, app.roundLength || 90);
     updateCamera(dt, snap);
   } else {
     // menu: slow orbit around the ring
@@ -1213,6 +1331,53 @@ const IDLE = { kind: 0, legSlow: 0, stateName: 'Guard', stageName: 'None', block
   stageAlpha: 0, headOffset: 0, zone: 0, speedForward: 0, speedSide: 0 };
 
 // ---------------------------------------------------------------- menu wiring
+// The first screen is one button. What it will start is one line under it (a click opens the settings).
+const LEVEL_LABEL = ['Лёгкий соперник', 'Нормальный соперник', 'Сложный соперник'];
+const MODE_LABEL = { bout: 'бой 3 × 90 с', short: 'бой 3 × 45 с', training: 'груша без таймера' };
+function syncMenu() {
+  for (const g of document.querySelectorAll('[data-group]')) {
+    const key = g.dataset.group;
+    if (!(key in settings)) continue;
+    for (const b of g.querySelectorAll('button')) b.classList.toggle('sel', String(settings[key]) === b.dataset.value);
+  }
+  const ctl = controlKind() === 'camera' ? 'камера' : TOUCH ? 'сенсор' : 'клавиатура';
+  $('#menu-now').textContent = `${settings.mode === 'training' ? '' : `${LEVEL_LABEL[settings.level] || ''} · `}${MODE_LABEL[settings.mode] || ''} · ${ctl}`;
+  $('#to-camera').textContent = settings.control === 'camera' ? 'Играть с клавиатуры' : 'Играть камерой (бета)';
+  $('#profile').hidden = !(rating.enabled && (rating.nick || boutsDone() >= 1));
+}
+
+// "В РИНГ" and the menu links. The click also takes the screen (setting; not in automated browsers) and, for a new player, the tutorial.
+async function goRing(where, opts = {}) {
+  track('cta_click', { where, mode: settings.mode, control: settings.control });
+  if ($('#start').disabled) return;
+  if (settings.fsStart && !navigator.webdriver && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {}); // must run inside the click, before any await
+  }
+  app.sound.start();
+  if (!app.loaded) {
+    $('#start').disabled = true;
+    $('#menu').hidden = true;
+    $('#loading').hidden = false;
+    try {
+      await ensureWorld();
+    } catch (err) {
+      console.error(err);
+      $('#start').disabled = false;
+      $('#loading').hidden = true;
+      $('#menu').hidden = false;
+      const note = $('#menu-load');
+      note.hidden = false;
+      note.textContent = `Не удалось запустить: ${err.message}`;
+      return;
+    }
+    $('#start').disabled = false;
+    $('#loading').hidden = true;
+  }
+  const auto = !tutorialSeen() && settings.mode !== 'training' && (!navigator.webdriver || globalThis.IRONECHO_FORCE_TUTORIAL);
+  if (opts.tutorial || (opts.tutorial === undefined && auto)) startTutorial(where);
+  else startBout();
+}
+
 function wireMenu() {
   const pick = (group, key, cast = (v) => v) => {
     for (const b of document.querySelectorAll(`[data-group="${group}"] button`)) {
@@ -1222,6 +1387,7 @@ function wireMenu() {
         saveSettings();
         for (const o of document.querySelectorAll(`[data-group="${group}"] button`)) o.classList.toggle('sel', o === b);
         app.sound.ui();
+        syncMenu();
       });
     }
   };
@@ -1236,48 +1402,35 @@ function wireMenu() {
   pick('control', 'control');
   pick('tracking', 'tracking');
   pick('camera2', 'camera2');
+  pick('fsStart', 'fsStart', (v) => v === 'true');
   // the second camera needs the phone page next to the game (the public site and the Windows app have it) and a webcam game
   const cam2 = document.querySelector('[data-group="camera2"]');
-  const syncCam2 = () => { if (cam2) cam2.hidden = !(settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage); };
+  const syncCam2 = () => { if (cam2) cam2.hidden = !(LAB && settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage); };
   for (const b of document.querySelectorAll('[data-group="control"] button')) b.addEventListener('click', syncCam2);
   syncCam2();
-  $('#start').addEventListener('click', async () => {
-    track('cta_click', { where: 'menu', mode: settings.mode, control: settings.control });
-    // once per page load: the table needs a name (automated browsers are not asked, unless a test forces it)
-    if (rating.enabled && !rating.nick && settings.mode !== 'training' && !app.nickAsked && (!navigator.webdriver || globalThis.IRONECHO_FORCE_NICK_PROMPT)) {
-      app.nickAsked = true;
-      $('#profile').classList.add('flash');
-      ratingNote('Введи ник и нажми ОК — бой попадёт в рейтинг. Или нажми «В РИНГ» ещё раз: играть без рейтинга.', 'bad');
-      $('#nick').focus();
-      return;
-    }
-    if ($('#start').disabled) return;
-    app.sound.start();
-    if (!app.loaded) {
-      $('#start').disabled = true;
-      $('#menu').hidden = true;
-      $('#loading').hidden = false;
-      try {
-        await ensureWorld();
-      } catch (err) {
-        console.error(err);
-        $('#start').disabled = false;
-        $('#loading').hidden = true;
-        $('#menu').hidden = false;
-        const note = $('#menu-load');
-        note.hidden = false;
-        note.textContent = `Не удалось запустить: ${err.message}`;
-        return;
-      }
-      $('#start').disabled = false;
-      $('#loading').hidden = true;
-    }
-    startBout();
+  $('#start').addEventListener('click', () => goRing('menu'));
+  const camLink = $('#to-camera');
+  camLink.hidden = typeof CameraInput === 'undefined'; // the camera is in every build of the website; not in the artifact
+  camLink.addEventListener('click', () => {
+    settings.control = settings.control === 'camera' ? 'keys' : 'camera';
+    saveSettings();
+    syncMenu();
+    goRing(settings.control === 'camera' ? 'camera-link' : 'keys-link');
   });
+  $('#to-tutorial').addEventListener('click', () => goRing('tutorial-link', { tutorial: true }));
+  $('#menu-now').addEventListener('click', () => { const d = $('#menu-settings'); d.open = true; d.scrollIntoView({ block: 'nearest' }); });
+  if (globalThis.IRONECHO_OPEN_SETTINGS) $('#menu-settings').open = true; // tests pick settings directly
   $('#resume').addEventListener('click', resumeBout);
-  $('#restart').addEventListener('click', () => startBout());
+  $('#restart').addEventListener('click', () => startBout(null, app.boutCfg));
   $('#to-menu').addEventListener('click', toMenu);
-  $('#rematch').addEventListener('click', () => { track('rematch', {}); startBout(); });
+  $('#rematch').addEventListener('click', () => { track('rematch', {}); startBout(null, app.boutCfg); });
+  $('#res-up').addEventListener('click', () => {
+    settings.level = Math.min(2, ((app.boutCfg && app.boutCfg.level) || 0) + 1);
+    saveSettings();
+    syncMenu();
+    track('rematch', { up: settings.level });
+    startBout(null, { mode: app.boutCfg ? app.boutCfg.mode : settings.mode, level: settings.level });
+  });
   $('#to-online').addEventListener('click', openLobby);
   $('#on-back').addEventListener('click', closeLobby);
   $('#on-video').checked = settings.shareVideo !== false;
@@ -1299,6 +1452,7 @@ function wireMenu() {
   }
   $('#pause-btn').addEventListener('click', togglePause);
   for (const b of document.querySelectorAll('.fs-toggle')) b.addEventListener('click', toggleFullscreen);
+  syncMenu();
   document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
   window.addEventListener('blur', autoPause);
   // Enter: into the ring from the menu, rematch from the results; Esc on the results: back to the menu.
@@ -1307,7 +1461,7 @@ function wireMenu() {
     const visible = (id) => !$(id).hidden;
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
       if (visible('#menu') && !$('#start').disabled) { e.preventDefault(); $('#start').click(); }
-      else if (app.state === 'results' && visible('#results')) { e.preventDefault(); startBout(); }
+      else if (app.state === 'results' && visible('#results')) { e.preventDefault(); startBout(null, app.boutCfg); }
       else if (visible('#online')) { e.preventDefault(); }
     } else if (e.code === 'Escape' && app.state === 'results' && visible('#results')) {
       e.preventDefault();
@@ -1371,6 +1525,17 @@ if (new URLSearchParams(location.search).has('collect') && typeof CollectMode !=
     },
   });
   app.collect.start();
+}
+// ?start=1 (the landing page's "Играть"): straight into the ring once the arena is loaded, no menu
+if (PAGE_QUERY.has('start') && !app.collect && !PAGE_QUERY.has('room')) {
+  const q = new URLSearchParams(location.search);
+  q.delete('start');
+  history.replaceState(null, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash);
+  // no click on this page yet, so the browser keeps the sound off: the first key or touch turns it on
+  const unlock = () => { app.sound.start(); window.removeEventListener('keydown', unlock, true); window.removeEventListener('pointerdown', unlock, true); };
+  window.addEventListener('keydown', unlock, true);
+  window.addEventListener('pointerdown', unlock, true);
+  ensureWorld().then(() => { if (app.state === 'menu' && !$('#menu').hidden) goRing('landing'); }).catch(() => {});
 }
 ensureWorld().catch((err) => {
   console.error(err);

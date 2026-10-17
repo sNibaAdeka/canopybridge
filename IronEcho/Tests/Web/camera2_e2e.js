@@ -52,7 +52,9 @@ async function openGame(browser) {
   page.on('pageerror', (e) => page.errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' || process.env.IRONECHO_DEBUG) console.log(`  [game ${m.type()}] ${m.text().slice(0, 300)}`); });
   await page.addInitScript(NET_INIT, BROKER);
-  await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.addInitScript(() => { globalThis.IRONECHO_OPEN_SETTINGS = true; }); // the test picks settings directly
+  // the second camera is an experiment: offered only with ?lab=1
+  await page.goto(`http://127.0.0.1:${PORT}/?lab=1`, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
   await page.evaluate((origin) => { globalThis.IRONECHO_DEPS.phonePage = `${origin}/phone/`; }, `http://127.0.0.1:${PORT}`);
   await page.click('[data-group="quality"] button[data-value="low"]');

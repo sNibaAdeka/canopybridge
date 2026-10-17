@@ -37,6 +37,7 @@ async function open(browser, url) {
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
   await page.addInitScript((b) => { globalThis.IRONECHO_NET = { host: '127.0.0.1', port: b, path: '/', secure: false }; }, BROKER);
+  await page.addInitScript(() => { globalThis.IRONECHO_OPEN_SETTINGS = true; }); // the test picks settings directly
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
   await page.evaluate(() => { globalThis.IRONECHO_APP.frozen = true; }); // no idle rendering: the test pumps the pages itself

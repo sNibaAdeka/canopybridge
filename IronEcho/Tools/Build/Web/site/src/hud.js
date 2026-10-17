@@ -156,6 +156,9 @@ export class Hud {
     r.querySelector('.res-title').className = `res-title ${won ? 'win' : m.hasWinner ? 'lose' : ''}`;
     r.querySelector('.res-how').textContent = winnerName ? `${winnerName} · ${how} · раунд ${m.round}` : how;
     r.querySelector('.res-judges').innerHTML = showCards ? judges : '';
+    const chip = (label, value) => `<span>${label}<b>${value}</b></span>`;
+    r.querySelector('.res-chips').innerHTML = [chip('Точность', `${acc(p)}%`), chip('Попаданий', p.landed), chip('Блоков', p.blocksMade),
+      chip('Уклонов', p.dodgesMade), chip('Лучшее комбо', p.maxCombo), p.counterHits ? chip('Контрударов', p.counterHits) : ''].join('');
     r.querySelector('.res-stats').innerHTML = `<table><thead><tr><td>${names[0]}</td><th></th><td>${names[1]}</td></tr></thead><tbody>${[
       row('Ударов', p.thrown, o.thrown), row('Попаданий', `${p.landed} (${acc(p)}%)`, `${o.landed} (${acc(o)}%)`),
       row('Блоков', p.blocksMade, o.blocksMade), row('Уклонов', p.dodgesMade, o.dodgesMade),

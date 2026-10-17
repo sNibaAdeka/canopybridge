@@ -30,6 +30,7 @@ const check = (name, ok, info = '') => { results.push(!!ok); console.log(`${ok ?
     const game = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
     const errors = [];
     game.on('pageerror', (e) => errors.push(e.message));
+    await game.addInitScript(() => { globalThis.IRONECHO_OPEN_SETTINGS = true; }); // the test picks settings directly
     await game.goto(`http://127.0.0.1:${GAME_PORT}/`);
     await game.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
     check('the app offers the phone camera', await game.isVisible('[data-group="control"] button[data-value="phone"]'));

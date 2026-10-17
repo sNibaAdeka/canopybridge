@@ -56,12 +56,14 @@ const PLAYER = `(() => { let i = 0, reactAt = -1, defend = false, last = '', nex
   const server = serve();
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, x-player-id, x-player-secret', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
-  const open = async () => {
+  const open = async ({ returning = false } = {}) => {
     const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
     const page = await ctx.newPage();
     page.errors = [];
     page.on('pageerror', (e) => page.errors.push(e.message));
-    await page.addInitScript(() => { globalThis.IRONECHO_FORCE_NICK_PROMPT = true; }); // automated browsers are normally not asked for a nickname
+    await page.addInitScript(() => { globalThis.IRONECHO_OPEN_SETTINGS = true; }); // the test picks settings directly
+    // a player who already finished a bout here sees the nickname field in the menu
+    if (returning) await page.addInitScript(() => { try { localStorage.setItem('ironecho.boutsDone', '1'); } catch { /* ignore */ } });
     await page.route('**/api/ratings**', async (route) => {
       const req = route.request();
       if (req.method() === 'OPTIONS') { await route.fulfill({ status: 204, headers: CORS }); return; }
@@ -80,23 +82,30 @@ const PLAYER = `(() => { let i = 0, reactAt = -1, defend = false, last = '', nex
 
   try {
     const A = await open();
-    check('the menu offers a nickname field and the table', await A.isVisible('#nick') && await A.isVisible('#to-rating'));
-    check('without a nickname the page says so', /Без ника/.test(await A.textContent('#nick-note')));
-    // pressing the ring button without a nickname asks for one (once)
+    // a new player is not asked for a name before the first bout: the card comes on the results screen
+    check('a first visit: no nickname field in the menu, the table is there', !(await A.isVisible('#nick')) && await A.isVisible('#to-rating'));
     await A.click(`[data-group="mode"] button[data-value="short"]`);
     await A.click(`[data-group="level"] button[data-value="0"]`);
     await A.click('#start');
-    check('"В РИНГ" without a nickname first asks for one', await A.evaluate(() => globalThis.IRONECHO_APP.state === 'menu' && document.querySelector('#profile').classList.contains('flash')));
+    const first = await A.evaluate((src) => {
+      const app = globalThis.IRONECHO_APP; const fn = eval(src);
+      const rated = !!app.rated;
+      for (let k = 0; k < 200 && app.state !== 'results'; k++) app.debugAdvance(5, fn);
+      return { rated, state: app.state };
+    }, PLAYER);
+    check('"В РИНГ" without a nickname starts an unrated bout at once', !first.rated && first.state === 'results', JSON.stringify(first));
+    check('the results screen offers the nickname card', await A.isVisible('#res-nick'));
+    await A.fill('#res-nick-in', 'x');
+    await A.click('#res-nick-ok');
+    check('a too short nickname is refused', /3–16/.test(await A.textContent('#res-nick-note')));
+    await A.fill('#res-nick-in', 'Адёка');
+    await A.click('#res-nick-ok');
+    await A.waitForFunction(() => /Ник твой/.test(document.querySelector('#res-nick-note').textContent), null, { timeout: 15000 });
+    check('a free nickname is taken', true, await A.textContent('#res-nick-note'));
+    await A.click('#res-menu');
+    check('back in the menu the nickname field shows the name', await A.isVisible('#nick') && (await A.inputValue('#nick')) === 'Адёка');
 
-    await A.fill('#nick', 'x');
-    await A.click('#nick-ok');
-    check('a too short nickname is refused', /3–16/.test(await A.textContent('#nick-note')));
-    await A.fill('#nick', 'Адёка');
-    await A.click('#nick-ok');
-    await A.waitForFunction(() => /Ник твой/.test(document.querySelector('#nick-note').textContent), null, { timeout: 15000 });
-    check('a free nickname is taken', true, await A.textContent('#nick-note'));
-
-    const B = await open();
+    const B = await open({ returning: true });
     await B.fill('#nick', 'Aдёка'); // Latin A
     await B.click('#nick-ok');
     await B.waitForFunction(() => /занят/.test(document.querySelector('#nick-note').textContent), null, { timeout: 15000 })
