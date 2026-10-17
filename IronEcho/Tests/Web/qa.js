@@ -466,7 +466,7 @@ async function onboarding(browser) {
   check('onboarding: the nickname card comes after the first finished bout', res.nick === res.rating, JSON.stringify({ nick: res.nick, rating: res.rating }));
   await page.click('#res-menu');
   check('onboarding: the menu now shows the nickname field', (await page.isVisible('#profile')) === res.rating);
-  await page.reload();
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 240000 }); // the full run loads the machine: the default 30 s is not enough
   await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
   await page.click('#start');
   const again = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; return { state: a.state, training: a.training, tutorial: !!a.tutorial }; });
