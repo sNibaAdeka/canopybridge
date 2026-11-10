@@ -7,8 +7,7 @@ const PUNCH_LEFT = 1;  // jab (lead, left hand)
 const PUNCH_RIGHT = 2; // cross (rear, right hand)
 const BODY_LEFT = 4;   // jab to the body
 const BODY_RIGHT = 8;  // cross to the body
-const ELBOW_LEFT = 16;  // lead elbow (1.6)
-const ELBOW_RIGHT = 32; // rear elbow
+// 16 / 32 (elbows) and the whole kick mask stay in the rules core but the browser game is hands-only since 1.8 (main.js handsOnly)
 const HOOK_LEFT = 64;   // lead hook (1.7)
 const HOOK_RIGHT = 128; // rear hook
 const HOOK_BODY_LEFT = 256;
@@ -19,8 +18,7 @@ const UPPER_RIGHT = 2048;
 
 export const KEY_HELP = [
   ['W / S', 'шаг вперёд / назад'], ['A / D', 'кружить влево / вправо'], ['J / K', 'джеб / кросс'], ['U / I', 'хук левой / правой'],
-  ['N / M', 'апперкот (вблизи)'], ['Shift', '+ J / K / U / I — в корпус'], [', / .', 'удар ногой (Shift — по ногам)'], ['Y / O', 'локоть (вблизи)'],
-  ['H / L', 'колено (вблизи)'], ['Q / E', 'уклон'], ['C', 'нырок (держать)'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
+  ['N / M', 'апперкот (вблизи)'], ['Shift', '+ J / K / U / I — в корпус'], ['Q / E', 'уклон'], ['C', 'нырок (держать)'], ['Пробел', 'блок'], ['Esc / P', 'пауза'],
 ];
 const MOVE_KEYS = { KeyW: 'fwd', ArrowUp: 'fwd', KeyS: 'back', KeyA: 'left', KeyD: 'right' };
 
@@ -50,12 +48,6 @@ export class ManualInput {
       else if (k === 'KeyI') { this.mask |= body ? HOOK_BODY_RIGHT : HOOK_RIGHT; e.preventDefault(); }
       else if (k === 'KeyN') { this.mask |= UPPER_LEFT; e.preventDefault(); }
       else if (k === 'KeyM') { this.mask |= UPPER_RIGHT; e.preventDefault(); }
-      else if (k === 'Comma') { this.kickMask |= body ? 4 : 1; e.preventDefault(); }
-      else if (k === 'Period') { this.kickMask |= body ? 8 : 2; e.preventDefault(); }
-      else if (k === 'KeyY') { this.mask |= ELBOW_LEFT; e.preventDefault(); }
-      else if (k === 'KeyO') { this.mask |= ELBOW_RIGHT; e.preventDefault(); }
-      else if (k === 'KeyH') { this.kickMask |= 16; e.preventDefault(); }
-      else if (k === 'KeyL') { this.kickMask |= 32; e.preventDefault(); }
       else if (k === 'KeyC') { this.duckKeys.add(k); e.preventDefault(); }
       else if (k === 'Space' || k === 'ArrowDown') { this.blockKeys.add(k); e.preventDefault(); }
       else if (k === 'KeyQ' || k === 'ArrowLeft') { this.leftHeld = true; e.preventDefault(); }
@@ -87,10 +79,6 @@ export class ManualInput {
     const set = (act, on) => {
       if (act === 'jab' && on) this.mask |= PUNCH_LEFT;
       if (act === 'cross' && on) this.mask |= PUNCH_RIGHT;
-      if (act === 'kick' && on) this.kickMask |= 2;
-      if (act === 'low' && on) this.kickMask |= 8;
-      if (act === 'elbow' && on) this.mask |= ELBOW_RIGHT;
-      if (act === 'knee' && on) this.kickMask |= 32;
       if (act === 'hook' && on) this.mask |= HOOK_RIGHT;
       if (act === 'upper' && on) this.mask |= UPPER_RIGHT;
       if (act === 'duck') this.touchDuck = on;

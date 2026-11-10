@@ -341,6 +341,7 @@ IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int3
 	Setup.Seed = static_cast<uint64_t>(Seed < 1.0 ? 1.0 : Seed);
 	Setup.Bot = MakeBotConfig(static_cast<BotLevel>(Level));
 	Setup.OpponentFighter = MakeBotFighterConfig(static_cast<BotLevel>(Level));
+	ApplyArcadeProfile(Setup); // 1.8: the browser game is hands-only boxing with the readable counter rule (Match.h)
 	if (Rounds > 0)
 	{
 		Setup.Rules.Rounds = Rounds;

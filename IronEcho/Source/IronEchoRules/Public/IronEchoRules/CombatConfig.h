@@ -73,6 +73,9 @@ namespace IronEchoCore
 		// Gassed: emptying the stamina tank costs a breath, no new punch for this long (flailing stops itself).
 		int32_t GassedTicks = SecondsToTicks(0.60);
 		float CounterHitMultiplier = 1.2f;  // hitting a defender that is winding up
+		// A hit counts as a counter only in the last CounterWindowTicks of the defender's windup (the punch was about to
+		// leave). 0 = anywhere in the windup (the 1.0-1.7 rule; a bot's long windup then makes almost every hit a "counter").
+		int32_t CounterWindowTicks = 0;
 		int32_t InputBufferTicks = SecondsToTicks(0.15);
 
 		bool bInvulnerable = false; // training bag: takes hits, never loses health

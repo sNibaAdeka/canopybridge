@@ -2,6 +2,26 @@
 
 namespace IronEchoCore
 {
+	static void ArcadeFighter(FighterConfig& F)
+	{
+		F.TiredDamageMultiplier = 0.35f;
+		F.TiredWindupMultiplier = 1.60f;
+		F.TiredHitStunMultiplier = 0.50f;
+		F.GassedTicks = SecondsToTicks(0.60);
+		F.StaminaRegenDelayTicks = SecondsToTicks(0.50);
+		F.StaminaRegenPerSecond *= 1.10f;
+		F.CounterWindowTicks = SecondsToTicks(0.16);
+		F.CounterHitMultiplier = 1.5f;
+	}
+
+	void ApplyArcadeProfile(MatchSetup& Setup)
+	{
+		ArcadeFighter(Setup.PlayerFighter);
+		ArcadeFighter(Setup.OpponentFighter);
+		Setup.Bot.KickChance = 0.0f;
+		Setup.Bot.ClinchStrikeChance = 0.0f;
+	}
+
 	namespace
 	{
 		constexpr FighterSlot kBothSlots[2] = {FighterSlot::Player, FighterSlot::Opponent};

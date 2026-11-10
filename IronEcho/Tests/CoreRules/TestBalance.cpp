@@ -60,3 +60,33 @@ IE_TEST(Balance_FlailingDoesNotWin)
 	IE_EXPECT(Hard.Wins <= N / 4);
 	IE_EXPECT(Measured.Wins > Normal.Wins); // picking punches beats throwing them all
 }
+
+// 1.8: the browser game's profile (ApplyArcadeProfile). Hands only, a readable counter rule; the levels keep their order and
+// mashing the buttons still does not beat a bot that fights back.
+IE_TEST(Balance_ArcadeProfileKeepsLevelsOrderedAndSpamUnrewarded)
+{
+	MatchSetup Setup;
+	ApplyArcadeProfile(Setup);
+	IE_EXPECT_NEAR(Setup.Bot.KickChance, 0.0, 1e-9);
+	IE_EXPECT_NEAR(Setup.Bot.ClinchStrikeChance, 0.0, 1e-9);
+	IE_EXPECT(Setup.PlayerFighter.CounterWindowTicks > 0 && Setup.OpponentFighter.CounterWindowTicks > 0);
+
+	const int N = 16;
+	auto Wins = [N](BotLevel Level, const HumanProfile& Profile) {
+		int W = 0;
+		for (int Seed = 1; Seed <= N; ++Seed)
+		{
+			const BoutSummary B = RunBout(Level, Profile, static_cast<uint64_t>(Seed), true);
+			W += (B.bHasWinner && B.Winner == FighterSlot::Player) ? 1 : 0;
+		}
+		return W;
+	};
+	const int Easy = Wins(BotLevel::Easy, AverageHuman());
+	const int Normal = Wins(BotLevel::Normal, AverageHuman());
+	const int Hard = Wins(BotLevel::Hard, AverageHuman());
+	IE_EXPECT(Easy >= Normal && Normal >= Hard);
+	IE_EXPECT(Easy >= N - 1);       // the first opponent is there to be beaten
+	IE_EXPECT(Normal >= N / 2);     // a fair fight for an average player
+	IE_EXPECT(Hard <= N / 2);       // Hard stays hard
+	IE_EXPECT(Wins(BotLevel::Hard, SpammerHuman()) <= N / 2);
+}

@@ -489,11 +489,13 @@ function onCombat(e, snap) {
     if (app.training && target === 'opponent') app.bag.hit(power, e.hand === 0 ? 1 : -1);
     else app.anim[target].takeHit(e.hand, e.damage, !!e.counter, e.zone);
     if (e.kind !== 0) app.shake.add(target === me ? 0.25 : 0.12); // legs, elbows and knees land heavier
-    app.hitStop = e.counter ? 0.06 : 0.035;
+    // the heavier the blow the longer both robots hang on the impact (animation only; the rules keep running)
+    app.hitStop = e.tired ? 0.02 : Math.min(0.09, 0.035 + 0.03 * power + (e.counter ? 0.025 : 0));
     app.shake.add(target === me ? 0.45 * power : 0.18 * power);
     if (target === me) app.hud.flash('hit');
     if (playerActs) {
-      if (e.throughGuard) app.hud.feed('АППЕРКОТ СКВОЗЬ БЛОК!', 'good');
+      if (e.tired) app.hud.feed('УСТАЛ — УДАР СЛАБЫЙ. ПЕРЕДОХНИ СЕКУНДУ', 'warn');
+      else if (e.throughGuard) app.hud.feed('АППЕРКОТ СКВОЗЬ БЛОК!', 'good');
       else if (e.counter && e.kind === 5) app.hud.feed('АППЕРКОТ НАВСТРЕЧУ НЫРКУ!', 'good');
       else if (e.counter) app.hud.feed('КОНТРУДАР!', 'good');
       else if (e.glancing) app.hud.feed('ВСКОЛЬЗЬ', '');
@@ -969,7 +971,7 @@ function versusSample() {
     if (app.versus) { t[9] = (t[9] | app.versus.ctl) >>> 0; app.versus.ctl = 0; }
     return t;
   }
-  const i = cameraPending() ? CAMERA_PENDING : (app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll());
+  const i = cameraPending() ? CAMERA_PENDING : handsOnly(app.cameraInput && app.cameraInput.active ? app.cameraInput.poll() : app.input.poll());
   const live = app.state === 'playing' || app.state === 'results';
   const f = live ? i : { status: 7, lean: 0, block: 0, punchMask: 0 };
   const ctl = app.versus ? app.versus.ctl : 0;
@@ -1169,12 +1171,19 @@ function updateCamera(dt, snap) {
 // starting the countdown on a keyboard nobody is touching.
 const CAMERA_PENDING = { status: 6, lean: 0, leanForward: 0, block: 0, punchMask: 0, kickMask: 0, confidence: 0 };
 const cameraPending = () => !!app.cameraWanted && !(app.cameraInput && app.cameraInput.active);
+// 1.8: the browser game is boxing with the hands. Elbows (punch bits 16, 32), kicks and knees (the kick mask) are dropped here, whatever
+// produced them (the camera's leg detectors still run for the recordings); the bot throws none either (ApplyArcadeProfile in the core).
+function handsOnly(f) {
+  if (f.kickMask) f.kickMask = 0;
+  if (f.punchMask & 48) f.punchMask &= ~48;
+  return f;
+}
 function currentInput() {
   if (app.state !== 'playing') return { status: 7, lean: 0, block: 0, punchMask: 0 };
   if (cameraPending()) return CAMERA_PENDING;
   if (!(app.cameraInput && app.cameraInput.active)) return app.input.poll();
-  const out = app.cameraInput.poll();
-  if (LATENCY_TEST && (out.punchMask || out.kickMask)) latencyFlash();
+  const out = handsOnly(app.cameraInput.poll());
+  if (LATENCY_TEST && out.punchMask) latencyFlash();
   return out;
 }
 

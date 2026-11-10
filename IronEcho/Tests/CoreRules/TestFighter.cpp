@@ -489,3 +489,30 @@ IE_TEST(Fighter_EmptyingStaminaCostsABreath)
 	IE_EXPECT_EQ(Second, 1 + Cfg.GassedTicks);
 	IE_EXPECT(H.P().bAttackTired); // it comes back as an arm punch
 }
+
+// 1.8: with a counter window only a punch that lands just before the foe's own would have left is a counter hit.
+IE_TEST(Fighter_CounterWindowLimitsCounterHitsToLateWindup)
+{
+	FighterConfig Cfg = MakeDefaultFighterConfig();
+	Cfg.CounterWindowTicks = SecondsToTicks(0.16);
+	Cfg.CounterHitMultiplier = 1.5f;
+	const FighterConfig Slow = MakeBotFighterConfig(BotLevel::Easy); // cross windup 0.65 s
+	{
+		Harness H(Cfg, Slow);
+		// Both start together: the jab lands early in the long windup. It still interrupts, but it is a plain hit.
+		H.Step(PunchIntentFor(Hand::Left), PunchIntentFor(Hand::Right));
+		H.Run(40);
+		IE_EXPECT_EQ(H.Count(CombatEventType::AttackCancelled, FighterSlot::Opponent), 1);
+		IE_EXPECT_NEAR(100.0 - H.O().Health, Cfg.Attacks[0].Damage, 1e-4);
+	}
+	{
+		Harness H(Cfg, Slow);
+		// The jab is timed to land in the last moments of the windup: a counter hit at the higher multiplier.
+		H.Step(Idle(), PunchIntentFor(Hand::Right));
+		H.Run(Slow.Attacks[1].WindupTicks - Cfg.Attacks[0].WindupTicks - SecondsToTicks(0.08));
+		H.Step(PunchIntentFor(Hand::Left), Idle());
+		H.Run(30);
+		IE_EXPECT_NEAR(100.0 - H.O().Health, Cfg.Attacks[0].Damage * Cfg.CounterHitMultiplier, 1e-4);
+		IE_EXPECT_NEAR(H.P().Health, 100.0, 1e-5);
+	}
+}

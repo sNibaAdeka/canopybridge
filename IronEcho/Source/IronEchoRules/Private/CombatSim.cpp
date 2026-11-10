@@ -238,7 +238,8 @@ namespace IronEchoCore
 		Result.Outcome = AttackOutcome::Hit;
 		// A counter hit: into a windup, or an uppercut into a head that ducked down onto it.
 		const FighterSnapshot& D = Defender.Snapshot();
-		Result.bCounter = Defender.IsWindingUp() || (bUppercut && D.HeadDrop > 0.5f * Defender.GetConfig().DuckDepthMeters);
+		const bool bIntoWindup = Defender.IsWindingUp() && (AC.CounterWindowTicks <= 0 || D.StageTicksLeft <= AC.CounterWindowTicks);
+		Result.bCounter = bIntoWindup || (bUppercut && D.HeadDrop > 0.5f * Defender.GetConfig().DuckDepthMeters);
 		return Result;
 	}
 

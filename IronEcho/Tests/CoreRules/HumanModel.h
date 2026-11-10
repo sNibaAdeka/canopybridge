@@ -208,12 +208,16 @@ namespace IronEchoTest
 		double FightSeconds = 0.0;
 	};
 
-	inline BoutSummary RunBout(BotLevel Level, const HumanProfile& Profile, uint64_t Seed)
+	inline BoutSummary RunBout(BotLevel Level, const HumanProfile& Profile, uint64_t Seed, bool bArcade = false)
 	{
 		MatchSetup Setup;
 		Setup.Seed = Seed;
 		Setup.Bot = MakeBotConfig(Level);
 		Setup.OpponentFighter = MakeBotFighterConfig(Level);
+		if (bArcade)
+		{
+			ApplyArcadeProfile(Setup);
+		}
 		Match M(Setup);
 		HumanModel Human(Profile, Seed);
 		CombatEventBuffer CombatEvents;

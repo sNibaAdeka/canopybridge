@@ -31,6 +31,13 @@ namespace IronEchoCore
 		uint64_t Seed = 1;
 	};
 
+	// The arcade profile (1.8, the browser game): boxing with the hands only and rules a newcomer can read.
+	// - the bot throws no kicks, elbows or knees (the page offers the player none either);
+	// - being out of breath weakens a punch instead of nearly cancelling it, and the breath comes back sooner;
+	// - a counter hit is a punch that lands just before the foe's own would have left (CounterWindowTicks), and pays more.
+	// Applied on top of a setup whose level-dependent parts are already chosen. Versus uses PlayerFighter for both sides.
+	void ApplyArcadeProfile(MatchSetup& Setup);
+
 	struct MatchInput
 	{
 		FighterIntent PlayerIntent;

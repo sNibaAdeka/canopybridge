@@ -4,12 +4,14 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 using namespace IronEchoTest;
 
 int main(int argc, char** argv)
 {
 	const int Bouts = argc > 1 ? std::atoi(argv[1]) : 100;
+	const bool bArcade = argc > 2 && std::string(argv[2]) == "arcade"; // the browser game's profile (ApplyArcadeProfile)
 	const HumanProfile Profiles[4] = {CasualHuman(), AverageHuman(), SkilledHuman(), SpammerHuman()};
 	std::printf("%-7s %-8s %5s %5s %5s %5s %5s %5s %6s %6s %6s %6s %6s %6s\n", "bot", "human", "win%", "lose%", "draw%", "dec%",
 		"stopR1", "rnd", "kdP", "kdBot", "pThr/r", "pAcc%", "bThr/r", "bAcc%");
@@ -21,7 +23,7 @@ int main(int argc, char** argv)
 			double Rounds = 0, KdP = 0, KdB = 0, PThrown = 0, PLanded = 0, BThrown = 0, BLanded = 0, Minutes = 0;
 			for (int Seed = 1; Seed <= Bouts; ++Seed)
 			{
-				const BoutSummary B = RunBout(static_cast<BotLevel>(L), Profile, static_cast<uint64_t>(Seed));
+				const BoutSummary B = RunBout(static_cast<BotLevel>(L), Profile, static_cast<uint64_t>(Seed), bArcade);
 				if (!B.bHasWinner) ++Draws;
 				else if (B.Winner == FighterSlot::Player) ++Wins;
 				else ++Losses;
