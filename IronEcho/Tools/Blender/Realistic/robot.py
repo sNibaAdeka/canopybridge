@@ -104,8 +104,40 @@ def _in_frame(objs, bone):
     return objs
 
 
+# 1.8 "heavyweight" proportions. The first IE-1 read as a stick figure from the game camera (limbs 9-11 cm thick at 6 m), so every
+# part is thickened around its own bone: the skeleton, the joints' positions and the contract stay exactly as they were, only the
+# silhouette changes. Value = scale across the bone (limbs, torso); a tuple = (across, along) about the bone's head (head, gloves).
+BULK = {
+    "upperarm": 1.5, "lowerarm": 1.45, "thigh": 1.5, "calf": 1.42, "clavicle": 1.3,
+    "spine_03": 1.2, "spine_01": 1.24, "pelvis": 1.22, "neck_01": 1.35,
+    "head": (1.12, 1.12), "hand": (1.32, 1.22), "foot": (1.22, 1.0),
+}
+
+
+def _bulk(obj, bone):
+    k = BULK.get(bone) or BULK.get(bone.rsplit("_", 1)[0])
+    if not k:
+        return
+    across, along = k if isinstance(k, tuple) else (k, 1.0)
+    m = rest_frame(bone)
+    inv = m.inverted()
+    floor = min(v.co.z for v in obj.data.vertices)
+    for v in obj.data.vertices:
+        c = inv @ v.co
+        c.x *= across
+        c.y *= across
+        c.z *= along
+        v.co = m @ c
+    if bone.startswith("foot"):  # the sole stays on the canvas
+        dz = floor - min(v.co.z for v in obj.data.vertices)
+        for v in obj.data.vertices:
+            v.co.z += dz
+    obj.data.update()
+
+
 def _assign(objs, bone, arm, prefix):
     obj = R.join(objs, f"{prefix}_{bone}")
+    _bulk(obj, bone)
     vg = obj.vertex_groups.new(name=bone)
     vg.add(list(range(len(obj.data.vertices))), 1.0, "REPLACE")
     obj.parent = arm

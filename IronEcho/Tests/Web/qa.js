@@ -36,6 +36,7 @@ const check = (name, ok, info = '') => { results.push({ name, ok: !!ok }); conso
 
 async function open(browser, { width = 960, height = 540, blockExternal = true, query = '', openSettings = true, init = null } = {}) {
   const page = await browser.newPage({ viewport: { width, height } });
+  page.setDefaultTimeout(180000); // software rendering: a frame of the ring can take over a second, a click waits for several
   page.errors = [];
   page.external = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -66,6 +67,13 @@ const PLAYER = `(() => { let i = 0, reactAt = -1, defend = false, last = '', nex
     const block = o.stateName === 'Attack' && reactAt > 0 && i >= reactAt && defend ? 1 : 0; let punchMask = 0;
     if (!block && i >= next && p.stamina > 30) { punchMask = rnd() < 0.7 ? 1 : 2; next = i + Math.round(60 * (0.8 + 0.8 * rnd())); }
     return { status: 7, lean: 0, block, punchMask }; }; })()`;
+
+// A click on a pause-panel button right after the pause: checked that the panel is open, then clicked in the page. (Playwright's own click
+// waits for two steady animation frames, which under software rendering can take longer than its timeout while the ring is drawn.)
+async function press(page, selector) {
+  await page.waitForFunction((s) => { const el = document.querySelector(s); return el && el.checkVisibility(); }, selector, { timeout: 30000 });
+  await page.$eval(selector, (el) => el.click());
+}
 
 async function flows(browser) {
   const page = await open(browser);
@@ -98,7 +106,7 @@ async function flows(browser) {
   const resumed = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; a.debugAdvance(1.5); a.frozen = false; return a.core.snapshot().match.phaseName; });
   check('resume returns to the fight (via the ready check and countdown)', ['Countdown', 'Fighting'].includes(resumed), resumed);
   await page.click('#pause-btn');
-  await page.click('#restart');
+  await press(page, '#restart');
   await page.keyboard.press('Escape'); // straight after the start, while the core still waits for the player
   await page.waitForTimeout(300);
   const w1 = await tick();
@@ -110,7 +118,7 @@ async function flows(browser) {
   const after = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; a.debugAdvance(6); a.frozen = false; return a.core.snapshot().match.phaseName; });
   check('... and resuming continues into the fight', ['Countdown', 'Fighting'].includes(after), after);
   await page.click('#pause-btn');
-  await page.click('#to-menu');
+  await press(page, '#to-menu');
   await page.click('[data-group="mode"] button[data-value="training"]');
   await page.click('#start');
   const t = await page.evaluate(() => { const a = globalThis.IRONECHO_APP; let i = 0; a.debugAdvance(60, () => ({ status: 7, lean: 0, block: 0, punchMask: ++i % 40 === 0 ? 1 : 0 }));
@@ -136,7 +144,7 @@ async function ui(browser) {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
   await page.keyboard.press('Escape');
-  await page.click('#to-menu');
+  await press(page, '#to-menu');
   const shadows = async () => page.evaluate(() => { let n = 0; globalThis.IRONECHO_APP.lights.traverse((o) => { if (o.isSpotLight && o.castShadow) n++; }); return n; });
   await page.click('[data-group="quality"] button[data-value="high"]');
   const hi = await shadows();

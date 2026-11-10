@@ -48,7 +48,7 @@ const PUNCH_OMEGA = 70;
 const GUARD = { lead: [0.44, 0.09, 1.50], rear: [0.22, -0.09, 1.47] };
 const BLOCK = { lead: [0.36, 0.07, 1.68], rear: [0.29, -0.07, 1.68] }; // gloves together in front of the face
 // Boxing stance on the canvas (armature space): lead (left) foot forward, rear foot back and out.
-const STANCE = { lead: [0.25, 0.17], rear: [-0.23, -0.16] };
+const STANCE = { lead: [0.29, 0.20], rear: [-0.27, -0.19] }; // 1.8: wider and deeper, a fighter's base rather than a mannequin's
 const ANKLE_Z = 0.10;
 const LEG_MAX = 0.84; // hip -> ankle reach before the knee locks (thigh 0.43 + calf 0.42)
 
@@ -79,7 +79,8 @@ export class FighterAnimator {
 
   // A clean hit landed on this fighter. hand: attacker's hand (0 lead/jab, 1 rear/cross); zone 1 = body shot.
   takeHit(hand, damage, counter, zone = 0) {
-    const power = clamp(damage / 2.8, 0.4, 1.6) * (counter ? 1.25 : 1);
+    // 1.8: reactions are 40% larger: at the game camera's distance the old head snap was hard to see
+    const power = 1.4 * clamp(damage / 2.8, 0.4, 1.6) * (counter ? 1.25 : 1);
     const side = hand === 0 ? 1 : -1; // jab from the opponent's lead hand turns this head one way, cross the other
     if (zone === 2) {
       // low kick: the leg is swept, the body dips and sags to that side
@@ -136,7 +137,9 @@ export class FighterAnimator {
     const bounce = Math.sin(t * 2 * Math.PI * hz);
     if (fighting) {
       const energy = gassed ? 0.45 : 1;
-      T.crouch = 0.10 + 0.018 * energy * bounce;
+      T.crouch = 0.15 + 0.02 * energy * bounce; // 1.8: sits lower in the knees
+      T.lean += 7;                                // shoulders over the lead knee
+      T.nod += 6;                                 // chin tucked behind the gloves
       heelL = heelR = 0.018 * energy * (0.5 + 0.5 * Math.sin(t * 2 * Math.PI * hz + 1.2));
       // the legs move for real now (the rules walk the robot): the rocking only fills the pauses
       const still = 1 - clamp(Math.hypot(f.speedForward || 0, f.speedSide || 0) / 0.6, 0, 1);

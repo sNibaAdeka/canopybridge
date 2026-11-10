@@ -1139,8 +1139,8 @@ function updateCamera(dt, snap) {
       const downP = mine.stateName === 'KnockedDown' || mine.stateName === 'KnockedOut';
       const n = stageSide();
       const midP = (px + ox) / 2;
-      pos.lerp(downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.9, 1.8).addScaledVector(n, 3.25), e);
-      look.lerp(stagePoint(midP + 0.1, 0.96).addScaledVector(n, -0.1), e);
+      pos.lerp(downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.75, 1.62).addScaledVector(n, 2.7), e);
+      look.lerp(stagePoint(midP + 0.1, 1.04).addScaledVector(n, -0.1), e);
     }
   } else if (m.phaseName === 'MatchOver') {
     const t = performance.now() / 1000;
@@ -1153,8 +1153,8 @@ function updateCamera(dt, snap) {
     const sway = 0.18 * Math.max(-1, Math.min(1, -mine.dodge || 0));
     const n = stageSide();
     const mid = (px + ox) / 2;
-    pos = downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.9, 1.8).addScaledVector(n, 3.25 - sway);
-    look = stagePoint(mid + 0.1, 0.96).addScaledVector(n, -0.1 - sway * 0.3);
+    pos = downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.75, 1.62).addScaledVector(n, 2.7 - sway);
+    look = stagePoint(mid + 0.1, 1.04).addScaledVector(n, -0.1 - sway * 0.3);
   }
   const k = 1 - Math.exp(-dt * (app.intro > 0 ? 6 : 4.5));
   app.camPos.lerp(pos, k);

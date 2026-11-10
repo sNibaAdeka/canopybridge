@@ -13,8 +13,9 @@ export function createRenderer(canvas, quality) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality === 'high' ? 2 : 1.25));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.AgXToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  // ACES keeps the liveries' colour and the contrast of the ring light (AgX washed the picture out to a flat brown)
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   return renderer;
@@ -24,10 +25,10 @@ export function applyVenue(renderer, scene, pano) {
   pano.mapping = THREE.EquirectangularReflectionMapping;
   pano.colorSpace = THREE.SRGBColorSpace;
   scene.background = pano;
-  scene.backgroundIntensity = 1.0;
+  scene.backgroundIntensity = 0.42; // the hall sits back in the dark: the lit ring and the robots are the picture
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromEquirectangular(pano).texture;
-  scene.environmentIntensity = 0.85;
+  scene.environmentIntensity = 0.6;
   pmrem.dispose();
 }
 
@@ -229,7 +230,7 @@ export function updateRingOcclusion(ring, cam, look, dt) {
 // TV lighting: soft top key with the main contact shadows, hard truss spots, cool/warm rims.
 export function buildLights(scene, quality) {
   const lights = new THREE.Group();
-  const key = new THREE.DirectionalLight(0xfff4e8, 1.15);
+  const key = new THREE.DirectionalLight(0xfff4e8, 1.7);
   key.position.set(0.8, 6.0, 0.6);
   key.target.position.set(0, 0.9, 0);
   key.castShadow = true;
@@ -262,9 +263,9 @@ export function buildLights(scene, quality) {
     lights.add(spot, spot.target);
   });
 
-  const rimBlue = new THREE.DirectionalLight(0x8cb2ff, 0.9);
+  const rimBlue = new THREE.DirectionalLight(0x8cb2ff, 2.4);
   rimBlue.position.set(-9, 7, 9);
-  const rimRed = new THREE.DirectionalLight(0xffa070, 0.8);
+  const rimRed = new THREE.DirectionalLight(0xffa070, 2.0);
   rimRed.position.set(9, 7, -9);
   lights.add(rimBlue, rimRed);
   scene.add(lights);
