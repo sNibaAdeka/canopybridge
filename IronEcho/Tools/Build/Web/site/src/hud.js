@@ -76,6 +76,7 @@ export class Hud {
     const counting = m.phaseName === 'Knockdown' && m.postGetUpTicksLeft <= 0;
     this.el.count.hidden = !counting || m.knockdownCount <= 0;
     if (counting) this.el.count.textContent = String(m.knockdownCount);
+    if (counting && m.knockdownCount > 0 && this.bannerTimer > 0.15) this.bannerTimer = 0.15; // the count takes the screen from the banner
     const playerDown = snap.player.stateName === 'KnockedDown';
     this.el.getup.hidden = !(counting && playerDown);
     if (playerDown) this.el.getupFill.style.width = `${m.getUpProgress}%`;

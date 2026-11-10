@@ -8,8 +8,8 @@ namespace IronEchoCore
 		F.TiredWindupMultiplier = 1.60f;
 		F.TiredHitStunMultiplier = 0.50f;
 		F.GassedTicks = SecondsToTicks(0.60);
-		F.StaminaRegenDelayTicks = SecondsToTicks(0.50);
-		F.StaminaRegenPerSecond *= 1.10f;
+		F.StaminaRegenDelayTicks = SecondsToTicks(0.25);
+		F.StaminaRegenPerSecond *= 1.50f;
 		F.CounterWindowTicks = SecondsToTicks(0.16);
 		F.CounterHitMultiplier = 1.5f;
 	}

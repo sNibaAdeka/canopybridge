@@ -18,7 +18,8 @@ const $ = (s) => document.querySelector(s);
 
 const TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 // Easy first: new players lose ~94% on Normal. fsStart: "В РИНГ" also goes full screen (desktop yes, phones no)
-const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off', shareVideo: true, fsStart: !TOUCH };
+const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off', shareVideo: true, fsStart: !TOUCH,
+  effects: globalThis.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'calm' : 'full' };
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
 } catch { /* storage unavailable: defaults */ }
@@ -249,7 +250,8 @@ function resize() {
   const h = window.innerHeight;
   app.renderer.setSize(w, h, false);
   app.camera.aspect = w / h;
-  app.camera.fov = w / h < 0.9 ? 62 : 46; // portrait phones need a wider view
+  app.baseFov = w / h < 0.9 ? 62 : 46; // portrait phones need a wider view
+  app.camera.fov = app.baseFov;
   app.camera.updateProjectionMatrix();
 }
 
@@ -491,7 +493,8 @@ function onCombat(e, snap) {
     if (e.kind !== 0) app.shake.add(target === me ? 0.25 : 0.12); // legs, elbows and knees land heavier
     // the heavier the blow the longer both robots hang on the impact (animation only; the rules keep running)
     app.hitStop = e.tired ? 0.02 : Math.min(0.09, 0.035 + 0.03 * power + (e.counter ? 0.025 : 0));
-    app.shake.add(target === me ? 0.45 * power : 0.18 * power);
+    app.shake.add((target === me ? 0.45 * power : 0.18 * power) * (0.3 + 0.7 * calm()));
+    if (power > 1.0 || e.counter) app.punch = Math.max(app.punch || 0, Math.min(1, power - 0.3));
     if (target === me) app.hud.flash('hit');
     if (playerActs) {
       if (e.tired) app.hud.feed('УСТАЛ — УДАР СЛАБЫЙ. ПЕРЕДОХНИ СЕКУНДУ', 'warn');
@@ -551,8 +554,10 @@ function onCombat(e, snap) {
   }
   if (type === 'KnockedDown') {
     app.sound.knockdown();
-    app.shake.add(0.7);
-    app.hud.banner('НОКДАУН', actor === me ? 'держи блок, чтобы встать' : (app.versus ? 'СОПЕРНИК' : NAMES[1]), 1.8, actor === me ? 'bad' : 'good');
+    app.shake.add(0.7 * (0.3 + 0.7 * calm()));
+    app.slowmo = 0.45 * calm();
+    app.punch = 1;
+    app.hud.banner('НОКДАУН', actor === me ? '' : (app.versus ? 'СОПЕРНИК' : NAMES[1]), 1.6, actor === me ? 'bad high' : 'good high');
     return;
   }
   if (type === 'GotUp') {
@@ -1124,7 +1129,8 @@ function updateCamera(dt, snap) {
   const m = snap.match;
   const mine = app.viewSlot === 1 ? snap.opponent : snap.player;
   const px = mine.position;
-  const ox = (app.viewSlot === 1 ? snap.player : snap.opponent).position;
+  const other = app.viewSlot === 1 ? snap.player : snap.opponent;
+  const ox = other.position;
   let pos;
   let look;
   if (app.intro > 0 && (m.phaseName === 'WaitingForPlayer' || m.phaseName === 'Countdown')) {
@@ -1153,8 +1159,17 @@ function updateCamera(dt, snap) {
     const sway = 0.18 * Math.max(-1, Math.min(1, -mine.dodge || 0));
     const n = stageSide();
     const mid = (px + ox) / 2;
-    pos = downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.75, 1.62).addScaledVector(n, 2.7 - sway);
-    look = stagePoint(mid + 0.1, 1.04).addScaledVector(n, -0.1 - sway * 0.3);
+    const downO = other.stateName === 'KnockedDown' || other.stateName === 'KnockedOut';
+    if (downP) { // the player is on the canvas: the camera rises and keeps both the fallen robot and the one standing over it in frame
+      pos = stagePoint(px - 1.1, 2.25).addScaledVector(n, 2.7);
+      look = stagePoint(px - 0.05, 0.6);
+    } else if (downO) {
+      pos = stagePoint(px - 0.6, 2.0).addScaledVector(n, 2.8);
+      look = stagePoint(ox + 0.25, 0.65);
+    } else {
+      pos = stagePoint(px - 0.75, 1.62).addScaledVector(n, 2.7 - sway);
+      look = stagePoint(mid + 0.1, 1.04).addScaledVector(n, -0.1 - sway * 0.3);
+    }
   }
   const k = 1 - Math.exp(-dt * (app.intro > 0 ? 6 : 4.5));
   app.camPos.lerp(pos, k);
@@ -1163,6 +1178,10 @@ function updateCamera(dt, snap) {
   app.camera.position.set(app.camPos.x + s.x, app.camPos.y + s.y, app.camPos.z + s.z);
   app.camera.lookAt(app.camLook);
   app.camera.rotateZ(s.roll);
+  // punch-in: a heavy blow pulls the lens in by up to 4% and lets go in a fifth of a second
+  app.punch = Math.max(0, (app.punch || 0) - dt * 5);
+  const fov = (app.baseFov || 46) * (1 - 0.04 * Math.min(1, app.punch) * calm());
+  if (Math.abs(fov - app.camera.fov) > 0.01) { app.camera.fov = fov; app.camera.updateProjectionMatrix(); }
   updateRingOcclusion(app.ring, app.camera.position, app.camLook, dt);
 }
 
@@ -1173,6 +1192,8 @@ const CAMERA_PENDING = { status: 6, lean: 0, leanForward: 0, block: 0, punchMask
 const cameraPending = () => !!app.cameraWanted && !(app.cameraInput && app.cameraInput.active);
 // 1.8: the browser game is boxing with the hands. Elbows (punch bits 16, 32), kicks and knees (the kick mask) are dropped here, whatever
 // produced them (the camera's leg detectors still run for the recordings); the bot throws none either (ApplyArcadeProfile in the core).
+// «Эффекты: спокойные» (and the system's reduced-motion wish by default): 0 = no punch-in, no slow motion, a third of the shake
+const calm = () => (settings.effects === 'calm' ? 0 : 1);
 function handsOnly(f) {
   if (f.kickMask) f.kickMask = 0;
   if (f.punchMask & 48) f.punchMask &= ~48;
@@ -1182,7 +1203,7 @@ function currentInput() {
   if (app.state !== 'playing') return { status: 7, lean: 0, block: 0, punchMask: 0 };
   if (cameraPending()) return CAMERA_PENDING;
   if (!(app.cameraInput && app.cameraInput.active)) return app.input.poll();
-  const out = handsOnly(app.cameraInput.poll());
+  const out = app.cameraInput.poll();
   if (LATENCY_TEST && out.punchMask) latencyFlash();
   return out;
 }
@@ -1214,7 +1235,7 @@ app.currentInput = currentInput;
 function step(dt, input, now) {
   if (app.state === 'paused') return; // frozen frame behind the pause panel
   if (app.state !== 'menu' && app.state !== 'collect') {
-    if (app.versus) netStep(dt); else app.core.frame(dt, input);
+    if (app.versus) netStep(dt); else app.core.frame(dt, handsOnly(input)); // every source of input passes the hands-only rule
     const snap = app.core.snapshot();
     smoothJumps(snap, dt);
     if (app.versus) versusUi(snap);
@@ -1244,6 +1265,9 @@ function step(dt, input, now) {
     if (app.hitStop > 0) {
       app.hitStop -= dt;
       animDt = dt * 0.15;
+    } else if (app.slowmo > 0) { // a knockdown plays at a third of the speed for a moment (animation only)
+      app.slowmo -= dt;
+      animDt = dt * 0.35;
     }
     const gap = snap.match.gap;
     const ctx = { gap, phase };
@@ -1251,8 +1275,8 @@ function step(dt, input, now) {
     placeFighters(snap);
     app.anim.player.update(animDt, snap.player, ctx);
     if (!app.training) app.anim.opponent.update(animDt, snap.opponent, ctx);
-    app.holders.player.tilt.rotation.z = app.anim.player.fall * 1.2;
-    app.holders.opponent.tilt.rotation.z = app.anim.opponent.fall * 1.2;
+    app.holders.player.tilt.rotation.z = app.anim.player.fall * 1.42;   // all the way down onto the back
+    app.holders.opponent.tilt.rotation.z = app.anim.opponent.fall * 1.42;
     app.bag.group.position.copy(stagePoint(snap.opponent.position + 0.1));
     app.bag.update(dt);
     app.sparks.update(dt);
@@ -1412,6 +1436,7 @@ function wireMenu() {
   pick('tracking', 'tracking');
   pick('camera2', 'camera2');
   pick('fsStart', 'fsStart', (v) => v === 'true');
+  pick('effects', 'effects');
   // the second camera needs the phone page next to the game (the public site and the Windows app have it) and a webcam game
   const cam2 = document.querySelector('[data-group="camera2"]');
   const syncCam2 = () => { if (cam2) cam2.hidden = !(LAB && settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage); };

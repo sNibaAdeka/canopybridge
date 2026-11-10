@@ -459,11 +459,15 @@ export class FighterAnimator {
     if (this.fall > 0.01) {
       const k = this.fall;
       T.crouch = lerp(T.crouch, 0.30, smooth(k * 1.6));
-      T.lean = lerp(T.lean, -22, k);
-      T.nod = lerp(T.nod, -18, k);
+      // getting up is not a plank swinging upright: the robot curls forward over its knees and pushes up through a deep crouch
+      const rising = this.rising ? smooth(clamp((1 - k) / 0.6, 0, 1)) * smooth(clamp(k / 0.25, 0, 1)) : 0;
+      T.lean = lerp(T.lean, -22, k) + 46 * rising;
+      T.nod = lerp(T.nod, -18, k) + 30 * rising;
+      T.crouch += 0.10 * rising;
       T.body_x = lerp(T.body_x, 0, k);
-      lead = lerp3(lead, [0.05, 0.42, 0.95], k);
-      rear = lerp3(rear, [0.00, -0.42, 0.95], k);
+      // flat on the back: the arms fall out to the sides and lie on the canvas (not held up over the chest)
+      lead = lerp3(lead, [-0.28, 0.52, 1.30], k);
+      rear = lerp3(rear, [-0.30, -0.52, 1.28], k);
       T.elbow_out = lerp(T.elbow_out, 0.8, k);
     }
     if ((f.legSlow || 0) > 0.05 || this.legHit > 0.05) {
@@ -577,7 +581,8 @@ export class FighterAnimator {
     this.speedS = f.speedSide || 0;
     this.telegraph = 0;
     const down = f.stateName === 'KnockedDown' || f.stateName === 'KnockedOut';
-    [this.fall, this.fallV] = spring(this.fall, this.fallV, down ? 1 : 0, down ? 5.5 : 4.0, dt);
+    [this.fall, this.fallV] = spring(this.fall, this.fallV, down ? 1 : 0, down ? 5.5 : 3.2, dt);
+    this.rising = !down && this.fall > 0.02;
     for (const k of Object.keys(this.kick)) {
       [this.kick[k], this.kickV[k]] = spring(this.kick[k], this.kickV[k], 0, 14, dt);
     }

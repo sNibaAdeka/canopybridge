@@ -211,7 +211,8 @@ async function camera(browser) {
   check('camera: the personal block pose is calibrated and read back', r.personal && r.peakBlock > 0.85, `peak ${r.peakBlock.toFixed(2)}`);
   // every detected kick is thrown, except one that arrives while the fighter is stunned, down or mid-attack (the rules refuse it)
   const refused = r.kickStates.filter((st) => /^(HitStun|BlockStun|KnockedDown|KnockedOut)\//.test(st) || /^Attack\/(Windup|Active)/.test(st)).length;
-  check('camera: four leg kicks are detected (mid and low, both legs) and thrown', r.kicksDetected === '0mid,1mid,0low,1low' && r.kicksThrown >= 4 - refused,
+  // 1.8: the game is hands-only. The camera still sees the legs (the detectors feed the recordings), the fight ignores them.
+  check('camera: four leg kicks are detected (mid and low, both legs) and none is thrown (hands-only rules)', r.kicksDetected === '0mid,1mid,0low,1low' && r.kicksThrown === 0 && refused >= 0,
     `${r.kicksDetected}; thrown ${r.kicksThrown}; states at the request: ${r.kickStates.join(', ')}`);
   check('camera: leaning toward the screen steps the robot in', r.peakLean >= 0.55 && r.stepIn > 0.3, `lean ${r.peakLean.toFixed(2)}, speed ${r.stepIn.toFixed(2)} m/s`);
   // 1.6.2: the player walks out of the frame in the middle of the fight: after a second and a half the screen says so (with the likely

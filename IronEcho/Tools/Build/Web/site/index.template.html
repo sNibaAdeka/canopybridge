@@ -79,10 +79,12 @@
   #banner-main { font: 800 clamp(56px, 11vw, 132px)/0.95 var(--display); letter-spacing: 0.04em; text-shadow: 0 6px 30px rgba(0,0,0,0.7); }
   #banner.good #banner-main { color: #fff; text-shadow: 0 0 30px rgba(94,224,138,0.45), 0 6px 30px rgba(0,0,0,0.7); }
   #banner.bad #banner-main { color: #ffd2cb; text-shadow: 0 0 30px rgba(255,90,74,0.55), 0 6px 30px rgba(0,0,0,0.7); }
+  #banner.high { top: 13%; } /* a knockdown: the words sit above the robots, not across them */
+  #banner.high #banner-main { font-size: clamp(44px, 7.5vw, 92px); }
   #banner-sub { font: 600 15px/1.3 var(--text); color: var(--dim); margin-top: 8px; letter-spacing: 0.04em; }
-  #count { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font: 800 clamp(90px, 18vw, 200px)/1 var(--display); color: #fff;
+  #count { position: absolute; left: 50%; top: 11%; transform: translateX(-50%); font: 800 clamp(72px, 12vw, 150px)/1 var(--display); color: #fff;
     text-shadow: 0 0 40px rgba(255,90,74,0.5), 0 8px 30px rgba(0,0,0,0.8); font-variant-numeric: tabular-nums; }
-  #getup { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 18%); transform: translateX(-50%); width: min(86vw, 460px);
+  #getup { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 7%); transform: translateX(-50%); width: min(86vw, 460px);
     text-align: center; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px 14px; }
   #getup b { font: 800 22px/1.1 var(--display); letter-spacing: 0.08em; }
   #getup .gbar { height: 10px; margin-top: 10px; background: rgba(255,255,255,0.08); border-radius: 5px; overflow: hidden; }
@@ -256,9 +258,12 @@
   .res-row > * { flex: 1 1 140px; margin-top: 16px; font-size: 18px; padding: 12px; }
   .res-more { margin-top: 12px; }
   .res-more summary { cursor: pointer; color: var(--faint); font-size: 12px; }
+  .more-keys { margin-top: 14px; }
+  .more-keys summary { cursor: pointer; color: var(--faint); font-size: 12px; }
+  .more-keys .tips { margin-top: 14px; }
   @media (max-height: 700px) { .go-big { padding: 14px; font-size: 28px; margin-top: 14px; } }
   /* touch screens: the keyboard table is noise; the on-screen pad has its own labels */
-  @media (hover: none) and (pointer: coarse) { #menu .keys { display: none; } }
+  @media (hover: none) and (pointer: coarse) { #menu .keys, #menu a.dl-win, #menu .menu-side > .side-h { display: none; } }
 </style>
 
 <div id="stage">
@@ -285,7 +290,7 @@
     <div id="count" hidden></div>
     <div id="getup" hidden><b>ДЕРЖИ БЛОК, ЧТОБЫ ВСТАТЬ</b><div class="gbar"><div id="getup-fill"></div></div></div>
     <div id="flash"></div>
-    <div id="help" hidden><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>ноги</span><span><kbd>J</kbd><kbd>K</kbd>прямые</span><span><kbd>U</kbd><kbd>I</kbd>хуки</span><span><kbd>N</kbd><kbd>M</kbd>апперкоты</span><span><kbd>Shift</kbd>в корпус</span><span><kbd>Q</kbd><kbd>E</kbd>уклон</span><span><kbd>C</kbd>нырок</span><span><kbd>Пробел</kbd>блок</span><span><kbd>Esc</kbd>пауза</span></div>
+    <div id="help" hidden><span><kbd>J</kbd><kbd>K</kbd>прямые</span><span><kbd>U</kbd><kbd>I</kbd>хуки</span><span><kbd>N</kbd><kbd>M</kbd>апперкоты</span><span><kbd>Пробел</kbd>блок</span><span><kbd>Q</kbd><kbd>E</kbd>уклон</span><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>шаги</span></div>
     <button id="pause-btn" type="button">ПАУЗА</button>
   </div>
 
@@ -328,6 +333,10 @@
       <button type="button" data-value="low">БЫСТРАЯ<small>слабые ПК и телефоны</small></button>
     </div></div>
     @@CAMERA_MENU@@
+    <div class="opt" data-group="effects"><span>Эффекты</span><div class="seg">
+      <button type="button" data-value="full">ПОЛНЫЕ<small>тряска, наезд, замедление</small></button>
+      <button type="button" data-value="calm">СПОКОЙНЫЕ<small>без резких движений камеры</small></button>
+    </div></div>
     <div class="opt" data-group="fsStart"><span>Во весь экран при старте</span><div class="seg">
       <button type="button" data-value="true">ДА<small>ринг на весь экран</small></button>
       <button type="button" data-value="false">НЕТ<small>в окне браузера</small></button>
@@ -340,21 +349,29 @@
       <div class="nick-row"><input id="nick" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Введи ник — бои пойдут в рейтинг"><button class="ghost" id="nick-ok" type="button">ОК</button></div>
       <small class="note" id="nick-note"></small></div>
     @@DOWNLOAD_MENU@@
-    <h3 class="side-h">Как драться</h3>
-    <ul class="tips">
-      <li><b>Уклон — в последний миг.</b> Визор вспыхнул, плечо ушло — удар летит. Ранний уклон удар догонит.</li>
-      <li><b>Ни одна защита не спасает от всего.</b> От хука — нырок или блок, от апперкота — уклон (сквозь блок проходит половина). Бот запоминает, как ты защищаешься.</li>
-      <li><b>Дистанция и корпус.</b> Вплотную удар вязнет, издалека не достаёт. От удара в корпус не уклониться — он отнимает дыхание.</li>
-    </ul>
+    <h3 class="side-h">Управление</h3>
     <div class="keys">
-      <kbd>W / S · A / D</kbd><span>шаг вперёд / назад · кружить</span>
       <kbd>J / K</kbd><span>джеб / кросс</span>
       <kbd>U / I</kbd><span>хук левой / правой</span>
       <kbd>N / M</kbd><span>апперкот (вблизи)</span>
-      <kbd>Shift</kbd><span>+ J / K / U / I — в корпус</span>
-      <kbd>Q / E · C</kbd><span>уклон · нырок (держать)</span>
-      <kbd>Пробел</kbd><span>блок; в нокдауне — держать, чтобы встать</span>
-      <kbd>Мышь</kbd><span>ЛКМ — джеб, ПКМ — кросс · <b>Esc</b> — пауза</span>
+      <kbd>Пробел</kbd><span>блок</span>
+      <kbd>Q / E</kbd><span>уклон</span>
+      <kbd>W A S D</kbd><span>шаги</span>
+    </div>
+    <details class="more-keys"><summary>Ещё приёмы и советы</summary>
+    <div class="keys">
+      <kbd>Shift</kbd><span>+ удар — в корпус (отнимает дыхание)</span>
+      <kbd>C</kbd><span>нырок под хук (держать)</span>
+      <kbd>Мышь</kbd><span>ЛКМ — джеб, ПКМ — кросс</span>
+      <kbd>Esc</kbd><span>пауза</span>
+    </div>
+    <ul class="tips">
+      <li><b>Уклон — в последний миг.</b> Визор соперника вспыхнул — удар летит. Ранний уклон удар догонит.</li>
+      <li><b>Контрудар.</b> Попади за миг до его удара — урон в полтора раза больше.</li>
+      <li><b>Дыши.</b> Полоска под здоровьем — дыхание. Пустая — удары слабые: сделай паузу.</li>
+      <li><b>От хука</b> — нырок или блок, <b>от апперкота</b> — уклон.</li>
+    </ul>
+    </details>
     </div>
    </div>
   </div>
