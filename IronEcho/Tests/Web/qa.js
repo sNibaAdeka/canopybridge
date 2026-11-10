@@ -499,7 +499,7 @@ async function soak(browser) {
   const page = await open(browser, { width: 640, height: 360 });
   await page.click('#start');
   const samples = [];
-  for (let b = 0; b < 3; b++) {
+  for (let b = 0; b < 4; b++) {
     samples.push(await page.evaluate(() => {
       const app = globalThis.IRONECHO_APP; let i = 0;
       for (let k = 0; k < 200 && app.state !== 'results'; k++) app.debugAdvance(5, () => ({ status: 7, lean: 0, block: 0, punchMask: ++i % 30 === 0 ? 1 : 0 }));
@@ -510,8 +510,9 @@ async function soak(browser) {
   }
   // the first bout may create one-off resources lazily (an effect texture at the first knockdown): a leak is growth from
   // one bout to the next, so the second and third are compared
-  const [, b, c] = samples;
-  check('soak: three bouts in a row leak no scene objects, geometries or textures',
+  // (four bouts, the last two compared: an effect first seen in the second bout is not a leak either)
+  const [, , b, c] = samples;
+  check('soak: bouts in a row leak no scene objects, geometries or textures',
     c.objects === b.objects && c.textures === b.textures && c.geometries <= b.geometries + 2, JSON.stringify(samples));
   await page.close();
 }
