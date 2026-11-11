@@ -152,6 +152,49 @@ function chainFrames(p0, p1, p2, yAxis) {
   return [f1, f2];
 }
 
+// ---- a robot does not run through itself (1.9) ----
+// The body is a few capsules (head, chest, belly, the shoulders' armour, the other arm); a fist and a forearm are spheres along the
+// arm. After the arm is solved, whatever sits inside the body pushes the wrist's target out along the shortest way and the arm is
+// solved again (three passes at most). A guard held at the chin therefore rests on the helmet instead of inside it, a forearm
+// swinging past the chest slides over the armour, and two fists in a block stay side by side.
+const SELF_FIST_R = 0.060;
+const SELF_ARM_R = 0.056;
+function closestOnSegment(p, a, b) {
+  const ab = b.clone().sub(a);
+  const len2 = ab.lengthSq();
+  if (len2 < 1e-10) return a.clone();
+  const t = Math.max(0, Math.min(1, p.clone().sub(a).dot(ab) / len2));
+  return a.clone().addScaledVector(ab, t);
+}
+function armSamples(elbow, wrist) {
+  const dir = wrist.clone().sub(elbow).normalize();
+  return [[wrist.clone().addScaledVector(dir, 0.165), SELF_FIST_R - 0.004], [wrist.clone().addScaledVector(dir, 0.095), SELF_FIST_R],
+    [wrist.clone().addScaledVector(dir, 0.02), SELF_ARM_R], [elbow.clone().lerp(wrist, 0.6), SELF_ARM_R + 0.004], [elbow.clone().lerp(wrist, 0.28), SELF_ARM_R]];
+}
+// The way out of the torso or the helmet is forward and outward, never up or down: pushed along the true shortest way, a fist under
+// the chin would be driven down into the chest and the two rules would fight. `fwd` is the chest's forward direction.
+function selfPush(elbow, wrist, obstacles, fwd) {
+  const push = V(0, 0, 0);
+  const samples = armSamples(elbow, wrist);
+  for (const [a, b, r, isBody] of obstacles) {
+    let deepest = 0;
+    let dir = null;
+    for (const [pt, pr] of samples) {
+      const q = closestOnSegment(pt, a, b);
+      const d = pt.clone().sub(q);
+      const dist = d.length();
+      const depth = r + pr - dist;
+      if (depth > deepest) {
+        deepest = depth;
+        if (isBody) { d.z *= 0.2; d.addScaledVector(fwd, 0.35 * Math.max(dist, 0.02)); }
+        dir = d.lengthSq() > 1e-10 ? d.normalize() : fwd.clone();
+      }
+    }
+    if (dir) push.addScaledVector(dir, deepest * (isBody ? 1.25 : 1));
+  }
+  return push;
+}
+
 // robot.pose(): deform matrix per bone (Blender armature space). A rigid part bound to bone b moves by D[b].
 // `memo` (optional, one per robot) keeps the last bend direction of each arm; `dt` the time since it (s).
 const ELBOW_TURN_RATE = 26; // rad/s, ~25 degrees a frame at 60 fps: a block or a hook turns the elbow well under this
@@ -170,6 +213,16 @@ export function computePose(p, memo = null, dt = 1 / 60) {
   D.spine_01 = mul(tPelvis, TV(waist), RZ(p.twist * 0.5), RY(p.lean * 0.5), TV(waist.clone().negate()));
   for (const b of ['spine_02', 'spine_03', 'clavicle_l', 'clavicle_r', 'neck_01']) D[b] = tChest;
   D.head = tHead;
+
+  // what an arm must stay out of (armature space, this frame)
+  const body = [
+    [V(-0.012, 0, 1.80).applyMatrix4(tHead), V(-0.012, 0, 1.87).applyMatrix4(tHead), 0.100, true],             // helmet
+    [V(0.015, -0.085, 1.48).applyMatrix4(tChest), V(0.015, 0.085, 1.48).applyMatrix4(tChest), 0.130, true],    // chest
+    [V(-0.012, 0, 1.12).applyMatrix4(D.spine_01), V(-0.012, 0, 1.28).applyMatrix4(D.spine_01), 0.088, true],   // belly
+  ];
+  const bodyForward = V(1, 0, 0).transformDirection(tChest).setZ(0).normalize();
+  const pauldron = { l: V(0, 0.262, 1.58).applyMatrix4(tChest), r: V(0, -0.262, 1.58).applyMatrix4(tChest) };
+  const solved = [];
 
   const arms = [['l', 1, p.lead_hand, p.lead_extended, p.lead_elbow || 0, p.lead_hook || 0],
     ['r', -1, p.rear_hand, p.rear_extended, p.rear_elbow || 0, p.rear_hook || 0]];
@@ -196,8 +249,21 @@ export function computePose(p, memo = null, dt = 1 / 60) {
     if (hook > 0) turns.push([V(0.1, s, 0.45), hook]);
     // (the strike's own turns replace the raised-glove one: the glove by the temple is part of the strike, not a high guard)
     const prevN = memo ? memo[side] : null;
-    const [elbow, wrist, bend] = twoBone(sh, reach, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp) * (1 - Math.max(strike, hook)), turns.length ? turns : null,
-      prevN, ELBOW_TURN_RATE * Math.max(1 / 240, Math.min(0.1, dt)));
+    const other = side === 'l' ? 'r' : 'l';
+    const obstacles = [...body, [pauldron[other], pauldron[other], 0.095, true], ...solved];
+    const solve = (goalPoint) => twoBone(sh, goalPoint, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp) * (1 - Math.max(strike, hook)),
+      turns.length ? turns : null, prevN, ELBOW_TURN_RATE * Math.max(1 / 240, Math.min(0.1, dt)));
+    let [elbow, wrist, bend] = solve(reach);
+    if (!p.limp) { // (lying on the canvas the limbs rest on the body: nothing to avoid)
+      const pushed = reach.clone();
+      for (let pass = 0; pass < 6; pass++) {
+        const push = selfPush(elbow, wrist, obstacles, bodyForward);
+        if (push.lengthSq() < 1e-8) break;
+        pushed.add(push);
+        [elbow, wrist, bend] = solve(armTarget(sh, pushed, s));
+      }
+    }
+    for (const [pt, pr] of armSamples(elbow, wrist)) solved.push([pt, pt, pr, false]); // the second arm keeps clear of the first
     if (memo) memo[side] = bend.clone();
     const [fUp, fLo] = chainFrames(sh, elbow, wrist, wrist.clone().sub(sh).normalize().cross(bend).negate());
     D[`upperarm_${side}`] = mul(fUp, REST_INV[`upperarm_${side}`]);

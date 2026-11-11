@@ -19,6 +19,7 @@ namespace IronEchoCore
 		ArcadeFighter(Setup.PlayerFighter);
 		ArcadeFighter(Setup.OpponentFighter);
 		Setup.Bot.KickChance = 0.0f;
+		Setup.Bot.bLegStrikes = false;
 		Setup.Bot.ClinchStrikeChance = 0.0f;
 	}
 

@@ -205,6 +205,7 @@ namespace IronEchoTest
 		int32_t BotLanded = 0;
 		int32_t BotBlocks = 0;
 		int32_t BotDodges = 0;
+		int32_t BotLegAndElbowStrikes = 0; // kicks + elbows + knees thrown by the bot
 		double FightSeconds = 0.0;
 	};
 
@@ -248,6 +249,7 @@ namespace IronEchoTest
 		B.BotLanded = O.PunchesLanded;
 		B.BotBlocks = O.BlocksMade;
 		B.BotDodges = O.DodgesMade;
+		B.BotLegAndElbowStrikes = O.KicksThrown + O.ElbowsThrown + O.KneesThrown;
 		B.FightSeconds = static_cast<double>(S.SimTick) / static_cast<double>(kTickRate);
 		return B;
 	}

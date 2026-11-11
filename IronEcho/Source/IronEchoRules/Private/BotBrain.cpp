@@ -269,7 +269,7 @@ namespace IronEchoCore
 				}
 			}
 			// The foe stands just out of punching reach but inside a kick's: a kick is the answer.
-			if (Kind == AttackKind::Punch && Sim.Gap() > Me.SpecFor(Choice, Zone).ReachMeters
+			if (Config.bLegStrikes && Kind == AttackKind::Punch && Sim.Gap() > Me.SpecFor(Choice, Zone).ReachMeters
 				&& Sim.Gap() <= Me.SpecFor(Hand::Right, PunchZone::Body, AttackKind::Kick).ReachMeters && MySnap.Stamina >= 16.0f && Rng.Chance(0.6f))
 			{
 				Kind = AttackKind::Kick;
@@ -359,7 +359,7 @@ namespace IronEchoCore
 
 	void BotBrain::PlanNext()
 	{
-		if (Rng.Chance(Config.KickChance))
+		if (Config.bLegStrikes && Rng.Chance(Config.KickChance))
 		{
 			PlannedKind = AttackKind::Kick;
 			PlannedHand = Rng.Chance(Config.RoundKickShare) ? Hand::Right : Hand::Left;

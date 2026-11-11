@@ -45,8 +45,8 @@ const PUNCH_OMEGA = 70;
 
 // Glove targets are in the body frame, and the lead shoulder sits forward (the stance is turned): keep every target at least
 // ~0.28 m from its shoulder, otherwise the rig pins it to the minimum reach and the arm swings wildly on small body motion.
-const GUARD = { lead: [0.44, 0.09, 1.50], rear: [0.22, -0.09, 1.47] };
-const BLOCK = { lead: [0.36, 0.07, 1.68], rear: [0.29, -0.07, 1.68] }; // gloves together in front of the face
+const GUARD = { lead: [0.45, 0.10, 1.49], rear: [0.28, -0.10, 1.44] }; // 1.9: fists in front of the chin, not at the temples
+const BLOCK = { lead: [0.36, 0.088, 1.57], rear: [0.32, -0.088, 1.56] }; // fists side by side in front of the face (the fist adds 0.2 m above the wrist)
 // Boxing stance on the canvas (armature space): lead (left) foot forward, rear foot back and out.
 const STANCE = { lead: [0.29, 0.20], rear: [-0.27, -0.19] }; // 1.8: wider and deeper, a fighter's base rather than a mannequin's
 const ANKLE_Z = 0.10;
@@ -192,8 +192,9 @@ export class FighterAnimator {
       T.nod = 16;
       T.yaw += 8 * T.lateral;
       const s = T.lateral;
-      lead = [0.26, 0.10 + 0.07 * s, 1.38];
-      rear = [0.18, -0.08 + 0.07 * s, 1.36];
+      // the gloves travel with the shoulders (0.20 m of the head's 0.30 m): left where they were, the far arm folds across the chest
+      lead = [0.46, 0.10 + 0.20 * s, 1.45];
+      rear = [0.33, -0.10 + 0.20 * s, 1.42];
     } else if (Math.abs(slip) > 0.02) {
       T.lateral += slip;
     }
@@ -626,6 +627,7 @@ export class FighterAnimator {
     const swingL = this.feet.lead.swing ? 0 : 1;
     const swingR = this.feet.rear.swing ? 0 : 1;
     P.guard_follow = this.kickS ? this.kickS.lift : 0;
+    P.limp = this.fall > 0.35 ? 1 : 0; // down on the canvas: the arms may rest on the body (rig.js self-avoidance off)
     P.lead_foot = [feet.lead.x, feet.lead.y, feet.lead.z, this.heel[0] * swingL];
     P.rear_foot = [feet.rear.x, feet.rear.y, feet.rear.z, this.heel[1] * swingR];
     P.foot_yaw = [10, lerp(35, 4, this.pivot)];
@@ -639,6 +641,7 @@ export class FighterAnimator {
     if (this.kickS && live) this._applyKick(P, feet, this.kickS);
     // the elbows' bend directions of the last frame: computePose limits how fast they may turn (no joint flips across the arm)
     this.poseMemo = this.poseMemo || {};
+    this.lastPose = P; // the pose as solved this frame (tests read it: Tests/Web/selfcheck.js)
     this.rig.applyPose(computePose(P, this.poseMemo, dt));
     // visor LEDs flare while the bot loads a punch: a readable "now!" for a human 2 m from the screen
     this.glow = (this.glow || 0) + ((this.telegraph > 0 ? 1 : 0) - (this.glow || 0)) * Math.min(1, dt * 18);

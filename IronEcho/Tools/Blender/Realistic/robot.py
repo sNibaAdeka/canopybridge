@@ -27,12 +27,16 @@ class Livery:
     led: Tuple[float, float, float]
     number: str
     wear: float
+    style: str = "sparring"                          # robot2.py: "sparring" (rounded) or "champion" (angular, crested)
+    trim: Tuple[float, float, float] = (0.62, 0.63, 0.65)  # bare-metal trim (brass on the champion)
 
 
-FORGE = Livery("Forge", (0.56, 0.57, 0.58), (0.015, 0.09, 0.42), (0.085, 0.09, 0.10), (0.006, 0.03, 0.24),
-               (0.25, 0.6, 1.0), "07", 0.45)
-EMBER = Livery("Ember", (0.045, 0.047, 0.052), (0.55, 0.035, 0.012), (0.16, 0.16, 0.17), (0.3, 0.012, 0.008),
-               (1.0, 0.28, 0.05), "13", 0.6)
+# IE-2 (robot2.py). FORGE: worn steel-blue armour over a dark frame, off-white markings, cold blue lights.
+# EMBER: black armour, crimson plates, brass trim, ember-orange lights.
+FORGE = Livery("Forge", (0.016, 0.070, 0.290), (0.300, 0.310, 0.320), (0.060, 0.064, 0.072), (0.006, 0.03, 0.24),
+               (0.20, 0.62, 1.0), "07", 0.42, "sparring", (0.62, 0.63, 0.65))
+EMBER = Livery("Ember", (0.022, 0.022, 0.026), (0.380, 0.022, 0.014), (0.080, 0.076, 0.076), (0.3, 0.012, 0.008),
+               (1.0, 0.26, 0.04), "13", 0.45, "champion", (0.560, 0.390, 0.130))
 
 # Rest pose (A-pose), metres. name: (head, tail, parent)
 BONES: Dict[str, Tuple[Tuple[float, float, float], Tuple[float, float, float], str]] = {
@@ -94,6 +98,7 @@ class Kit:
         self.decal = R.mat_rough(f"{p}_Decal", (0.85, 0.85, 0.85) if sum(lv.shell) < 1.0 else (0.02, 0.02, 0.025),
                                  0.4)
         self.warn = R.mat_rough("WarnYellow", (0.75, 0.48, 0.02), 0.45)
+        self.trim = R.mat_metal(f"{p}_Trim", lv.trim, rough=0.3, aniso=0.2, brushed=False, grime=0.35)
 
 
 def _in_frame(objs, bone):
@@ -104,259 +109,14 @@ def _in_frame(objs, bone):
     return objs
 
 
-# 1.8 "heavyweight" proportions. The first IE-1 read as a stick figure from the game camera (limbs 9-11 cm thick at 6 m), so every
-# part is thickened around its own bone: the skeleton, the joints' positions and the contract stay exactly as they were, only the
-# silhouette changes. Value = scale across the bone (limbs, torso); a tuple = (across, along) about the bone's head (head, gloves).
-BULK = {
-    "upperarm": 1.5, "lowerarm": 1.45, "thigh": 1.5, "calf": 1.42, "clavicle": 1.3,
-    "spine_03": 1.2, "spine_01": 1.24, "pelvis": 1.22, "neck_01": 1.35,
-    "head": (1.12, 1.12), "hand": (1.32, 1.22), "foot": (1.22, 1.0),
-}
-
-
-def _bulk(obj, bone):
-    k = BULK.get(bone) or BULK.get(bone.rsplit("_", 1)[0])
-    if not k:
-        return
-    across, along = k if isinstance(k, tuple) else (k, 1.0)
-    m = rest_frame(bone)
-    inv = m.inverted()
-    floor = min(v.co.z for v in obj.data.vertices)
-    for v in obj.data.vertices:
-        c = inv @ v.co
-        c.x *= across
-        c.y *= across
-        c.z *= along
-        v.co = m @ c
-    if bone.startswith("foot"):  # the sole stays on the canvas
-        dz = floor - min(v.co.z for v in obj.data.vertices)
-        for v in obj.data.vertices:
-            v.co.z += dz
-    obj.data.update()
-
-
 def _assign(objs, bone, arm, prefix):
     obj = R.join(objs, f"{prefix}_{bone}")
-    _bulk(obj, bone)
     vg = obj.vertex_groups.new(name=bone)
     vg.add(list(range(len(obj.data.vertices))), 1.0, "REPLACE")
     obj.parent = arm
     mod = obj.modifiers.new("Armature", "ARMATURE")
     mod.object = arm
     return obj
-
-
-# ------------------------------------------------------------------------------------------------------------- parts
-# Torso/head/pelvis/feet are modelled in rest-pose world space; limbs in their bone frame (z along the bone, x forward;
-# outward side of a limb is -s*y, s = +1 left / -1 right).
-
-D = math.radians
-
-
-def _head(k: Kit, lv: Livery):
-    """Armoured combat head: a helmet dome over the back and top, a separate face mask in front (deep-set dark visor
-    under a brow ridge, faceted jaw with vents), cheek guards bridging dome and mask, short crest, flush slit sensors.
-    Reads like a fighter's helmet on an electric humanoid; no round cartoon eyes."""
-    z = 1.81
-    p = [R.blob("skull_core", (0.165, 0.142, 0.19), (-0.012, 0, z - 0.005), mat=k.frame, cuboid=0.4),
-         R.blob("dome", (0.19, 0.166, 0.14), (-0.034, 0, z + 0.042), mat=k.shell, cuboid=0.62),
-         R.curved_plate("visor", 0.088, 112, 0.07, 0.012, (-0.02, 0, z + 0.004), mat=k.glass, lean=0.016,
-                        bulge=0.003, bevel=0.004),
-         R.curved_plate("visor_line", 0.0915, 64, 0.004, 0.002, (-0.02, 0, z + 0.012), mat=k.led, lean=0.004,
-                        bevel=0.0005),
-         R.curved_plate("brow", 0.095, 104, 0.026, 0.012, (-0.02, 0, z + 0.05), mat=k.shell, lean=-0.003,
-                        taper=1.03, bevel=0.006, screws=k.bolt),
-         R.curved_plate("jaw", 0.086, 106, 0.056, 0.016, (-0.02, 0, z - 0.058), mat=k.frame, lean=0.026, taper=0.74,
-                        bevel=0.005),
-         R.fins("jaw_vent", 4, (0.004, 0.05, 0.006), 0.011, 2, (0.06, 0, z - 0.062), mat=k.plastic),
-         R.box("crest", (0.13, 0.018, 0.026), (-0.05, 0, z + 0.122), mat=k.accent, bevel=0.006, taper=(0.7, 0.6)),
-         R.fins("rear_vent", 4, (0.006, 0.08, 0.01), 0.018, 2, (-0.13, 0, z + 0.02), mat=k.plastic)]
-    for s in (-1, 1):
-        p.append(R.curved_plate(f"cheek{s}", 0.094, 44, 0.115, 0.016, (-0.02, 0, z - 0.012), (0, 0, s * D(58)),
-                                k.accent, bulge=0.006, taper=0.72, lean=0.008, bevel=0.005, screws=k.bolt))
-        p.append(R.box(f"slit{s}", (0.05, 0.006, 0.01), (-0.05, s * 0.083, z + 0.03), mat=k.plastic, bevel=0.002))
-        p.append(R.box(f"slit_led{s}", (0.03, 0.002, 0.003), (-0.05, s * 0.0858, z + 0.03), mat=k.led, bevel=0.0006))
-    return p
-
-
-def _neck(k: Kit):
-    p = [R.cylinder("neck_core", 0.04, 0.13, (0, 0, 1.64), mat=k.alu, verts=48),
-         R.actuator("neck_act", 0.046, 0.09, k.frame, k.alu, k.bolt, (0, 0, 1.665), (D(90), 0, 0), 8)]
-    for i in range(3):
-        y = -0.03 + i * 0.03
-        p.append(R.cable(f"neck_cable{i}", [(-0.05, y, 1.58), (-0.062, y, 1.64), (-0.045, y, 1.71)], 0.0065,
-                         k.cablemat))
-    return p
-
-
-def _chest(k: Kit, lv: Livery):
-    p = [R.soft_box("core", (0.22, 0.30, 0.30), (-0.01, 0, 1.42), mat=k.frame, roundness=0.25),
-         R.fins("rib_l", 6, (0.12, 0.012, 0.01), 0.03, 2, (0.0, 0.15, 1.40), mat=k.alu),
-         R.fins("rib_r", 6, (0.12, 0.012, 0.01), 0.03, 2, (0.0, -0.15, 1.40), mat=k.alu),
-         R.curved_plate("collar", 0.165, 130, 0.045, 0.02, (0, 0, 1.565), mat=k.accent, bulge=0.004, lean=0.02),
-         R.box("sternum", (0.03, 0.035, 0.17), (0.152, 0, 1.45), mat=k.frame, bevel=0.008),
-         R.curved_plate("back", 0.155, 125, 0.27, 0.024, (0, 0, 1.43), (0, 0, D(180)), k.shell, bulge=0.012,
-                        taper=1.08, screws=k.bolt),
-         R.soft_box("battery", (0.055, 0.2, 0.17), (-0.178, 0, 1.40), mat=k.frame, roundness=0.3),
-         R.fins("bat_fins", 7, (0.012, 0.16, 0.004), 0.019, 2, (-0.208, 0, 1.40), mat=k.alu),
-         R.box("bat_led", (0.004, 0.12, 0.006), (-0.207, 0, 1.495), mat=k.led, bevel=0.0015),
-         R.box("bat_warn", (0.003, 0.05, 0.018), (-0.2065, 0.06, 1.33), mat=k.warn, bevel=0.001)]
-    pecs = {}
-    for s in (-1, 1):
-        pecs[s] = R.curved_plate(f"pec{s}", 0.15, 72, 0.18, 0.026, (0.0, s * 0.06, 1.465), (0, 0, s * D(14)),
-                                 k.shell, bulge=0.018, taper=1.12, lean=0.008, screws=k.bolt)
-        p.append(pecs[s])
-        p.append(R.curved_plate(f"pec_trim{s}", 0.17, 60, 0.012, 0.008, (0.0, s * 0.06, 1.37), (0, 0, s * D(14)),
-                                k.accent, bevel=0.003))
-        p.append(R.curved_plate(f"lat{s}", 0.16, 48, 0.22, 0.02, (0, 0, 1.40), (0, 0, s * D(90)), k.frame,
-                                bulge=0.01, taper=1.15))
-    for s, body, size in ((-1, lv.number, 0.06), (1, "IRON ECHO", 0.016)):
-        ang = s * D(14)
-        n = (math.cos(ang), math.sin(ang), 0.0)
-        p.append(R.text_mesh(f"pec_txt{s}", body, size, k.decal, (0.19 * n[0], s * 0.06 + 0.19 * n[1], 1.475),
-                             R.orient(n, (0, 0, 1)), extrude=0.0008, wrap=pecs[s]))
-    back = [o for o in p if o.name.startswith("back")][0]
-    p.append(R.text_mesh("back_name", lv.name.upper(), 0.03, k.decal, (-0.175, 0, 1.535), R.orient((-1, 0, 0), (0, 0, 1)),
-                         extrude=0.0008, wrap=back))
-    p.append(R.text_mesh("bat_txt", "HV 400V", 0.011, k.warn, (-0.2065, -0.04, 1.33), (D(90), 0, -D(90)),
-                         extrude=0.0005))
-    return p
-
-
-def _abdomen(k: Kit):
-    p = [R.actuator("waist_act", 0.08, 0.07, k.frame, k.alu, k.bolt, (-0.01, 0, 1.2), (0, 0, 0), 12),
-         R.cylinder("spine_col", 0.045, 0.22, (-0.04, 0, 1.18), mat=k.alu)]
-    for i in range(6):
-        p.append(R.tube(f"bellow{i}", 0.112 - 0.006 * (i % 2), 0.016, 0.02, (0.0, 0, 1.10 + i * 0.023), mat=k.rubber,
-                        verts=64))
-    for i, z in enumerate((1.16, 1.222, 1.284)):
-        p.append(R.curved_plate(f"abs{i}", 0.118 + 0.006 * i, 86, 0.054, 0.018, (0.0, 0, z), mat=k.shell,
-                                bulge=0.006, taper=1.04))
-    for s in (-1, 1):
-        p.append(R.box(f"obl{s}", (0.05, 0.03, 0.18), (-0.06, s * 0.125, 1.18), mat=k.alu, bevel=0.006))
-        p.append(R.cable(f"abd_cable{s}", [(-0.11, s * 0.06, 1.08), (-0.14, s * 0.07, 1.18), (-0.11, s * 0.07, 1.28)],
-                         0.008, k.cablemat))
-    return p
-
-
-def _pelvis(k: Kit):
-    p = [R.blob("hip_shell", (0.23, 0.31, 0.14), (-0.01, 0, 1.0), mat=k.shell, cuboid=0.45),
-         R.tube("belt", 0.142, 0.016, 0.034, (-0.005, 0, 1.075), mat=k.frame, verts=64, bevel=0.004),
-         R.box("belt_led", (0.004, 0.09, 0.006), (0.137, 0, 1.075), mat=k.led, bevel=0.0015),
-         R.curved_plate("groin", 0.11, 60, 0.11, 0.02, (0.0, 0, 0.93), mat=k.accent, taper=0.65, lean=-0.01)]
-    p[1].scale = (1.0, 1.12, 1.0)
-    for s in (-1, 1):
-        p.append(R.actuator(f"hip_act{s}", 0.078, 0.09, k.frame, k.alu, k.bolt, (0, s * 0.17, 0.955),
-                            (D(90), 0, 0), 12))
-    return p
-
-
-def _clavicle(k: Kit, s):
-    return [R.blob(f"trap{s}", (0.15, 0.13, 0.075), (-0.015, s * 0.14, 1.565), mat=k.shell, cuboid=0.35)]
-
-
-def _upperarm(k: Kit, s):
-    L = 0.359
-    out = -s * D(90)
-    return [R.actuator("shoulder", 0.074, 0.11, k.frame, k.alu, k.bolt, (0, 0, 0.0), (D(90), 0, 0), 12),
-            R.curved_plate("deltoid", 0.084, 175, 0.17, 0.026, (0, 0, 0.035), (0, 0, out * 0.66), k.accent,
-                           bulge=0.022, taper=0.7, bevel=0.006),
-            R.box("humerus", (0.055, 0.05, 0.26), (-0.005, 0, 0.19), mat=k.alu, bevel=0.008),
-            R.curved_plate("bicep", 0.06, 190, 0.22, 0.022, (0, 0, 0.205), mat=k.shell, bulge=0.014, taper=0.85,
-                           screws=k.bolt),
-            R.curved_plate("tricep", 0.058, 130, 0.2, 0.018, (0, 0, 0.205), (0, 0, D(180)), k.frame, bulge=0.01),
-            R.actuator("elbow", 0.052, 0.10, k.frame, k.alu, k.bolt, (0, 0, L), (D(90), 0, 0), 10),
-            R.cable("ua_cable", [(-0.06, -s * 0.03, 0.06), (-0.07, -s * 0.03, 0.17), (-0.055, -s * 0.03, 0.32)],
-                    0.007, k.cablemat)]
-
-
-def _lowerarm(k: Kit, s):
-    L = 0.337
-    return [R.curved_plate("forearm", 0.056, 215, 0.26, 0.02, (0, 0, 0.155), mat=k.carbon, bulge=0.01, taper=0.8),
-            R.box("radius", (0.03, 0.04, 0.27), (-0.035, 0, 0.165), mat=k.alu, bevel=0.006),
-            R.cylinder("piston_body", 0.015, 0.13, (-0.06, 0, 0.09), mat=k.frame, verts=32),
-            R.cylinder("piston_rod", 0.008, 0.13, (-0.06, 0, 0.21), mat=k.chrome, verts=32, bevel=0.001),
-            R.tube("wrist_ring", 0.047, 0.012, 0.03, (0, 0, L - 0.02), mat=k.frame, verts=64),
-            R.curved_plate("fa_led", 0.0595, 14, 0.07, 0.003, (0, 0, 0.14), (0, 0, -s * D(60)), k.led, bevel=0.001)]
-
-
-def _glove(k: Kit, s):
-    """16 oz boxing glove as one continuous padded leather form (metaballs: fist, knuckle bulge, curled-finger palm,
-    thumb tucked along the side, tapering cuff), with piping seams that follow the surface, a velcro strap and a
-    logo. Hand frame: z = punch direction, +x = back of the hand, inner (thumb) side = +s*y. ~33 cm long."""
-    g = k.glove
-    D_ = D
-    # elements in normalised units with generous overlap so they fuse into one surface; fit= sets real size
-    body = R.metaball_mesh("glove_body", [
-        ((0.0, 0.0, 0.55), 1.0, (0.92, 1.0, 1.15), (0, 0, 0)),            # fist mass
-        ((0.12, 0.0, 0.95), 0.85, (0.95, 1.12, 0.72), (0, 0, 0)),         # knuckle bulge (striking face)
-        ((-0.28, 0.0, 0.72), 0.72, (0.8, 1.0, 1.05), (0, 0, 0)),          # curled fingers / palm
-        ((-0.2, s * 0.58, 0.32), 0.42, (0.8, 0.75, 1.7), (D_(-6), s * D_(12), 0)),  # thumb, tucked to the side
-        ((0.0, 0.0, -0.3), 0.86, (0.95, 0.95, 1.15), (0, 0, 0)),          # cuff
-        ((0.0, 0.0, -0.95), 0.76, (0.9, 0.9, 1.0), (0, 0, 0)),            # wrist opening
-    ], mat=g, resolution=0.035, threshold=0.6, fit=(0.13, 0.14, 0.335))
-    body.location = (0.0, 0.0, 0.085)  # fist front ends ~0.25 m past the wrist, cuff reaches back over the forearm
-    bpy.context.view_layer.update()
-    parts = [body]
-    for nm, co, no in (("glove_seam_side", (0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),        # top/palm panel seam
-                       ("glove_seam_cuff", (0.0, 0.0, -0.035), (0.0, 0.0, 1.0))):   # cuff/fist seam
-        seam = R.surface_seam(nm, body, co, no, 0.0024, g, offset=0.0012)
-        if seam is not None:
-            parts.append(seam)
-    strap = R.curved_plate("glove_strap", 0.05, 250, 0.048, 0.005, (0, 0, 0.012), (0, 0, D_(180)), g, bevel=0.002,
-                           segs=(40, 6), wrap=body)
-    parts.append(strap)
-    for i, zz in enumerate((0.035, -0.011)):
-        parts.append(R.curved_plate(f"glove_strap_edge{i}", 0.05, 250, 0.003, 0.0018, (0, 0, zz), (0, 0, D_(180)),
-                                    k.tape, bevel=0.0006, segs=(40, 2), wrap=body))
-    parts.append(R.text_mesh("glove_logo", "IE", 0.034, k.tape, (0.075, 0, 0.165), R.orient((1, 0, 0), (0, 0, 1)),
-                             extrude=0.0008, wrap=body))
-    parts.append(R.text_mesh("glove_oz", "16 OZ", 0.012, k.tape, (0.062, 0, 0.01), R.orient((1, 0, 0), (0, 0, 1)),
-                             extrude=0.0006, wrap=strap))
-    return parts
-
-
-def _thigh(k: Kit, s):
-    L = 0.43
-    out = -s * D(90)
-    side = R.curved_plate("quad_side", 0.106, 60, 0.24, 0.016, (0, 0, 0.19), (0, 0, out), k.accent, bulge=0.018,
-                          taper=0.8)
-    return [R.curved_plate("quad", 0.092, 205, 0.32, 0.026, (0, 0, 0.2), mat=k.shell, bulge=0.026, taper=0.78,
-                           screws=k.bolt),
-            side,
-            R.text_mesh("serial", "IE-1 SN0007", 0.014, k.decal, (0.0, -s * 0.125, 0.15),
-                        R.orient((0, -s, 0), (0, 0, -1)), extrude=0.0005, wrap=side),
-            R.curved_plate("hamstring", 0.086, 140, 0.29, 0.022, (0, 0, 0.2), (0, 0, D(180)), k.frame, bulge=0.016,
-                           taper=0.8),
-            R.box("femur", (0.06, 0.07, 0.36), (-0.02, 0, 0.21), mat=k.alu, bevel=0.01),
-            R.actuator("knee", 0.066, 0.12, k.frame, k.alu, k.bolt, (0, 0, L), (D(90), 0, 0), 12),
-            R.cable("th_cable", [(-0.09, -s * 0.05, 0.04), (-0.11, -s * 0.06, 0.2), (-0.09, -s * 0.05, 0.37)], 0.008,
-                    k.cablemat)]
-
-
-def _calf(k: Kit, s):
-    L = 0.42
-    return [R.curved_plate("shin", 0.062, 150, 0.30, 0.02, (0, 0, 0.2), mat=k.carbon, bulge=0.008, taper=0.72),
-            R.blob("knee_cap", (0.06, 0.11, 0.09), (0.07, 0, 0.03), mat=k.accent, cuboid=0.35),
-            R.curved_plate("calf_shell", 0.07, 175, 0.25, 0.022, (0, 0, 0.15), (0, 0, D(180)), k.shell,
-                           bulge=0.026, taper=0.62, screws=k.bolt),
-            R.box("tibia", (0.06, 0.06, 0.34), (0.0, 0, 0.2), mat=k.alu, bevel=0.01),
-            R.cylinder("calf_piston", 0.017, 0.15, (-0.035, s * 0.06, 0.24), mat=k.frame, verts=32),
-            R.cylinder("calf_rod", 0.009, 0.12, (-0.035, s * 0.06, 0.35), mat=k.chrome, verts=32, bevel=0.001),
-            R.actuator("ankle", 0.048, 0.10, k.frame, k.alu, k.bolt, (0, 0, L), (D(90), 0, 0), 8)]
-
-
-def _foot(k: Kit, s):
-    """Robot foot: thick rubber sole with tread, machined ankle block, shell over the toes."""
-    y = s * 0.14
-    p = [R.blob("sole", (0.31, 0.125, 0.05), (0.05, y, 0.025), mat=k.rubber, cuboid=0.55),
-         R.blob("midsole", (0.29, 0.115, 0.035), (0.05, y, 0.06), mat=k.frame, cuboid=0.5),
-         R.blob("toe_cap", (0.13, 0.115, 0.07), (0.13, y, 0.075), mat=k.shell, cuboid=0.45),
-         R.blob("heel", (0.09, 0.105, 0.08), (-0.06, y, 0.08), mat=k.accent, cuboid=0.45),
-         R.box("ankle_block", (0.08, 0.07, 0.07), (0.0, y, 0.105), mat=k.alu, bevel=0.01)]
-    for i in range(5):
-        p.append(R.box(f"tread{i}", (0.012, 0.11, 0.008), (-0.07 + i * 0.055, y, 0.002), mat=k.rubber, bevel=0.002))
-    return p
 
 
 # ------------------------------------------------------------------------------------------------------------ build
@@ -381,25 +141,24 @@ def build_armature(prefix: str) -> bpy.types.Object:
 
 
 def build_robot(lv: Livery, prefix: str = None) -> bpy.types.Object:
+    """IE-2: the parts come from robot2.py (designed from scratch in 2026-11); the skeleton and the contract are the same."""
+    import robot2 as P
+
     prefix = prefix or f"IE1_{lv.name}"
     col = R.collection(prefix)
     R.set_collection(col)
     k = Kit(lv)
     arm = build_armature(prefix)
     world_parts = {
-        "head": _head(k, lv), "neck_01": _neck(k), "spine_03": _chest(k, lv), "spine_02": [], "spine_01": _abdomen(k),
-        "pelvis": _pelvis(k), "clavicle_l": _clavicle(k, 1), "clavicle_r": _clavicle(k, -1),
-        "foot_l": _foot(k, 1), "foot_r": _foot(k, -1),
+        "head": P.head(k, lv), "neck_01": P.neck(k, lv), "spine_03": P.chest(k, lv), "spine_01": P.abdomen(k, lv),
+        "pelvis": P.pelvis(k, lv), "clavicle_l": P.clavicle(k, lv, 1), "clavicle_r": P.clavicle(k, lv, -1),
+        "foot_l": P.foot(k, lv, 1), "foot_r": P.foot(k, lv, -1),
     }
     for bone, objs in world_parts.items():
-        if objs:
-            _assign(objs, bone, arm, prefix)
+        _assign(objs, bone, arm, prefix)
     for s, side in ((1, "l"), (-1, "r")):
-        _assign(_in_frame(_upperarm(k, s), f"upperarm_{side}"), f"upperarm_{side}", arm, prefix)
-        _assign(_in_frame(_lowerarm(k, s), f"lowerarm_{side}"), f"lowerarm_{side}", arm, prefix)
-        _assign(_in_frame(_glove(k, s), f"hand_{side}"), f"hand_{side}", arm, prefix)
-        _assign(_in_frame(_thigh(k, s), f"thigh_{side}"), f"thigh_{side}", arm, prefix)
-        _assign(_in_frame(_calf(k, s), f"calf_{side}"), f"calf_{side}", arm, prefix)
+        for bone, make in (("upperarm", P.upperarm), ("lowerarm", P.lowerarm), ("hand", P.fist), ("thigh", P.thigh), ("calf", P.calf)):
+            _assign(_in_frame(make(k, lv, s), f"{bone}_{side}"), f"{bone}_{side}", arm, prefix)
     return arm
 
 

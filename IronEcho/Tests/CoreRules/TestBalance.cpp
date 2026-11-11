@@ -72,12 +72,14 @@ IE_TEST(Balance_ArcadeProfileKeepsLevelsOrderedAndSpamUnrewarded)
 	IE_EXPECT(Setup.PlayerFighter.CounterWindowTicks > 0 && Setup.OpponentFighter.CounterWindowTicks > 0);
 
 	const int N = 16;
-	auto Wins = [N](BotLevel Level, const HumanProfile& Profile) {
+	int LegStrikes = 0; // 1.8.1: in whole bouts the bot must throw none (KickChance 0 alone left the "out of reach: kick" answer on)
+	auto Wins = [N, &LegStrikes](BotLevel Level, const HumanProfile& Profile) {
 		int W = 0;
 		for (int Seed = 1; Seed <= N; ++Seed)
 		{
 			const BoutSummary B = RunBout(Level, Profile, static_cast<uint64_t>(Seed), true);
 			W += (B.bHasWinner && B.Winner == FighterSlot::Player) ? 1 : 0;
+			LegStrikes += B.BotLegAndElbowStrikes;
 		}
 		return W;
 	};
@@ -89,4 +91,5 @@ IE_TEST(Balance_ArcadeProfileKeepsLevelsOrderedAndSpamUnrewarded)
 	IE_EXPECT(Normal >= N / 2);     // a fair fight for an average player
 	IE_EXPECT(Hard <= N / 2);       // Hard stays hard
 	IE_EXPECT(Wins(BotLevel::Hard, SpammerHuman()) <= N / 2);
+	IE_EXPECT_EQ(LegStrikes, 0);
 }

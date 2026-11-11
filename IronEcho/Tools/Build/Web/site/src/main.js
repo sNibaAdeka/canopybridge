@@ -1353,7 +1353,8 @@ app.debugAdvance = (seconds, inputFn = () => ({ status: 7, lean: 0, block: 0, pu
   const n = Math.max(1, Math.round(seconds * 60));
   for (let i = 0; i < n; i++) step(1 / 60, inputFn(i), performance.now());
   if (app.debugCamera) app.debugCamera(app.camera, stagePoint, stageSide());
-  app.renderer.render(app.scene, app.camera);
+  if (app.debugNoRender) app.scene.updateMatrixWorld(true); // measuring tests (Tests/Web/selfcheck.js): poses only, no picture
+  else app.renderer.render(app.scene, app.camera);
   const s = app.core.snapshot();
   return { phase: s.match.phaseName, p: s.player.stateName + '/' + s.player.stageName, o: s.opponent.stateName + '/' + s.opponent.stageName,
     ph: s.player.health, oh: s.opponent.health, round: s.match.round, gap: s.match.gap, theta: +stage.theta.toFixed(3),

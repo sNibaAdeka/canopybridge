@@ -250,6 +250,9 @@ namespace IronEchoCore
 		// Kicks (1.4): share of planned attacks that are kicks, of those the share of round kicks (rear leg) and of low
 		// kicks (legs, against a player who walks, instead of the body).
 		float KickChance = 0.12f;
+		// false: hands only (1.8.1). KickChance alone does not cover it: the bot also answers a foe standing just out of
+		// punching reach with a kick, whatever the planned attack was.
+		bool bLegStrikes = true;
 		float RoundKickShare = 0.55f;
 		float LegKickShare = 0.35f;
 		// Close range (1.6): when the foe is inside elbow reach, the share of planned punches that become an elbow or a knee.
