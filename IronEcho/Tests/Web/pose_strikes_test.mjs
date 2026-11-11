@@ -20,7 +20,7 @@ const FLOOR = { punch: 0.92, hook: 0.85, hookBody: 0.85, upper: 0.85, elbow: 0.8
 const check = (name, ok, info = '') => { results.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? `  (${info})` : ''}`); };
 
 // One session: calibration (with the punch step), then 104 strikes and ducks in random order, then 40 s of no strikes.
-function session(faults, seed) {
+function session(faults, seed, opts = {}) {
   let notLive = 0;
   let live = 0;
   const { script, end } = calibration(new Script(), { punches: true });
@@ -55,7 +55,7 @@ function session(faults, seed) {
   }
   script.idle(t, 1.0);
   script.fidget(0.03);
-  const proc = new PoseProcessor(() => {}, {});
+  const proc = new PoseProcessor(() => {}, opts);
   for (const fr of stream(script, { ...faults, seed })) {
     proc.process(fr.world, fr.t, faults.noImage ? null : fr.image);
     if (fr.t > end + 0.5 && fr.t < quiet) { live++; if (proc.status !== 7) notLive++; }
@@ -75,12 +75,13 @@ function session(faults, seed) {
     tally[s.kind].of++;
     const side = s.kind === 'duck' ? -1 : s.side;
     const near = det.map((d, i) => [d, i]).filter(([d, i]) => !used.has(i) && d[0] >= s.t && d[0] <= s.t + 0.5 && d[1] === side);
-    const right = near.find(([d]) => d[2] === s.kind);
+    const want = opts.handsOnly && s.kind === 'elbow' ? 'hook' : s.kind; // boxing with the hands: the folded swing is a tight hook
+    const right = near.find(([d]) => d[2] === want);
     if (right) { used.add(right[1]); tally[s.kind].hit++; }
     else if (near.length) { const k = near[0][0][2]; tally[s.kind].wrong[k] = (tally[s.kind].wrong[k] || 0) + 1; used.add(near[0][1]); }
   }
   const extra = det.filter((d, i) => !used.has(i));
-  return { cal: !!proc.cal, tally, extra, quietFrom: quiet, quietFalse: extra.filter(([pt]) => pt >= quiet).length, script, notLive, live };
+  return { cal: !!proc.cal, elbows: proc.elbows.length, tally, extra, quietFrom: quiet, quietFalse: extra.filter(([pt]) => pt >= quiet).length, script, notLive, live };
 }
 
 const SETS = [
@@ -126,6 +127,24 @@ for (const [name, faults] of SETS) {
   const quietList = runs.flatMap((r, i) => r.extra.filter(([pt]) => pt >= r.quietFrom).map(([pt, s, k]) => { const a = r.script.actions.filter((x) => x.start <= pt).pop(); return `seed ${i + 1}: ${k}${s} at ${pt.toFixed(2)} s, ${a ? `${(pt - a.start).toFixed(2)} s into a ${a.kind}` : ''}`; }));
   check(`${name}: nothing fires while blocking, slipping, leaning, standing`, quietFalse === 0, `${quietFalse} in the quiet part${quietList.length ? ': ' + quietList.join(', ') : ''}, ${extra} unmatched in all`);
   check(`${name}: few extra detections during the strikes`, extra - quietFalse <= 6, `${extra - quietFalse}`);
+}
+
+// The browser game (hands-only, 1.9): the elbow swing must come out as a hook of the same hand, never as an elbow, and it must not
+// cost the hand its next punch. The same script and faults as the webcam set above.
+{
+  const faults = { fps: 30, jitterMs: 4, drop: 0.04, depthNoise: 0.02 };
+  const runs = [1, 2, 3].map((seed) => session(faults, seed, { handsOnly: true }));
+  const sum = (k) => runs.reduce((a, r) => [a[0] + r.tally[k].hit, a[1] + r.tally[k].of], [0, 0]);
+  console.log('--- hands-only (the browser game)');
+  check('hands-only: no elbow strike is ever reported', runs.every((r) => r.elbows === 0));
+  for (const k of ['punch', 'hook', 'hookBody', 'upper', 'elbow']) {
+    const [hit, of] = sum(k);
+    check(`hands-only: ${k === 'elbow' ? 'elbow swing -> hook' : k.padEnd(5)} ${hit}/${of}`, hit / of >= FLOOR[k]);
+  }
+  const quietFalse = runs.reduce((a, r) => a + r.quietFalse, 0);
+  const extra = runs.reduce((a, r) => a + r.extra.length, 0);
+  check('hands-only: nothing fires while blocking, slipping, leaning, standing', quietFalse === 0, `${quietFalse}`);
+  check('hands-only: few extra detections during the strikes', extra - quietFalse <= 6, `${extra - quietFalse}`);
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} checks passed`);

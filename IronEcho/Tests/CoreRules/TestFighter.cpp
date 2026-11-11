@@ -1,6 +1,7 @@
 #include "TestFramework.h"
 
 #include "IronEchoRules/CombatSim.h"
+#include "IronEchoRules/Match.h"
 
 #include <algorithm>
 #include <cmath>
@@ -491,6 +492,28 @@ IE_TEST(Fighter_EmptyingStaminaCostsABreath)
 }
 
 // 1.8: with a counter window only a punch that lands just before the foe's own would have left is a counter hit.
+IE_TEST(Fighter_ArcadeBufferLetsAQuickDoubleJabOut)
+{
+	// The second jab is asked for 0.14 s after the first: the first one still has 0.22 s to run and the same hand cannot cancel it.
+	for (const bool bArcade : {false, true})
+	{
+		MatchSetup Setup;
+		Setup.PlayerFighter = MakeDefaultFighterConfig();
+		Setup.OpponentFighter = MakeDefaultFighterConfig();
+		if (bArcade)
+		{
+			ApplyArcadeProfile(Setup);
+		}
+		Harness H(Setup.PlayerFighter, Setup.OpponentFighter);
+		H.Step(PunchIntentFor(Hand::Left), Idle());
+		H.Run(SecondsToTicks(0.14));
+		H.Step(PunchIntentFor(Hand::Left), Idle());
+		H.Run(SecondsToTicks(0.60));
+		IE_EXPECT_EQ(H.Count(CombatEventType::AttackStarted, FighterSlot::Player), bArcade ? 2 : 1);
+		IE_EXPECT_EQ(H.Count(CombatEventType::InputDropped, FighterSlot::Player), bArcade ? 0 : 1);
+	}
+}
+
 IE_TEST(Fighter_CounterWindowLimitsCounterHitsToLateWindup)
 {
 	FighterConfig Cfg = MakeDefaultFighterConfig();

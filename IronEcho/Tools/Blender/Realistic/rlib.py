@@ -687,8 +687,11 @@ def _dust(nt, amount=0.3):
 _MATS: dict = {}
 
 
-def mat_painted(name, color, wear=0.55, rough=0.34, coat=0.45, metal_under=(0.55, 0.56, 0.58)):
-    """Painted metal/composite shell with clear coat, edge chipping to bare metal and cavity grime."""
+def mat_painted(name, color, wear=0.55, rough=0.34, coat=0.45, metal_under=(0.55, 0.56, 0.58), scratch=1.0):
+    """Painted metal/composite shell with clear coat, edge chipping to bare metal and cavity grime.
+
+    scratch: how much of the scratch strokes reach bare metal (1 = the ring's hardware; the robots use less, so that
+    from the fight camera the paint reads as paint with scuffs, not as a pattern of white dashes)."""
     if name in _MATS:
         return _MATS[name]
     mat = bpy.data.materials.new(name)
@@ -712,7 +715,7 @@ def mat_painted(name, color, wear=0.55, rough=0.34, coat=0.45, metal_under=(0.55
     cav = _cavity(nt, 0.04)
     grime = _mix_rgb(nt, _math(nt, "MULTIPLY", _math(nt, "SUBTRACT", 1.0, cav), 1.4), paint.outputs[2],
                      tuple(c * 0.22 for c in color))
-    scr = _math(nt, "MULTIPLY", _scratches(nt, 1.0, wear), 0.35 + wear)
+    scr = _math(nt, "MULTIPLY", _scratches(nt, 1.0, wear), (0.35 + wear) * scratch)
     chip_mask = _math(nt, "MINIMUM", _math(nt, "MAXIMUM", chip_mask, scr), 1.0)
     dust = _dust(nt, 0.22 + 0.2 * wear)
     grime = _mix_rgb(nt, dust, grime, (0.30, 0.28, 0.25))

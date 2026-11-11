@@ -46,6 +46,7 @@ def suites(browser: bool) -> list[tuple[str, list[str], str | None]]:
         s += [
             ("qa", ["node", "Tests/Web/qa.js"], None),
             ("camera2", ["node", "Tests/Web/camera2_e2e.js"], None),
+            ("selfcheck", ["node", "Tests/Web/selfcheck.js"], None),  # no limb inside the robot's own body for longer than a blink
         ]
     return s
 

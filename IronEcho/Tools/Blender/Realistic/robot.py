@@ -79,8 +79,8 @@ class Kit:
 
     def __init__(self, lv: Livery):
         p = lv.name
-        self.shell = R.mat_painted(f"{p}_Shell", lv.shell, wear=lv.wear)
-        self.accent = R.mat_painted(f"{p}_Accent", lv.accent, wear=lv.wear * 0.8, rough=0.3)
+        self.shell = R.mat_painted(f"{p}_Shell", lv.shell, wear=lv.wear, scratch=0.3)
+        self.accent = R.mat_painted(f"{p}_Accent", lv.accent, wear=lv.wear * 0.8, rough=0.3, scratch=0.3)
         self.frame = R.mat_metal(f"{p}_Frame", lv.frame, rough=0.36, aniso=0.5)
         self.alu = R.mat_metal("RawAluminium", (0.62, 0.63, 0.65), rough=0.28, aniso=0.7)
         self.steel = R.mat_metal("DarkSteel", (0.18, 0.18, 0.19), rough=0.4, brushed=False)

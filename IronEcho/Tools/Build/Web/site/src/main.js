@@ -317,7 +317,7 @@ function startBout(versus, cfg) {
   $('#pad').hidden = useCamera || !TOUCH;
   app.cameraWanted = useCamera; // until the camera is up (permission, model, second phone) the fight must wait, not run on the keyboard
   if (useCamera && !app.cameraInput) {
-    app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait, onEvent: track });
+    app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait, onEvent: track, handsOnly: true });
     app.cameraInput.key = cameraKey;
     app.cameraInput.start().catch((err) => {
       console.error(err);

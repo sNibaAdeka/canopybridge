@@ -482,7 +482,9 @@ export class PoseProcessor {
   constructor(say = () => {}, opts = {}) {
     this._say = say;
     // close: elbows and knees (1.6, web only like the kicks); strikes: hooks, uppercuts and the duck (1.7, web only)
-    this.opts = { personalBlock: true, kicks: true, punchCal: true, close: true, strikes: true, ...opts };
+    // handsOnly: the browser game is boxing with the hands (1.8). A fast elbow raised to the shoulder with the arm folded is then a
+    // tight hook of that hand, not an elbow strike the game would throw away together with the 0.35 s it locks the hand for (1.9).
+    this.opts = { personalBlock: true, kicks: true, punchCal: true, close: true, strikes: true, handsOnly: false, ...opts };
     this.strikeDetectors = [new HandStrikeDetector(0), new HandStrikeDetector(1)];
     this.strikes = [];        // [t, side, 'hook' | 'hookBody' | 'upper'] log (tests)
     this.lastHand = [-1e9, -1e9]; // when each hand last struck (one strike per hand at a time)
@@ -623,9 +625,15 @@ export class PoseProcessor {
   }
 
   _elbow(t, side) {
-    this.mask |= side === 0 ? 16 : 32;
-    this.elbows.push([t, side]);
-    this.lastElbow[side] = t;
+    if (this.opts.handsOnly) {
+      if (t - this.lastHand[side] < STRIKE_CFG.minInterval) return; // the elbow flared in a punch already counted
+      this.mask |= 64 << side;
+      this.strikes.push([t, side, 'hook']);
+    } else {
+      this.mask |= side === 0 ? 16 : 32;
+      this.elbows.push([t, side]);
+      this.lastElbow[side] = t;
+    }
     this.lastHand[side] = t;
     this.lastOther[side] = t;
   }
@@ -1034,6 +1042,7 @@ class PoseTap {
 export class CameraInput {
   constructor(source = 'webcam', opts = {}) {
     this.source = source;
+    this.procOpts = { handsOnly: !!opts.handsOnly }; // the game: true (boxing with the hands); Collection Mode: false (it asks for elbows too)
     this.model = MODELS[opts.model] ? opts.model : 'full';
     this.inferMs = 0;      // moving average of one detection, ms
     this.quality = { level: 'wait', tip: '' };
@@ -1071,7 +1080,7 @@ export class CameraInput {
     this.taps = {};
     this.streams = {};
     this._ui();
-    this.proc = new PoseProcessor((title, progress, note) => this._say(title, progress, note));
+    this.proc = new PoseProcessor((title, progress, note) => this._say(title, progress, note), this.procOpts);
   }
 
   _ui() {
@@ -1778,7 +1787,7 @@ export class CameraInput {
 
   // a new calibration from scratch (Collection Mode, before every condition)
   recalibrate() {
-    this.proc = new PoseProcessor((title, progress, note) => this._say(title, progress, note));
+    this.proc = new PoseProcessor((title, progress, note) => this._say(title, progress, note), this.procOpts);
     this.lostShown = false;
     this._say(STEPS.neutral, 0, 'Настройка камеры: стойка, блок, уклоны, удары в экран.');
   }

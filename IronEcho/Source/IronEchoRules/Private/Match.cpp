@@ -12,6 +12,10 @@ namespace IronEchoCore
 		F.StaminaRegenPerSecond *= 1.50f;
 		F.CounterWindowTicks = SecondsToTicks(0.16);
 		F.CounterHitMultiplier = 1.5f;
+		// A press during the own strike, a hit taken or a block waits this long for its turn (0.15 s in the simulation rules).
+		// The same hand cannot cancel its own recovery, so the second jab of a quick double (0.15-0.20 s apart on a keyboard)
+		// used to expire 0.05 s before the first one ended: "every other punch does not come out".
+		F.InputBufferTicks = SecondsToTicks(0.30);
 	}
 
 	void ApplyArcadeProfile(MatchSetup& Setup)
