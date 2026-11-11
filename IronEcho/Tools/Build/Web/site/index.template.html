@@ -103,6 +103,8 @@
     border-bottom-width: 2px; border-radius: 3px; padding: 3px 6px; margin-right: 4px; }
   #pause-btn { position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); pointer-events: auto; background: var(--panel);
     border: 1px solid var(--line); border-radius: 4px; padding: 7px 12px; font: 700 13px/1 var(--display); letter-spacing: 0.12em; cursor: pointer; }
+  /* with the touch pad on, the bottom right corner belongs to the punch buttons: the pause goes under the opponent's bars */
+  body.pad-on #pause-btn { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 88px); right: 10px; padding: 9px 12px; font-size: 12px; }
 
   /* touch pad */
   #pad { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); display: flex; justify-content: space-between;

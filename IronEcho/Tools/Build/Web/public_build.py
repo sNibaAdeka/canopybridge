@@ -60,7 +60,7 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
 
     from PIL import Image
 
-    hero = project / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "hero.jpg"
+    hero = project / "Docs" / "Reports" / "2026-11-11_ie2" / "hero.jpg"  # a frame of the game itself (1.9.0), not a studio render
     Image.open(hero).convert("RGB").save(media / "hero.jpg", "JPEG", quality=84, optimize=True, progressive=True)
     icon = Image.open(project / "Build" / "Desktop" / "icon.png")  # written by build_desktop.py
     icon.resize((192, 192), Image.LANCZOS).save(media / "icon.png", optimize=True)

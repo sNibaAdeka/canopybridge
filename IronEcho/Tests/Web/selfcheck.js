@@ -3,8 +3,11 @@
 // are tested pair by pair (fist against the own head and chest, forearm against the chest, pauldron against the head, ...). The
 // report is the deepest overlap of each pair and the moment it happened. The capsules are a little smaller than the armour, so a
 // few millimetres of real contact (a glove resting on the guard) do not count: anything above the tolerance is a limb inside a body.
+// A fault is an overlap the eye can see: deeper than the tolerance for longer than --held seconds IN A ROW (a pose held inside the
+// body). The push out of the body is applied smoothly (rig.js SELF_PUSH_RATE), so in a fast change, a hand snapping back to the guard
+// while the shoulders turn, a fist may cross the helmet for a few frames; the report prints the longest such run and the total.
 //
-//   node Tests/Web/selfcheck.js [--seconds 40] [--tolerance 0.03]        (needs Build/Web/standalone and Playwright, as qa.js)
+//   node Tests/Web/selfcheck.js [--seconds 40] [--tolerance 0.03] [--held 0.15]   (needs Build/Web/standalone and Playwright, as qa.js)
 const { chromium } = require('playwright');
 const http = require('http');
 const fs = require('fs');
@@ -15,7 +18,7 @@ const ROOT = process.env.IRONECHO_STANDALONE || path.join(PROJECT, 'Build', 'Web
 const arg = (name, def) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? Number(process.argv[i + 1]) : def; };
 const SECONDS = arg('seconds', 40);
 const TOLERANCE = arg('tolerance', 0.03);
-const HELD = arg('held', 0.25);
+const HELD = arg('held', 0.15);
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.jpg': 'image/jpeg', '.png': 'image/png' };
 const PORT = 8890 + Math.floor(Math.random() * 100);
 
@@ -115,6 +118,8 @@ function serve() {
       };
       const worst = {};
       const held = {}; // seconds each pair spent deeper than the tolerance
+      const run = {}; // ... in a row, now
+      const longest = {}; // ... in a row, at most
       app.debugAdvance(7.5, input); // intro and countdown
       const n = Math.round(seconds * 60);
       for (let f = 0; f < n; f++) {
@@ -131,27 +136,27 @@ function serve() {
             const A = world[a]; const B = world[b];
             const depth = A[2] + B[2] - seg(A[0], A[1], B[0], B[1]);
             const key = `${who}: ${a} in ${b}`;
-            if (depth > tolerance) held[key] = (held[key] || 0) + 1 / 60;
+            if (depth > tolerance) { held[key] = (held[key] || 0) + 1 / 60; run[key] = (run[key] || 0) + 1 / 60; longest[key] = Math.max(longest[key] || 0, run[key]); } else run[key] = 0;
             if (depth > (worst[key] ? worst[key].depth : 0)) {
               worst[key] = { depth, t: +(f / 60).toFixed(2), pose: app.anim[who].lastPose ? JSON.stringify(app.anim[who].lastPose, (k2, v) => (typeof v === 'number' ? +v.toFixed(3) : v)) : '', state: `${st.stateName}/${st.stageName} kind ${st.kind} hand ${st.hand} block ${st.blocking > 0.5 ? 1 : 0} dodge ${st.dodge} duck ${st.ducking > 0.5 ? 1 : 0}` };
             }
           }
         }
       }
-      for (const [key, w] of Object.entries(worst)) w.held = held[key] || 0;
+      for (const [key, w] of Object.entries(worst)) { w.held = held[key] || 0; w.longest = longest[key] || 0; }
       return worst;
     }, { partList: parts(), pairList: pairs(), seconds: SECONDS, tolerance: TOLERANCE });
     const rows = Object.entries(report).sort((a, b) => b[1].depth - a[1].depth);
     let bad = 0;
     for (const [key, w] of rows) {
-      // a limb inside the body is a fault when the eye can see it: deeper than the tolerance for longer than HELD seconds in the bout
-      const over = w.depth > TOLERANCE && w.held > HELD;
+      // a limb inside the body is a fault when the eye can see it: deeper than the tolerance for longer than HELD seconds in a row
+      const over = w.depth > TOLERANCE && w.longest > HELD;
       if (over) bad++;
       if (over && process.argv.includes('--poses')) console.log(`      pose ${w.pose}`);
-      if (over || process.argv.includes('--all')) console.log(`${over ? 'FAIL' : 'ok  '}  ${key}: ${(w.depth * 100).toFixed(1)} cm at ${w.t} s, ${w.held.toFixed(2)} s over the tolerance (${w.state})`);
+      if (over || process.argv.includes('--all')) console.log(`${over ? 'FAIL' : 'ok  '}  ${key}: ${(w.depth * 100).toFixed(1)} cm at ${w.t} s, longest ${w.longest.toFixed(2)} s in a row, ${w.held.toFixed(2)} s in all (${w.state})`);
     }
     if (errors.length) { console.log('page errors:', errors.slice(0, 3).join(' | ')); bad++; }
-    console.log(`\n${rows.length} overlapping pairs seen, ${bad} deeper than ${(TOLERANCE * 100).toFixed(0)} cm for more than ${HELD} s`);
+    console.log(`\n${rows.length} overlapping pairs seen, ${bad} deeper than ${(TOLERANCE * 100).toFixed(0)} cm for more than ${HELD} s in a row`);
     process.exitCode = bad ? 1 : 0;
   } finally {
     await browser.close();

@@ -250,7 +250,10 @@ function resize() {
   const h = window.innerHeight;
   app.renderer.setSize(w, h, false);
   app.camera.aspect = w / h;
-  app.baseFov = w / h < 0.9 ? 62 : 46; // portrait phones need a wider view
+  // A fight is wide: the two robots take about 2.6 m across. A portrait phone shows a quarter of a landscape screen's width, so there the
+  // lens is wider and the camera stands further back and more behind the player's shoulder (1.9): both robots whole, none cut by the edge.
+  app.narrow = Math.max(0, Math.min(1, (1.25 - w / h) / 0.75)); // 0 from 5:4 and wider, 1 at 1:2
+  app.baseFov = 46 + 20 * app.narrow;
   app.camera.fov = app.baseFov;
   app.camera.updateProjectionMatrix();
 }
@@ -311,10 +314,11 @@ function startBout(versus, cfg) {
     app.cameraInput.stop();
     app.cameraInput = null;
   }
-  $('#help').hidden = useCamera;
+  $('#help').hidden = useCamera || TOUCH; // the touch pad is its own legend
   $('#help').classList.remove('dim');
   app.helpTime = 0;
   $('#pad').hidden = useCamera || !TOUCH;
+  document.body.classList.toggle('pad-on', !$('#pad').hidden); // the pause button moves out from under the punch buttons
   app.cameraWanted = useCamera; // until the camera is up (permission, model, second phone) the fight must wait, not run on the keyboard
   if (useCamera && !app.cameraInput) {
     app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait, onEvent: track, handsOnly: true });
@@ -1125,6 +1129,11 @@ function placeFighters(snap) {
 }
 
 // ---------------------------------------------------------------- camera
+// The fight view: 2.7 m to the side of the player and 0.75 m behind; on a narrow screen further out and more behind the shoulder.
+function fightCamera(px, n, sway) {
+  const k = app.narrow || 0;
+  return stagePoint(px - 0.75 - 1.1 * k, 1.62 + 0.25 * k).addScaledVector(n, 2.7 + 0.6 * k - sway);
+}
 function updateCamera(dt, snap) {
   const m = snap.match;
   const mine = app.viewSlot === 1 ? snap.opponent : snap.player;
@@ -1145,7 +1154,7 @@ function updateCamera(dt, snap) {
       const downP = mine.stateName === 'KnockedDown' || mine.stateName === 'KnockedOut';
       const n = stageSide();
       const midP = (px + ox) / 2;
-      pos.lerp(downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : stagePoint(px - 0.75, 1.62).addScaledVector(n, 2.7), e);
+      pos.lerp(downP ? stagePoint(px - 0.4, 2.6).addScaledVector(n, 2.4) : fightCamera(px, n, 0), e);
       look.lerp(stagePoint(midP + 0.1, 1.04).addScaledVector(n, -0.1), e);
     }
   } else if (m.phaseName === 'MatchOver') {
@@ -1167,9 +1176,10 @@ function updateCamera(dt, snap) {
       pos = stagePoint(px - 0.6, 2.0).addScaledVector(n, 2.8);
       look = stagePoint(ox + 0.25, 0.65);
     } else {
-      pos = stagePoint(px - 0.75, 1.62).addScaledVector(n, 2.7 - sway);
+      pos = fightCamera(px, n, sway);
       look = stagePoint(mid + 0.1, 1.04).addScaledVector(n, -0.1 - sway * 0.3);
     }
+    if (downP || downO) pos.sub(look).multiplyScalar(1 + 0.45 * (app.narrow || 0)).add(look); // a narrow screen steps back from the knockdown too
   }
   const k = 1 - Math.exp(-dt * (app.intro > 0 ? 6 : 4.5));
   app.camPos.lerp(pos, k);

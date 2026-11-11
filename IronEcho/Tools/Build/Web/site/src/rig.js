@@ -159,6 +159,7 @@ function chainFrames(p0, p1, p2, yAxis) {
 // swinging past the chest slides over the armour, and two fists in a block stay side by side.
 const SELF_FIST_R = 0.060;
 const SELF_ARM_R = 0.056;
+const SELF_PUSH_RATE = 4.0; // m/s: how fast the push out of the body builds up and lets go (0.07 m a frame at 60 fps)
 function closestOnSegment(p, a, b) {
   const ab = b.clone().sub(a);
   const len2 = ab.lengthSq();
@@ -254,6 +255,11 @@ export function computePose(p, memo = null, dt = 1 / 60) {
     const solve = (goalPoint) => twoBone(sh, goalPoint, a, b, pole, V(0.7, s * 0.3, -0.5), hUp * hUp * (3 - 2 * hUp) * (1 - Math.max(strike, hook)),
       turns.length ? turns : null, prevN, ELBOW_TURN_RATE * Math.max(1 / 240, Math.min(0.1, dt)));
     let [elbow, wrist, bend] = solve(reach);
+    // The way out is found from scratch on every frame, and it is not a smooth function of the pose: the deepest point moves from
+    // the fist to the forearm, a glove crosses the middle of the chest and the shortest way flips sides. Applied as found, the arm
+    // jumped 0.3-0.5 m in one frame in the windup of a cross or a hook. So what is applied is an offset that follows the wanted one
+    // at SELF_PUSH_RATE: a few frames to slide out or back in, never a jump (a limb through the body for a blink is not seen, a pop is).
+    const offset = V(0, 0, 0);
     if (!p.limp) { // (lying on the canvas the limbs rest on the body: nothing to avoid)
       const pushed = reach.clone();
       for (let pass = 0; pass < 6; pass++) {
@@ -262,6 +268,17 @@ export function computePose(p, memo = null, dt = 1 / 60) {
         pushed.add(push);
         [elbow, wrist, bend] = solve(armTarget(sh, pushed, s));
       }
+      offset.copy(pushed).sub(reach);
+    }
+    if (memo) {
+      const last = memo[`off_${side}`] || V(0, 0, 0);
+      const step = offset.clone().sub(last);
+      const maxStep = SELF_PUSH_RATE * Math.max(1 / 240, Math.min(0.1, dt));
+      if (step.length() > maxStep) {
+        offset.copy(last).addScaledVector(step.normalize(), maxStep);
+        [elbow, wrist, bend] = solve(armTarget(sh, reach.clone().add(offset), s));
+      }
+      memo[`off_${side}`] = offset.clone();
     }
     for (const [pt, pr] of armSamples(elbow, wrist)) solved.push([pt, pt, pr, false]); // the second arm keeps clear of the first
     if (memo) memo[side] = bend.clone();
