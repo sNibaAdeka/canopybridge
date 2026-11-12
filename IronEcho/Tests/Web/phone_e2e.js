@@ -36,7 +36,7 @@ const check = (name, ok, info = '') => { results.push(!!ok); console.log(`${ok ?
     check('the app offers the phone camera', await game.isVisible('[data-group="control"] button[data-value="phone"]'));
     await game.click('[data-group="quality"] button[data-value="low"]');
     await game.click('[data-group="control"] button[data-value="phone"]');
-    await game.click('#start');
+    await game.click('#start-cam'); // the camera button keeps the phone as the camera when the settings say so
     await game.waitForSelector('#phone-pair', { timeout: 120000 });
     const urls = await game.textContent('#phone-pair small');
     check('pairing panel shows a QR code and the link', await game.isVisible('#phone-pair .pp-qr img') && /https:\/\/.+\/phone\?k=[0-9a-f]+/.test(urls), urls);

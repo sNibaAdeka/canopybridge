@@ -173,8 +173,7 @@ async function ui(browser) {
 async function camera(browser) {
   if (!SYNTHETIC) { console.log('SKIP  camera (set IRONECHO_SYNTHETIC)'); return; }
   const page = await open(browser);
-  await page.click('[data-group="control"] button[data-value="camera"]');
-  await page.click('#start');
+  await page.click('#start-cam'); // the main button, from the default settings: no trip to «Управление» (1.9.1)
   // the camera is still loading (permission, model): the rules must wait for the player, not run the countdown on the keyboard
   const early = await page.evaluate(() => { const app = globalThis.IRONECHO_APP; const r = app.debugAdvance(5, () => app.currentInput()); return { phase: r.phase, status: app.currentInput().status, active: !!(app.cameraInput && app.cameraInput.active) }; });
   check('camera: the fight does not start while the camera is still loading', early.phase === 'WaitingForPlayer' && early.status === 6 && !early.active, `${early.phase}, status ${early.status}`);
@@ -253,6 +252,8 @@ async function ring(browser) {
   const page = await open(browser, { width: 1280, height: 720 });
   await page.click('[data-group="level"] button[data-value="1"]');
   await page.click('#start');
+  // the page's own frame loop polls the keys too: stopped here, or now and then it takes the Shift+J before the check reads it
+  await page.evaluate(() => { globalThis.IRONECHO_APP.frozen = true; });
   // keys map to the InputFrame footwork / body-shot fields
   const keys = {};
   for (const [k, field, want] of [['w', 'moveForward', 1], ['s', 'moveForward', -1], ['d', 'moveSide', 1], ['a', 'moveSide', -1]]) {
@@ -300,7 +301,7 @@ async function ring(browser) {
 async function offline(browser) {
   const page = await open(browser);
   await page.click('[data-group="control"] button[data-value="camera"]');
-  await page.click('#start');
+  await page.click('#start-cam');
   await page.waitForFunction(() => globalThis.IRONECHO_APP.cameraInput && globalThis.IRONECHO_APP.cameraInput.active, null, { timeout: 300000 });
   check('offline: game and camera model load with every external request blocked', !page.external.length, page.external.slice(0, 3).join(' '));
   check('offline: fonts are local', await page.evaluate(() => document.fonts.check('700 20px "Barlow Condensed"')));
@@ -438,13 +439,15 @@ async function onboarding(browser) {
   const page = await open(browser, { width: 1280, height: 720, openSettings: false, init: () => { globalThis.IRONECHO_FORCE_TUTORIAL = true; } });
   const first = await page.evaluate(() => {
     const vis = (el) => !!el && (el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null); // content of a closed <details> counts as hidden
-    const big = [...document.querySelectorAll('#menu .go')].filter(vis).map((b) => b.id);
-    return { big, settingsOpen: document.querySelector('#menu-settings').open, now: document.querySelector('#menu-now').textContent,
-      level: vis(document.querySelector('[data-group="level"] button')), nick: vis(document.querySelector('#profile')), camLink: vis(document.querySelector('#to-camera')) };
+    const big = [...document.querySelectorAll('#menu .go-big')].filter(vis).map((b) => b.id);
+    const alt = [...document.querySelectorAll('#menu .go-alt')].filter(vis).map((b) => `${b.id}: ${b.textContent}`);
+    return { big, alt, settingsOpen: document.querySelector('#menu-settings').open, now: document.querySelector('#menu-now').textContent,
+      level: vis(document.querySelector('[data-group="level"] button')), nick: vis(document.querySelector('#profile')), camText: document.querySelector('#start-cam').textContent };
   });
-  check('onboarding: the first screen has one big button and the settings folded', first.big.join() === 'start' && !first.settingsOpen && !first.level, JSON.stringify(first));
-  check('onboarding: one line under it says what it starts', /Лёгкий соперник/.test(first.now) && /клавиатура/.test(first.now), first.now);
-  check('onboarding: no nickname field before the first bout; the camera is one link', !first.nick && first.camLink);
+  // 1.9.1: the camera is the game, so the one big button is the camera; the keyboard is the smaller button under it
+  check('onboarding: the first screen has one big button, the camera, and the settings folded', first.big.join() === 'start-cam' && /камер/i.test(first.camText) && !first.settingsOpen && !first.level, JSON.stringify(first));
+  check('onboarding: one line under it says what it starts', /Лёгкий соперник/.test(first.now), first.now);
+  check('onboarding: no nickname field before the first bout; without a camera is one smaller button', !first.nick && first.alt.length === 1 && /^start: БЕЗ КАМЕРЫ/.test(first.alt[0]), first.alt.join());
   const cam2 = await page.evaluate(() => {
     const pick = (v) => document.querySelector(`[data-group="control"] button[data-value="${v}"]`).click();
     pick('camera'); const hidden = document.querySelector('[data-group="camera2"]').hidden; pick('keys'); return hidden; });
@@ -488,6 +491,20 @@ async function onboarding(browser) {
   check('onboarding: "Обучение" opens it again and "Пропустить" goes into a bout', skipped.state === 'playing' && !skipped.training && !skipped.tutorial && !skipped.card, JSON.stringify(skipped));
   check('onboarding: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
   await page.close();
+  // the camera refused (permission, no camera, busy): back to the menu with the reason in the player's language, and the other way in works
+  const denied = await open(browser, { init: () => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError')); } });
+  await denied.click('#start-cam');
+  await denied.waitForFunction(() => !document.querySelector('#cam-note').hidden, null, { timeout: 180000 });
+  const dn = await denied.evaluate(() => { const app = globalThis.IRONECHO_APP; return { note: document.querySelector('#cam-note').textContent, state: app.state, menu: !document.querySelector('#menu').hidden, wanted: !!app.cameraWanted }; });
+  check('onboarding: a refused camera returns to the menu and says why in Russian', dn.state === 'menu' && dn.menu && !dn.wanted && /не дал доступ к камере/.test(dn.note) && /без камеры/.test(dn.note), JSON.stringify(dn));
+  await denied.click('#start');
+  const dk = await denied.evaluate(() => { const app = globalThis.IRONECHO_APP; const r = app.debugAdvance(6, () => app.currentInput()); return { state: app.state, phase: r.phase, note: document.querySelector('#cam-note').hidden, help: !document.querySelector('#help').hidden }; });
+  check('onboarding: ... and «Без камеры» then starts a bout on the keyboard', dk.state === 'playing' && dk.phase !== 'WaitingForPlayer' && dk.note && dk.help, JSON.stringify(dk));
+  await denied.close();
+  const camLanding = await open(browser, { query: '?start=camera', openSettings: false });
+  await camLanding.waitForFunction(() => globalThis.IRONECHO_APP.state === 'playing', null, { timeout: 180000 });
+  check('onboarding: /play/?start=camera (the landing page\'s main button) starts the fight with the camera', await camLanding.evaluate(() => !!globalThis.IRONECHO_APP.cameraWanted || !!globalThis.IRONECHO_APP.cameraInput));
+  await camLanding.close();
   const landing = await open(browser, { query: '?start=1', openSettings: false });
   await landing.waitForFunction(() => globalThis.IRONECHO_APP.state === 'playing', null, { timeout: 60000 }).catch(() => {});
   const l = await landing.evaluate(() => ({ state: globalThis.IRONECHO_APP.state, menu: !document.querySelector('#menu').hidden, search: location.search }));

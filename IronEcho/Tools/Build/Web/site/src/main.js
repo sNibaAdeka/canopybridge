@@ -330,7 +330,16 @@ function startBout(versus, cfg) {
       app.cameraWanted = false;
       const msg = String(err && err.name ? err.name : err);
       track('camera_fail', { reason: /NotAllowed|Permission/i.test(msg) ? 'denied' : /NotReadable|TrackStart/i.test(msg) ? 'busy' : /NotFound|Overconstrained/i.test(msg) ? 'none' : 'other' });
-      app.hud.banner('КАМЕРА НЕДОСТУПНА', String(err && err.message ? err.message : err).slice(0, 90) + ' — играю с клавиатуры', 4, 'warn');
+      const why = /NotAllowed|Permission/i.test(msg) ? 'Браузер не дал доступ к камере: нажми на значок камеры в адресной строке и выбери «Разрешить»'
+        : /NotFound|Overconstrained/i.test(msg) ? 'Камера не найдена: подключи веб-камеру'
+          : /NotReadable|TrackStart/i.test(msg) ? 'Камера занята другой программой (Zoom, Teams, другая вкладка)'
+            : `Камера не запустилась (${String(err && err.message ? err.message : err).slice(0, 60)})`;
+      // The player asked for the camera, not for the keyboard: back to the menu with the reason next to the button (1.9.1). The bout
+      // used to go on with the keys under a banner that the countdown replaced at once, and on a phone with no controls at all.
+      toMenu();
+      const note = $('#cam-note');
+      note.hidden = false;
+      note.textContent = `${why}. Исправь и нажми «В ринг» ещё раз — или играй без камеры кнопкой ниже.`;
     });
   }
 }
@@ -1384,29 +1393,41 @@ function syncMenu() {
     if (!(key in settings)) continue;
     for (const b of g.querySelectorAll('button')) b.classList.toggle('sel', String(settings[key]) === b.dataset.value);
   }
-  const ctl = controlKind() === 'camera' ? 'камера' : TOUCH ? 'сенсор' : 'клавиатура';
-  $('#menu-now').textContent = `${settings.mode === 'training' ? '' : `${LEVEL_LABEL[settings.level] || ''} · `}${MODE_LABEL[settings.mode] || ''} · ${ctl}`;
-  $('#to-camera').textContent = settings.control === 'camera' ? 'Играть с клавиатуры' : 'Играть камерой (бета)';
+  // (how to play is not a setting to read here any more: the two buttons above this line say it, camera first)
+  const ctl = CAMERA_READY ? '' : ` · ${TOUCH ? 'сенсор' : 'клавиатура'}`;
+  $('#menu-now').textContent = `${settings.mode === 'training' ? '' : `${LEVEL_LABEL[settings.level] || ''} · `}${MODE_LABEL[settings.mode] || ''}${ctl}`;
   $('#profile').hidden = !(rating.enabled && (rating.nick || boutsDone() >= 1));
+}
+
+// The camera is in every build of the website (not in the artifact) and needs a browser that gives out a camera at all.
+const CAMERA_READY = typeof CameraInput !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+// camera: true = the body in front of the camera (the phone as the camera if that is what the settings say), false = keys / touch
+function pickControl(camera) {
+  const now = controlKind() === 'camera';
+  if (camera === now) return;
+  settings.control = camera ? 'camera' : 'keys';
+  saveSettings();
+  syncMenu();
 }
 
 // "В РИНГ" and the menu links. The click also takes the screen (setting; not in automated browsers) and, for a new player, the tutorial.
 async function goRing(where, opts = {}) {
   track('cta_click', { where, mode: settings.mode, control: settings.control });
   if ($('#start').disabled) return;
+  $('#cam-note').hidden = true;
   if (settings.fsStart && !navigator.webdriver && !document.fullscreenElement && document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen().catch(() => {}); // must run inside the click, before any await
   }
   app.sound.start();
   if (!app.loaded) {
-    $('#start').disabled = true;
+    $('#start').disabled = true; $('#start-cam').disabled = true;
     $('#menu').hidden = true;
     $('#loading').hidden = false;
     try {
       await ensureWorld();
     } catch (err) {
       console.error(err);
-      $('#start').disabled = false;
+      $('#start').disabled = false; $('#start-cam').disabled = false;
       $('#loading').hidden = true;
       $('#menu').hidden = false;
       const note = $('#menu-load');
@@ -1414,7 +1435,7 @@ async function goRing(where, opts = {}) {
       note.textContent = `Не удалось запустить: ${err.message}`;
       return;
     }
-    $('#start').disabled = false;
+    $('#start').disabled = false; $('#start-cam').disabled = false;
     $('#loading').hidden = true;
   }
   const auto = !tutorialSeen() && settings.mode !== 'training' && (!navigator.webdriver || globalThis.IRONECHO_FORCE_TUTORIAL);
@@ -1453,15 +1474,17 @@ function wireMenu() {
   const syncCam2 = () => { if (cam2) cam2.hidden = !(LAB && settings.control === 'camera' && globalThis.IRONECHO_DEPS && globalThis.IRONECHO_DEPS.phonePage); };
   for (const b of document.querySelectorAll('[data-group="control"] button')) b.addEventListener('click', syncCam2);
   syncCam2();
-  $('#start').addEventListener('click', () => goRing('menu'));
-  const camLink = $('#to-camera');
-  camLink.hidden = typeof CameraInput === 'undefined'; // the camera is in every build of the website; not in the artifact
-  camLink.addEventListener('click', () => {
-    settings.control = settings.control === 'camera' ? 'keys' : 'camera';
-    saveSettings();
-    syncMenu();
-    goRing(settings.control === 'camera' ? 'camera-link' : 'keys-link');
-  });
+  // Camera first (1.9.1): the big button is the fight with the body in front of the webcam, the small one under it is the way in
+  // without a camera. Each does what it says whatever was played last; the «Управление» setting only picks webcam or phone.
+  $('#start-cam').hidden = !CAMERA_READY;
+  $('#start').classList.toggle('go-big', !CAMERA_READY);
+  $('#start').classList.toggle('go-alt', CAMERA_READY);
+  if (CAMERA_READY) $('#start').textContent = TOUCH ? 'БЕЗ КАМЕРЫ — КНОПКИ НА ЭКРАНЕ' : 'БЕЗ КАМЕРЫ — КЛАВИАТУРА';
+  if (TOUCH) $('#start-cam small').textContent = 'с камерой телефона: поставь его в 2 м и бей руками';
+  $('#cam-h').hidden = $('#cam-how').hidden = !CAMERA_READY; // a build without the camera shows the keys
+  $('#keys-fold').open = !CAMERA_READY;
+  $('#start-cam').addEventListener('click', () => { pickControl(true); goRing('camera-main'); });
+  $('#start').addEventListener('click', () => { if (CAMERA_READY) pickControl(false); goRing('menu'); });
   $('#to-tutorial').addEventListener('click', () => goRing('tutorial-link', { tutorial: true }));
   $('#menu-now').addEventListener('click', () => { const d = $('#menu-settings'); d.open = true; d.scrollIntoView({ block: 'nearest' }); });
   if (globalThis.IRONECHO_OPEN_SETTINGS) $('#menu-settings').open = true; // tests pick settings directly
@@ -1505,7 +1528,7 @@ function wireMenu() {
     if (e.repeat) return;
     const visible = (id) => !$(id).hidden;
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
-      if (visible('#menu') && !$('#start').disabled) { e.preventDefault(); $('#start').click(); }
+      if (visible('#menu') && !$('#start').disabled) { e.preventDefault(); $('#start').click(); } // a key was pressed: the bout on keys
       else if (app.state === 'results' && visible('#results')) { e.preventDefault(); startBout(null, app.boutCfg); }
       else if (visible('#online')) { e.preventDefault(); }
     } else if (e.code === 'Escape' && app.state === 'results' && visible('#results')) {
@@ -1580,7 +1603,9 @@ if (PAGE_QUERY.has('start') && !app.collect && !PAGE_QUERY.has('room')) {
   const unlock = () => { app.sound.start(); window.removeEventListener('keydown', unlock, true); window.removeEventListener('pointerdown', unlock, true); };
   window.addEventListener('keydown', unlock, true);
   window.addEventListener('pointerdown', unlock, true);
-  ensureWorld().then(() => { if (app.state === 'menu' && !$('#menu').hidden) goRing('landing'); }).catch(() => {});
+  const how = PAGE_QUERY.get('start'); // camera | keys | 1 (as played last)
+  if (how === 'camera' || how === 'keys') pickControl(how === 'camera' && CAMERA_READY);
+  ensureWorld().then(() => { if (app.state === 'menu' && !$('#menu').hidden) goRing(how === 'camera' ? 'landing-camera' : 'landing'); }).catch(() => {});
 }
 ensureWorld().catch((err) => {
   console.error(err);

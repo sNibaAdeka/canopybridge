@@ -85,7 +85,7 @@ const camState = (g) => g.evaluate(() => {
 async function startCamera(g, second) {
   await g.click('[data-group="control"] button[data-value="camera"]');
   await g.click(`[data-group="camera2"] button[data-value="${second}"]`);
-  await g.click('#start');
+  await g.click('#start-cam');
   await g.waitForSelector('#cam-link', { timeout: 180000 });
   await g.waitForFunction(() => document.querySelector('#cam-link .pp-ph small').textContent.includes('cam='), null, { timeout: 60000 });
   return g.textContent('#cam-link .pp-ph small');
@@ -165,7 +165,7 @@ async function startCamera(g, second) {
     const links = await (async () => {
       await game2.click('[data-group="control"] button[data-value="camera"]');
       await game2.click('[data-group="camera2"] button[data-value="phones"]');
-      await game2.click('#start');
+      await game2.click('#start-cam');
       await game2.waitForSelector('#cam-link', { timeout: 180000 });
       await game2.waitForFunction(() => [...document.querySelectorAll('#cam-link .pp-ph small')].every((s) => s.textContent.includes('cam=')), null, { timeout: 60000 });
       return game2.$$eval('#cam-link .pp-ph small', (els) => els.map((e) => e.textContent.trim()));

@@ -76,7 +76,7 @@
   @keyframes pop { 0% { opacity: 0; transform: scale(1.5); } 15% { opacity: 1; transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
   #banner { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; transition: opacity 160ms; }
   #banner.on { opacity: 1; }
-  #banner-main { font: 800 clamp(56px, 11vw, 132px)/0.95 var(--display); letter-spacing: 0.04em; text-shadow: 0 6px 30px rgba(0,0,0,0.7); }
+  #banner-main { font: 800 clamp(40px, 11vw, 132px)/0.95 var(--display); letter-spacing: 0.04em; text-shadow: 0 6px 30px rgba(0,0,0,0.7); }
   #banner.good #banner-main { color: #fff; text-shadow: 0 0 30px rgba(94,224,138,0.45), 0 6px 30px rgba(0,0,0,0.7); }
   #banner.bad #banner-main { color: #ffd2cb; text-shadow: 0 0 30px rgba(255,90,74,0.55), 0 6px 30px rgba(0,0,0,0.7); }
   #banner.high { top: 13%; } /* a knockdown: the words sit above the robots, not across them */
@@ -222,6 +222,15 @@
   }
   /* ---------- 1.7.1: one button first, the rest one click away ---------- */
   .go-big { margin-top: 22px; padding: 20px 14px; font-size: 34px; letter-spacing: 0.16em; }
+  .go-big small { display: block; margin-top: 8px; font: 600 13px/1.3 var(--text); letter-spacing: 0.02em; text-transform: none; opacity: 0.92; }
+  /* 1.9.1: the camera is the game; the keyboard and the touch pad are the way in without one */
+  .go.go-alt { margin-top: 10px; padding: 12px; background: transparent; border: 1px solid var(--line); box-shadow: none; color: var(--ink);
+    font-size: 15px; letter-spacing: 0.1em; }
+  .go.go-alt:hover { border-color: var(--blue); filter: none; }
+  .cam-note { margin: 10px 0 0; padding: 10px 12px; border: 1px solid rgba(255,190,90,0.55); border-radius: 6px; background: rgba(255,170,60,0.10);
+    color: #ffe2b8; font: 500 13px/1.4 var(--text); }
+  .cam-how li { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 10px; }
+  @media (hover: none) and (pointer: coarse) { #menu .menu-side > .side-h.cam-h { display: block; } }
   .menu-now { display: block; width: 100%; margin: 8px 0 0; padding: 4px; background: none; border: 0; color: var(--dim); font: 500 13px/1.3 var(--text);
     cursor: pointer; text-align: center; }
   .menu-now:hover { color: var(--ink); }
@@ -265,7 +274,7 @@
   .more-keys .tips { margin-top: 14px; }
   @media (max-height: 700px) { .go-big { padding: 14px; font-size: 28px; margin-top: 14px; } }
   /* touch screens: the keyboard table is noise; the on-screen pad has its own labels */
-  @media (hover: none) and (pointer: coarse) { #menu .keys, #menu a.dl-win, #menu .menu-side > .side-h { display: none; } }
+  @media (hover: none) and (pointer: coarse) { #menu .keys, #menu #keys-fold, #menu a.dl-win, #menu .menu-side > .side-h { display: none; } }
 </style>
 
 <div id="stage">
@@ -304,11 +313,12 @@
   <div id="menu" class="panel">
    <div class="menu-main">
     <h1 class="brand">IRON <span>ECHO</span></h1>
-    <p class="lede">Бокс роботов. Читай замах соперника, закрывайся, уклоняйся и бей в тот миг, когда он раскрылся.</p>
+    <p class="lede">Бокс роботов твоим телом: бей перед камерой — робот повторяет. Читай замах соперника, закрывайся и бей, когда он раскрылся.</p>
+    <button class="go go-big" id="start-cam" type="button" hidden>В РИНГ<small>с веб-камерой: бей руками — робот повторяет</small></button>
+    <p class="cam-note" id="cam-note" hidden></p>
     <button class="go go-big" id="start" type="button">В РИНГ</button>
     <button class="menu-now" id="menu-now" type="button" title="Изменить в настройках"></button>
     <nav class="menu-links" aria-label="Другие режимы">
-      <button type="button" id="to-camera" hidden>Играть камерой (бета)</button>
       <button type="button" id="to-tutorial">Обучение</button>
       <button type="button" id="to-rating">Рейтинг</button>
       <button type="button" id="to-online" title="Два игрока, два экрана">Онлайн-дуэль (бета)</button>
@@ -351,8 +361,18 @@
       <div class="nick-row"><input id="nick" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Введи ник — бои пойдут в рейтинг"><button class="ghost" id="nick-ok" type="button">ОК</button></div>
       <small class="note" id="nick-note"></small></div>
     @@DOWNLOAD_MENU@@
-    <h3 class="side-h">Управление</h3>
-    <div class="keys">
+    <h3 class="side-h cam-h" id="cam-h">Как драться перед камерой</h3>
+    <ul class="tips cam-how" id="cam-how">
+      <li><b>Встань в 2–3 м</b><span>в кадре голова, плечи и руки до пояса</span></li>
+      <li><b>Джеб, кросс</b><span>резко выпрями руку к экрану</span></li>
+      <li><b>Хук</b><span>локоть к плечу, кулак по дуге</span></li>
+      <li><b>Апперкот</b><span>кулак снизу вверх</span></li>
+      <li><b>Блок</b><span>оба кулака к лицу</span></li>
+      <li><b>Уклон, нырок</b><span>наклонись вбок, присядь</span></li>
+      <li><b>Шаг</b><span>наклонись к экрану или от него</span></li>
+    </ul>
+    <details class="more-keys" id="keys-fold"><summary>Без камеры: клавиши</summary>
+    <div class="keys" style="margin-top:12px">
       <kbd>J / K</kbd><span>джеб / кросс</span>
       <kbd>U / I</kbd><span>хук левой / правой</span>
       <kbd>N / M</kbd><span>апперкот (вблизи)</span>
@@ -360,6 +380,7 @@
       <kbd>Q / E</kbd><span>уклон</span>
       <kbd>W A S D</kbd><span>шаги</span>
     </div>
+    </details>
     <details class="more-keys"><summary>Ещё приёмы и советы</summary>
     <div class="keys">
       <kbd>Shift</kbd><span>+ удар — в корпус (отнимает дыхание)</span>
