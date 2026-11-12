@@ -118,15 +118,16 @@
 <main>
   <div class="hero">
     <div class="wrap">
-      <div class="kicker">Бокс роботов · версия 1.9.0</div>
+      <div class="kicker">Бокс роботов · версия 1.9.1</div>
       <h1>IRON<br><em>ECHO</em></h1>
       <p class="lead">Твои удары — его удары. Веб-камера читает джебы, кроссы, блоки, уклоны и шаги твоего тела, а стальной боец на ринге
         повторяет их против робота, который ходит по рингу, кружит и бьёт в корпус.</p>
       <div class="cta">
-        <a class="btn primary" href="play/?start=1">Играть в браузере</a>
+        <a class="btn primary" href="play/?start=camera">Играть с камерой</a>
+        <a class="btn secondary" href="play/?start=keys">Без камеры <small>клавиатура или кнопки</small></a>
         <a class="btn secondary" href="download/IronEcho-Windows.zip" download>Скачать для Windows <small>50 МБ</small></a>
       </div>
-      <p class="meta"><b>Бесплатно.</b> Клавиатура, мышь, сенсор или камера. Версия для Windows работает без интернета.</p>
+      <p class="meta"><b>Бесплатно.</b> Нужна веб-камера и 2–3 метра перед экраном; видео не покидает твой компьютер. Версия для Windows работает без интернета.</p>
     </div>
   </div>
 
@@ -155,27 +156,29 @@
   <section id="controls">
     <div class="wrap">
       <h2>Управление</h2>
-      <p class="sub">Начни с клавиатуры, чтобы понять ритм, потом переключи в меню «Управление → Камера».</p>
+      <p class="sub">Игра сделана под камеру: ты боксируешь — робот повторяет. Клавиатура и кнопки на экране — запасной вход, если камеры нет.</p>
       <div class="controls">
-        <div class="panel"><h3>Клавиатура и мышь</h3>
-          <dl class="keys">
-            <dt><kbd>W</kbd><kbd>S</kbd></dt><dd>Шаг вперёд / назад</dd>
-            <dt><kbd>A</kbd><kbd>D</kbd></dt><dd>Кружить по рингу</dd>
-            <dt><kbd>J</kbd><kbd>ЛКМ</kbd></dt><dd>Джеб — быстрый, дешёвый</dd>
-            <dt><kbd>K</kbd><kbd>ПКМ</kbd></dt><dd>Кросс — тяжёлый, дорогой</dd>
-            <dt><kbd>Shift</kbd>+<kbd>J</kbd><kbd>K</kbd></dt><dd>Удар в корпус — не уклониться, бьёт по дыханию</dd>
-            <dt><kbd>U</kbd><kbd>I</kbd></dt><dd>Удар ногой (с Shift — по ногам: замедляет, блок руками не спасает)</dd>
-            <dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Уклон влево / вправо — убери голову с линии удара</dd>
-            <dt><kbd>Пробел</kbd></dt><dd>Блок — держит урон, ест выносливость</dd>
-            <dt><kbd>Esc</kbd></dt><dd>Пауза</dd>
-          </dl>
-        </div>
-        <div class="panel"><h3>Камера</h3>
+        <div class="panel"><h3>Камера — основное</h3>
           <ol class="steps">
             <li>Встань в 2–3 м от камеры: в кадре голова, плечи и руки до пояса.</li>
             <li>Пройди короткую калибровку по подсказкам на экране.</li>
-            <li><span class="pose">Удар</span> — резко выпрями руку к камере. <span class="pose">Блок</span> — перчатки к лицу. <span class="pose">Уклон</span> — наклон корпуса вбок. <span class="pose">Шаг</span> — наклон к экрану вперёд, от экрана назад. Рука ниже плеч — удар в корпус.</li>
+            <li><span class="pose">Джеб и кросс</span> — резко выпрями руку к камере. <span class="pose">Хук</span> — локоть к плечу, кулак по дуге. <span class="pose">Апперкот</span> — кулак снизу вверх. Рука ниже плеч — удар в корпус.</li>
+            <li><span class="pose">Блок</span> — оба кулака к лицу. <span class="pose">Уклон</span> — наклон корпуса вбок. <span class="pose">Нырок</span> — присядь. <span class="pose">Шаг</span> — наклон к экрану вперёд, от экрана назад.</li>
           </ol>
+        </div>
+        <div class="panel"><h3>Без камеры: клавиатура</h3>
+          <dl class="keys">
+            <dt><kbd>J</kbd><kbd>K</kbd></dt><dd>Джеб / кросс</dd>
+            <dt><kbd>U</kbd><kbd>I</kbd></dt><dd>Хук левой / правой</dd>
+            <dt><kbd>N</kbd><kbd>M</kbd></dt><dd>Апперкот (вблизи)</dd>
+            <dt><kbd>Shift</kbd>+ удар</dt><dd>В корпус — не уклониться, бьёт по дыханию</dd>
+            <dt><kbd>Пробел</kbd></dt><dd>Блок — держит урон, ест выносливость</dd>
+            <dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Уклон влево / вправо</dd>
+            <dt><kbd>C</kbd></dt><dd>Нырок (держать)</dd>
+            <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Шаги и движение по кругу</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Пауза</dd>
+          </dl>
+          <p class="sub" style="margin-top:12px">На телефоне те же действия — кнопками на экране.</p>
         </div>
       </div>
     </div>
@@ -194,7 +197,7 @@
           <ul class="req">
             <li>Windows 10 или 11, 64 бит</li>
             <li>Microsoft Edge или Google Chrome (Edge уже есть в Windows)</li>
-            <li>Видеокарта с WebGL 2 (почти любая); веб-камера — по желанию</li>
+            <li>Видеокарта с WebGL 2 (почти любая); веб-камера (без неё — клавиатура)</li>
             <li>Без установки и без интернета; настройки — в %LOCALAPPDATA%\IronEcho</li>
           </ul>
           <div class="note">У игры пока нет платной цифровой подписи, поэтому Windows может показать «Система Windows защитила ваш компьютер».
@@ -206,7 +209,7 @@
 </main>
 
 <footer>
-  <div class="wrap"><span>IRON ECHO · версия 1.9.0</span><span>Полноценная версия на Unreal Engine — в разработке</span></div>
+  <div class="wrap"><span>IRON ECHO · версия 1.9.1</span><span>Полноценная версия на Unreal Engine — в разработке</span></div>
 </footer>
 </body>
 </html>
