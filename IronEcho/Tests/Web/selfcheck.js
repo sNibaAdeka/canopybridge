@@ -7,7 +7,7 @@
 // body). The push out of the body is applied smoothly (rig.js SELF_PUSH_RATE), so in a fast change, a hand snapping back to the guard
 // while the shoulders turn, a fist may cross the helmet for a few frames; the report prints the longest such run and the total.
 //
-//   node Tests/Web/selfcheck.js [--seconds 40] [--tolerance 0.03] [--held 0.15]   (needs Build/Web/standalone and Playwright, as qa.js)
+//   node Tests/Web/selfcheck.js [--seconds 40] [--tolerance 0.03] [--held 0.15] [--rung 0..5]   (needs Build/Web/standalone and Playwright, as qa.js)
 const { chromium } = require('playwright');
 const http = require('http');
 const fs = require('fs');
@@ -19,6 +19,7 @@ const arg = (name, def) => { const i = process.argv.indexOf(`--${name}`); return
 const SECONDS = arg('seconds', 40);
 const TOLERANCE = arg('tolerance', 0.03);
 const HELD = arg('held', 0.15);
+const RUNG = arg('rung', -1); // >= 0: fight that ladder opponent (its own body language, ladder.js) instead of the Normal bot
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.jpg': 'image/jpeg', '.png': 'image/png' };
 const PORT = 8890 + Math.floor(Math.random() * 100);
 
@@ -75,7 +76,8 @@ function serve() {
     await page.goto(`http://localhost:${PORT}/`);
     await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded);
     await page.evaluate(() => { try { localStorage.setItem('ironecho.tutorial', 'done'); } catch { /* ignore */ } });
-    await page.$eval('[data-group="level"] button[data-value="1"]', (b) => b.click());
+    await page.$eval(`[data-group="level"] button[data-value="${RUNG >= 0 ? -1 : 1}"]`, (b) => b.click());
+    if (RUNG >= 0) await page.evaluate((r) => { const c = globalThis.IRONECHO_APP.career; c.beaten = [0, 1, 2, 3, 4]; c.pick = r; }, RUNG);
     await page.click('#start');
     const report = await page.evaluate(({ partList, pairList, seconds, tolerance }) => {
       const app = globalThis.IRONECHO_APP;

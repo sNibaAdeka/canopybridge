@@ -10,7 +10,7 @@ function run(exports, input) {
   const mem = () => exports.memory.buffer;
   exports._initialize && exports._initialize();
   const h = new Float64Array(input.buffer, input.byteOffset, input.length);
-  exports.ie_init(h[0] | 0, h[1] | 0, h[2], h[3] | 0, h[4]);
+  exports.ie_init(h[0] | 0, h[1] | 0, h[2], h[3] | 0, h[4], -1);
   const frames = h[5] | 0;
   let hash = 0xcbf29ce484222325n;
   const prime = 0x100000001b3n;
@@ -32,7 +32,7 @@ function run(exports, input) {
     if ((f + 1) % 60 === 0) lines.push(`${f + 1} ${hash.toString(16).padStart(16, '0')}`);
   }
   // Versus (lockstep): the same scripted pair of players as bridge_check.cpp (LCG-driven), through ie_versus_step.
-  exports.ie_init(2, 1, h[2], 2, 20.0);
+  exports.ie_init(2, 1, h[2], 2, 20.0, -1);
   const vin = new Float64Array(mem(), exports.ie_versus_input(), 22);
   let vh = 0xcbf29ce484222325n;
   const vmix = (ptr, count) => {

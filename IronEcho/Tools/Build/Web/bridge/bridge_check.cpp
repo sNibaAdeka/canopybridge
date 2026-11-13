@@ -14,7 +14,7 @@ extern "C" int32_t ie_combat_event_size();
 extern "C" void ie_clear_events();
 extern "C" double* ie_versus_input();
 extern "C" int32_t ie_versus_step(int32_t);
-extern "C" void ie_init(int32_t, int32_t, double, int32_t, double);
+extern "C" void ie_init(int32_t, int32_t, double, int32_t, double, int32_t);
 extern "C" int32_t ie_frame(double, int32_t, double, double, double, double, int32_t, double, double, double, int32_t, double);
 
 namespace
@@ -43,7 +43,7 @@ int main()
 	{
 		return 1;
 	}
-	ie_init(static_cast<int32_t>(In[0]), static_cast<int32_t>(In[1]), In[2], static_cast<int32_t>(In[3]), In[4]);
+	ie_init(static_cast<int32_t>(In[0]), static_cast<int32_t>(In[1]), In[2], static_cast<int32_t>(In[3]), In[4], -1);
 	const int32_t Frames = static_cast<int32_t>(In[5]);
 	uint64_t Hash = 14695981039346656037ULL; // FNV-1a 64 offset basis (0xcbf29ce484222325)
 	for (int32_t F = 0; F < Frames; ++F)
@@ -59,7 +59,7 @@ int main()
 		}
 	}
 	// Versus lockstep: the same bridge in mode 2 driven by a scripted pair of players (header word 7 > 0 = frames of versus)
-	ie_init(2, 1, In[2], 2, 20.0);
+	ie_init(2, 1, In[2], 2, 20.0, -1);
 	double* V = ie_versus_input();
 	uint64_t VHash = 14695981039346656037ULL;
 	uint32_t Rng = 12345u;

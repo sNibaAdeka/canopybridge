@@ -315,6 +315,26 @@ const C = new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 
 const C_INV = C.clone().invert();
 export function blenderToThree(v) { return new THREE.Vector3(v.x, v.z, -v.y); }
 
+// 1.10: a livery painted over the baked colours (the ladder's opponents: the same chassis in another team's paint). Painted, saturated
+// areas turn round the colour wheel; grey metal has no hue and stays as it is; the dark, unsaturated armour of the Ember frame can be
+// repainted (its scratches and grime kept: the new colour is scaled by the old brightness); the lights turn with the paint.
+const LIVERY_GLSL = `
+uniform float ieHue; uniform float ieSat; uniform vec3 ieShell; uniform float ieShellMix; uniform vec3 ieGlow;
+vec3 ieHsv(vec3 c) { vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y); float e = 1.0e-10;
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x); }
+vec3 ieRgb(vec3 c) { vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0); vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y); }
+vec3 ieRecolor(vec3 c) {
+  vec3 h = ieHsv(c);
+  vec3 turned = ieRgb(vec3(fract(h.x + ieHue), clamp(h.y * ieSat, 0.0, 1.0), h.z));
+  vec3 o = mix(c, turned, smoothstep(0.25, 0.45, h.y));
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float shellW = ieShellMix * (1.0 - smoothstep(0.035, 0.06, lum)) * (1.0 - smoothstep(0.2, 0.35, h.y));
+  return mix(o, ieShell * clamp(lum / 0.024, 0.0, 1.6), shellW); }
+vec3 ieRecolorGlow(vec3 e) { vec3 h = ieHsv(e); return ieRgb(vec3(fract(h.x + ieHue), h.y, h.z)) * ieGlow; }
+`;
+
 export class RobotRig {
   // gltf: loaded GLB (mesh + skeleton, no material); maps: { map, normalMap, orm, emissiveMap } textures
   constructor(gltf, maps, { name = 'robot', emissiveIntensity = 3.0 } = {}) {
@@ -367,6 +387,33 @@ export class RobotRig {
     this._world = {};
     this.deform = {};
     this.applyPose(computePose(POSE_DEFAULTS));
+  }
+
+  // livery: { hue, sat, shell: [r, g, b] linear, shellMix, glow: [r, g, b] } (ladder.js) or null = the colours as baked
+  setLivery(livery) {
+    const u = this._livery || this._liveryUniforms();
+    const l = livery || {};
+    u.ieHue.value = l.hue || 0;
+    u.ieSat.value = l.sat === undefined ? 1 : l.sat;
+    u.ieShellMix.value = l.shell ? (l.shellMix === undefined ? 1 : l.shellMix) : 0;
+    if (l.shell) u.ieShell.value.setRGB(...l.shell);
+    u.ieGlow.value.setRGB(...(l.glow || [1, 1, 1]));
+  }
+
+  _liveryUniforms() {
+    const u = { ieHue: { value: 0 }, ieSat: { value: 1 }, ieShell: { value: new THREE.Color(0, 0, 0) }, ieShellMix: { value: 0 },
+      ieGlow: { value: new THREE.Color(1, 1, 1) } };
+    this._livery = u;
+    this.material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, u);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${LIVERY_GLSL}`)
+        .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb = ieRecolor(diffuseColor.rgb);')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance = ieRecolorGlow(totalEmissiveRadiance);');
+    };
+    this.material.customProgramCacheKey = () => 'ironecho-livery';
+    this.material.needsUpdate = true;
+    return u;
   }
 
   // D: deform per bone in Blender space (computePose output).

@@ -11,19 +11,21 @@ using namespace IronEchoTest;
 int main(int argc, char** argv)
 {
 	const int Bouts = argc > 1 ? std::atoi(argv[1]) : 100;
-	const bool bArcade = argc > 2 && std::string(argv[2]) == "arcade"; // the browser game's profile (ApplyArcadeProfile)
+	const bool bLadder = argc > 2 && std::string(argv[2]) == "ladder"; // the browser game's ladder (ApplyLadderRung, arcade rules)
+	const bool bArcade = bLadder || (argc > 2 && std::string(argv[2]) == "arcade"); // the browser game's profile (ApplyArcadeProfile)
 	const HumanProfile Profiles[4] = {CasualHuman(), AverageHuman(), SkilledHuman(), SpammerHuman()};
 	std::printf("%-7s %-8s %5s %5s %5s %5s %5s %5s %6s %6s %6s %6s %6s %6s\n", "bot", "human", "win%", "lose%", "draw%", "dec%",
 		"stopR1", "rnd", "kdP", "kdBot", "pThr/r", "pAcc%", "bThr/r", "bAcc%");
-	for (int L = 0; L <= 2; ++L)
+	static const char* kRungNames[kLadderRungs] = {"rookie", "slugger", "counter", "mover", "pressure", "champ"};
+	for (int L = 0; L <= (bLadder ? kLadderRungs - 1 : 2); ++L)
 	{
 		for (const HumanProfile& Profile : Profiles)
 		{
 			int Wins = 0, Losses = 0, Draws = 0, Decisions = 0, StopR1 = 0;
-			double Rounds = 0, KdP = 0, KdB = 0, PThrown = 0, PLanded = 0, BThrown = 0, BLanded = 0, Minutes = 0;
+			double Rounds = 0, KdP = 0, KdB = 0, PThrown = 0, PLanded = 0, BThrown = 0, BLanded = 0, Minutes = 0, Blocks = 0, Dodges = 0;
 			for (int Seed = 1; Seed <= Bouts; ++Seed)
 			{
-				const BoutSummary B = RunBout(static_cast<BotLevel>(L), Profile, static_cast<uint64_t>(Seed), bArcade);
+				const BoutSummary B = RunBout(bLadder ? BotLevel::Normal : static_cast<BotLevel>(L), Profile, static_cast<uint64_t>(Seed), bArcade, bLadder ? L : -1);
 				if (!B.bHasWinner) ++Draws;
 				else if (B.Winner == FighterSlot::Player) ++Wins;
 				else ++Losses;
@@ -36,13 +38,15 @@ int main(int argc, char** argv)
 				PLanded += B.PlayerLanded;
 				BThrown += B.BotThrown;
 				BLanded += B.BotLanded;
+				Blocks += B.BotBlocks;
+				Dodges += B.BotDodges;
 				Minutes += B.FightSeconds / 90.0; // in round-lengths
 			}
 			const double N = Bouts;
-			std::printf("%-7s %-8s %5.0f %5.0f %5.0f %5.0f %6.0f %5.2f %6.2f %6.2f %6.1f %6.0f %6.1f %6.0f\n", BotLevelName(static_cast<BotLevel>(L)),
+			std::printf("%-8s %-8s %5.0f %5.0f %5.0f %5.0f %6.0f %5.2f %6.2f %6.2f %6.1f %6.0f %6.1f %6.0f  blk %4.1f dodge %4.1f\n", bLadder ? kRungNames[L] : BotLevelName(static_cast<BotLevel>(L)),
 				Profile.Name, 100.0 * Wins / N, 100.0 * Losses / N, 100.0 * Draws / N, 100.0 * Decisions / N, 100.0 * StopR1 / N, Rounds / N,
 				KdP / N, KdB / N, PThrown / Minutes, PThrown > 0 ? 100.0 * PLanded / PThrown : 0.0, BThrown / Minutes,
-				BThrown > 0 ? 100.0 * BLanded / BThrown : 0.0);
+				BThrown > 0 ? 100.0 * BLanded / BThrown : 0.0, Blocks / N, Dodges / N);
 		}
 	}
 	return 0;

@@ -59,8 +59,9 @@ export class Core {
     this.fighterCount = this.layout.fighter.length;
   }
 
-  init({ mode = 0, level = 1, seed = 1, rounds = 0, roundSeconds = 0 } = {}) {
-    this.ex.ie_init(mode, level, seed, rounds, roundSeconds);
+  // rung >= 0 (1.10): a ladder opponent (ApplyLadderRung in the core) instead of the plain level
+  init({ mode = 0, level = 1, seed = 1, rounds = 0, roundSeconds = 0, rung = -1 } = {}) {
+    this.ex.ie_init(mode, level, seed, rounds, roundSeconds, rung);
     this.ex.ie_clear_events();
     this.recorder = null; // a BoutRecorder (replay.js) set after init records every call below for the rating server
   }

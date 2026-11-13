@@ -45,6 +45,8 @@ const PUNCH_OMEGA = 70;
 
 // Glove targets are in the body frame, and the lead shoulder sits forward (the stance is turned): keep every target at least
 // ~0.28 m from its shoulder, otherwise the rig pins it to the minimum reach and the arm swings wildly on small body motion.
+// 1.10: the default body language; a ladder opponent overrides some of it (FighterAnimator.setStyle)
+const BODY_STYLE = { crouch: 0, lean: 0, bounce: 1, weave: 1, hz: 1, guard: 0 };
 const GUARD = { lead: [0.45, 0.10, 1.49], rear: [0.28, -0.10, 1.44] }; // 1.9: fists in front of the chin, not at the temples
 const BLOCK = { lead: [0.36, 0.088, 1.57], rear: [0.32, -0.088, 1.56] }; // fists side by side in front of the face (the fist adds 0.2 m above the wrist)
 // Boxing stance on the canvas (armature space): lead (left) foot forward, rear foot back and out.
@@ -56,6 +58,7 @@ export class FighterAnimator {
   constructor(rig, { isBot = false, seed = 1 } = {}) {
     this.rig = rig;
     this.isBot = isBot;
+    this.style = { ...BODY_STYLE };
     this.seed = seed;
     this.t = seed * 3.7;
     this.p = structuredClone(POSE_DEFAULTS);
@@ -117,11 +120,18 @@ export class FighterAnimator {
     this.kickV.x -= 1.4 * power;
   }
 
+  // 1.10: the body language of a ladder opponent (ladder.js `body`): how low it sits, how much it bounces and weaves, how far it
+  // leans in, where it holds its gloves. null = the default fighter.
+  setStyle(body) { this.style = { ...BODY_STYLE, ...(body || {}) }; }
+
   // Target pose for the current rules state.
   _targets(f, ctx) {
     const T = structuredClone(POSE_DEFAULTS);
-    let lead = [...GUARD.lead];
-    let rear = [...GUARD.rear];
+    const st = this.style;
+    // glove targets are in the armature's frame: a style that leans in or sits lower moves the head, so the gloves go with it
+    const lf = 0.75 * Math.sin((st.lean * Math.PI) / 180);
+    let lead = [GUARD.lead[0] + lf, GUARD.lead[1], GUARD.lead[2] + st.guard - st.crouch];
+    let rear = [GUARD.rear[0] + lf, GUARD.rear[1], GUARD.rear[2] + st.guard - st.crouch];
     const t = this.t;
     const ph = this.seed * 1.7;
     const fighting = ctx.phase === 'Fighting' || ctx.phase === 'Training';
@@ -133,18 +143,18 @@ export class FighterAnimator {
     let pivot = 0;
 
     // live rhythm: knees bent, bouncing on the balls of the feet, rocking in and out, weaving the head
-    const hz = gassed ? 1.15 : 1.85;
+    const hz = (gassed ? 1.15 : 1.85) * st.hz;
     const bounce = Math.sin(t * 2 * Math.PI * hz);
     if (fighting) {
       const energy = gassed ? 0.45 : 1;
-      T.crouch = 0.15 + 0.02 * energy * bounce; // 1.8: sits lower in the knees
-      T.lean += 7;                                // shoulders over the lead knee
+      T.crouch = 0.15 + st.crouch + 0.02 * energy * bounce * st.bounce; // 1.8: sits lower in the knees
+      T.lean += 7 + st.lean;                      // shoulders over the lead knee
       T.nod += 6;                                 // chin tucked behind the gloves
-      heelL = heelR = 0.018 * energy * (0.5 + 0.5 * Math.sin(t * 2 * Math.PI * hz + 1.2));
+      heelL = heelR = 0.018 * energy * st.bounce * (0.5 + 0.5 * Math.sin(t * 2 * Math.PI * hz + 1.2));
       // the legs move for real now (the rules walk the robot): the rocking only fills the pauses
       const still = 1 - clamp(Math.hypot(f.speedForward || 0, f.speedSide || 0) / 0.6, 0, 1);
-      T.body_x = 0.045 * energy * still * noise(t, 1.25, ph);  // in and out of range
-      T.lateral = 0.15 * energy * noise(t, 0.85, ph + 2.0);   // a small weave; the real slip comes from the rules
+      T.body_x = 0.045 * energy * still * st.weave * noise(t, 1.25, ph);  // in and out of range
+      T.lateral = 0.15 * energy * st.weave * noise(t, 0.85, ph + 2.0);   // a small weave; the real slip comes from the rules
       T.lean += 5 * clamp(f.speedForward || 0, -1.5, 1.5);    // into the step, away when backing off
       T.side_bend += -3 * clamp(f.speedSide || 0, -1.5, 1.5);
       T.yaw += 5 * noise(t, 0.7, ph + 4.0);
@@ -426,7 +436,10 @@ export class FighterAnimator {
       T.crouch += 0.75 * drop;
       T.lean += 70 * drop;
       T.nod += 12 * drop;
-      for (const g of [lead, rear]) { g[2] -= 0.75 * drop; g[0] += 0.06 * drop; }
+      // the waist bends the head ~0.77 m above it forward and down: the gloves follow it (they stayed put before 1.10, and the
+      // helmet ducked onto them, a cross loading behind them went into the chest)
+      const tilt = (70 * drop * Math.PI) / 180;
+      for (const g of [lead, rear]) { g[2] -= 0.75 * drop + 0.77 * (1 - Math.cos(tilt)); g[0] += 0.9 * 0.77 * Math.sin(tilt); }
     }
 
     // a heavy hit knocks the stance back: the rear foot catches the fall, then the lead foot follows

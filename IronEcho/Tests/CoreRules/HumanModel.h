@@ -209,12 +209,14 @@ namespace IronEchoTest
 		double FightSeconds = 0.0;
 	};
 
-	inline BoutSummary RunBout(BotLevel Level, const HumanProfile& Profile, uint64_t Seed, bool bArcade = false)
+	// Rung >= 0: the ladder opponent (ApplyLadderRung) instead of the plain level
+	inline BoutSummary RunBout(BotLevel Level, const HumanProfile& Profile, uint64_t Seed, bool bArcade = false, int32_t Rung = -1)
 	{
 		MatchSetup Setup;
 		Setup.Seed = Seed;
 		Setup.Bot = MakeBotConfig(Level);
 		Setup.OpponentFighter = MakeBotFighterConfig(Level);
+		ApplyLadderRung(Setup, Rung);
 		if (bArcade)
 		{
 			ApplyArcadeProfile(Setup);

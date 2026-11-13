@@ -1670,8 +1670,9 @@ export class CameraInput {
       else if (mean < 0.7) { level = 'warn'; tip = lightTip || 'Видимость средняя: добавь света'; }
       else if (inferMs > 45) { level = 'warn'; tip = `Трекер тормозит (${Math.round(inferMs)} мс): выбери «Обычная» точность`; }
       else if (lightTip) { level = 'warn'; tip = lightTip; }
-      else if (!kneesSeen && this.proc.cal) { tip = 'Ног не видно: колени и удары ногами выключены (отойди дальше)'; }
-      else if (!anklesSeen && this.proc.cal) { tip = 'Стоп не видно: удары ногами выключены, колени работают'; }
+      // (the game is boxing with the hands since 1.8: the legs only matter where kicks are recorded, in Collection Mode)
+      else if (!this.procOpts.handsOnly && !kneesSeen && this.proc.cal) { tip = 'Ног не видно: колени и удары ногами выключены (отойди дальше)'; }
+      else if (!this.procOpts.handsOnly && !anklesSeen && this.proc.cal) { tip = 'Стоп не видно: удары ногами выключены, колени работают'; }
     }
     return { level, tip };
   }
@@ -1710,6 +1711,7 @@ export class CameraInput {
     if (res.landmarks && res.landmarks[0]) {
       this.drawingUtils.drawConnectors(res.landmarks[0], this.connections, { color: '#3f7dff', lineWidth: 3 });
       this.drawingUtils.drawLandmarks(res.landmarks[0], { color: '#ffffff', radius: 2 });
+      this._drawStrikeFlash(ctx, res.landmarks[0]);
     }
     const world = res.worldLandmarks && res.worldLandmarks.length ? res.worldLandmarks[0] : null;
     this._watchExposure(world);
@@ -1717,11 +1719,57 @@ export class CameraInput {
     else this._feed(world, stamp / 1000, res.landmarks && res.landmarks[0]);
   }
 
+  // 1.10: what the camera counted, on the player's own picture: the fist that struck lights up with the strike's name for a third of a
+  // second. "Did it see my punch?" is answered where the player is looking, before the robot's arm has even moved.
+  _noteStrikes() {
+    const p = this.proc;
+    const seen = p.punches.length + p.strikes.length;
+    if (this.strikesSeen === undefined) this.strikesSeen = seen;
+    if (seen === this.strikesSeen) return;
+    this.strikesSeen = seen;
+    const a = p.punches[p.punches.length - 1];
+    const b = p.strikes[p.strikes.length - 1];
+    const last = !b || (a && a[0] >= b[0]) ? { side: a[1], kind: 'straight' } : { side: b[1], kind: b[2] };
+    const name = last.kind === 'straight' ? (last.side === 0 ? 'ДЖЕБ' : 'КРОСС') : last.kind === 'upper' ? 'АППЕРКОТ' : 'ХУК';
+    this.flash = { side: last.side, name, at: performance.now() };
+  }
+
+  _drawStrikeFlash(ctx, lm) {
+    const f = this.flash;
+    if (!f) return;
+    const age = (performance.now() - f.at) / 350;
+    if (age >= 1) { this.flash = null; return; }
+    const w = lm[f.side === 0 ? 15 : 16];
+    if (!w) return;
+    const x = w.x * this.overlay.width;
+    const y = w.y * this.overlay.height;
+    const k = 1 - age;
+    ctx.save();
+    ctx.globalAlpha = k;
+    ctx.strokeStyle = '#ffd34d';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(x, y, 18 + 26 * age, 0, Math.PI * 2);
+    ctx.stroke();
+    // the picture is shown mirrored (CSS): the words are drawn mirrored too, so that they read the right way round
+    ctx.translate(x, y - 34);
+    ctx.scale(-1, 1);
+    ctx.font = '800 26px Barlow Condensed, Inter, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(10,11,14,0.85)';
+    ctx.strokeText(f.name, 0, 0);
+    ctx.fillStyle = '#ffd34d';
+    ctx.fillText(f.name, 0, 0);
+    ctx.restore();
+  }
+
   // every skeleton the game gets goes through here: into the recording, then into the strike detectors
   _feed(world, t, image) {
     this.lastT = t;
     this.rec.add(t, world, image);
     this.proc.process(world, t, image);
+    this._noteStrikes();
     if (this.proc.cal) {
       this.rec.calibrated(t);
       if (!this.calibratedSent) {

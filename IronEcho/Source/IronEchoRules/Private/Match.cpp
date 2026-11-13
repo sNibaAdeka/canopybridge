@@ -27,6 +27,114 @@ namespace IronEchoCore
 		Setup.Bot.ClinchStrikeChance = 0.0f;
 	}
 
+	bool ApplyLadderRung(MatchSetup& Setup, int32_t Rung)
+	{
+		if (Rung < 0 || Rung >= kLadderRungs)
+		{
+			return false;
+		}
+		static constexpr BotLevel kBase[kLadderRungs] = {BotLevel::Easy, BotLevel::Easy, BotLevel::Easy, BotLevel::Normal, BotLevel::Hard, BotLevel::Hard};
+		BotConfig& B = Setup.Bot;
+		FighterConfig& F = Setup.OpponentFighter;
+		B = MakeBotConfig(kBase[Rung]);
+		F = MakeBotFighterConfig(kBase[Rung]);
+		switch (Rung)
+		{
+		case 0: // the rookie: jabs, long tells, hardly defends; goes down and stays down
+			B.CrossChance = 0.20f;
+			B.ComboChance = 0.08f;
+			B.HookChance = 0.05f;
+			B.UppercutChance = 0.05f;
+			B.BodyShotChance = 0.05f;
+			B.BlockChance = 0.20f;
+			B.DodgeChance = 0.05f;
+			B.CounterChance = 0.08f;
+			B.ReadHabitChance = 0.0f;
+			B.CircleChance = 0.15f;
+			B.AttackIntervalMinTicks = SecondsToTicks(1.8);
+			B.AttackIntervalMaxTicks = SecondsToTicks(3.0);
+			B.GetUpChance[0] = 0.60f;
+			B.GetUpChance[1] = 0.30f;
+			B.GetUpChance[2] = 0.10f;
+			F.Attacks[0].WindupTicks = SecondsToTicks(0.56);
+			F.Attacks[1].WindupTicks = SecondsToTicks(0.72);
+			break;
+		case 1: // the slugger: wide hooks and heavy crosses with big tells, walks forward, blocks little
+			B.CrossChance = 0.65f;
+			B.HookChance = 0.45f;
+			B.UppercutChance = 0.25f;
+			B.ComboChance = 0.12f;
+			B.BodyShotChance = 0.15f;
+			B.BlockChance = 0.18f;
+			B.DodgeChance = 0.03f;
+			B.CircleChance = 0.10f;
+			B.StepBackChance = 0.0f;
+			B.bCutOffRing = true;
+			B.AttackIntervalMinTicks = SecondsToTicks(1.3);
+			B.AttackIntervalMaxTicks = SecondsToTicks(2.2);
+			F.Attacks[1].Damage *= 1.35f;
+			F.MaxHealth = 125.0f; // a heavy frame: it takes more to put down
+			for (int32_t Index = 0; Index < 2; ++Index)
+			{
+				F.Hooks[Index].Damage *= 1.35f;
+				F.Hooks[Index].WindupTicks += SecondsToTicks(0.06);
+			}
+			break;
+		case 2: // the counter-puncher: waits, covers up, fires back into the miss (reads like the Normal bot, punches with the
+			// Easy bot's long tells: the lesson is to punch into its recovery, not into its guard)
+			B.ReactionTicks = SecondsToTicks(0.08);
+			B.FlurryBlockBonus = 0.12f;
+			B.GuardAfterHitChance = 0.45f;
+			B.GetUpChance[0] = 0.90f;
+			B.GetUpChance[1] = 0.65f;
+			B.GetUpChance[2] = 0.35f;
+			B.CounterChance = 0.45f;
+			B.CounterCrossChance = 0.70f;
+			B.BlockChance = 0.45f;
+			B.MaxBlockChance = 0.80f;
+			B.AvoidTradeChance = 0.70f;
+			B.GuardUpChance = 0.45f;
+			B.ComboChance = 0.20f;
+			B.CircleChance = 0.30f;
+			B.ReadHabitChance = 0.30f;
+			B.AttackIntervalMinTicks = SecondsToTicks(1.5);
+			B.AttackIntervalMaxTicks = SecondsToTicks(2.6);
+			break;
+		case 3: // the mover: circles and steps out, slips, throws in bunches of light punches
+			B.CircleChance = 0.75f;
+			B.CircleSpeed = 0.95f;
+			B.StepBackChance = 0.30f;
+			B.DodgeChance = 0.30f;
+			B.BlockChance = 0.30f;
+			B.ComboChance = 0.60f;
+			B.CrossChance = 0.30f;
+			B.HookChance = 0.15f;
+			B.ReactionTicks = SecondsToTicks(0.05);
+			B.AttackIntervalMinTicks = SecondsToTicks(0.9);
+			B.AttackIntervalMaxTicks = SecondsToTicks(1.6);
+			F.Attacks[0].Damage *= 0.85f;
+			break;
+		case 4: // the pressure fighter (on the Hard bot's hands): walks the player down to the ropes and works the body
+			B.bCutOffRing = true;
+			B.RetreatChance = 0.10f;
+			B.CircleChance = 0.20f;
+			B.StepBackChance = 0.0f;
+			B.BodyShotChance = 0.35f;
+			B.BodyVsGuardBonus = 0.50f;
+			B.UppercutChance = 0.45f;
+			B.ComboChance = 0.45f;
+			B.PressureIntervalScale = 0.45f;
+			B.ReadHabitChance = 0.40f;
+			B.AttackIntervalMinTicks = SecondsToTicks(0.70);
+			B.AttackIntervalMaxTicks = SecondsToTicks(1.30);
+			F.StaminaRegenPerSecond *= 1.15f;
+			break;
+		default: // the champion: the Hard bot as it is
+			break;
+		}
+		return true;
+	}
+
 	namespace
 	{
 		constexpr FighterSlot kBothSlots[2] = {FighterSlot::Player, FighterSlot::Opponent};

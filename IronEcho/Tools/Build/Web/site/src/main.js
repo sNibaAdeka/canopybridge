@@ -11,6 +11,7 @@ import { Sound } from './audio.js';
 import { ManualInput } from './input.js';
 import { Hud } from './hud.js';
 import { Tutorial, TUTORIAL_KEY, resultTip } from './tutorial.js';
+import { LADDER, LadderProgress } from './ladder.js';
 
 const NAMES = ['FORGE 07', 'EMBER 13'];
 const PHASE_LABEL = { WaitingForPlayer: 'ПРИГОТОВЬСЯ', Paused: 'ПАУЗА' };
@@ -23,6 +24,8 @@ const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tra
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
 } catch { /* storage unavailable: defaults */ }
+// 1.10: «Соперник» = the ladder (level -1: the next of six opponents) unless the player picks a fixed level; once for everybody
+if (!settings.ladderDefault) { settings.ladderDefault = 1; settings.level = -1; }
 const PAGE_QUERY = new URLSearchParams(location.search);
 const LAB = PAGE_QUERY.has('lab'); // ?lab=1: the experimental second camera
 if (!LAB) settings.camera2 = 'off';
@@ -134,12 +137,13 @@ async function loadAssets() {
   });
   const forge = robot('Forge');
   const ember = robot('Ember');
+  const forge2 = track(loadGlb(glbName('Forge'))); // the ladder's opponents on the sparring frame need a skeleton of their own
   const pano = tex('T_Venue_Pano.jpg');
   const canvas = tex('T_Ring_Canvas.jpg');
   for (const r of [forge, ember]) jobs.push(...Object.values(r));
-  jobs.push(pano, canvas);
+  jobs.push(pano, canvas, forge2);
   const resolve = async (r) => Object.fromEntries(await Promise.all(Object.entries(r).map(async ([k, v]) => [k, await v])));
-  return { forge: await resolve(forge), ember: await resolve(ember), pano: await pano, canvas: await canvas };
+  return { forge: await resolve(forge), ember: await resolve(ember), forge2: await forge2, pano: await pano, canvas: await canvas };
 }
 
 async function buildWorld() {
@@ -165,7 +169,10 @@ async function buildWorld() {
   const mk = (a, name) => new RobotRig(a.gltf, { map: a.map, normalMap: a.normalMap, orm: a.orm, emissiveMap: a.emissiveMap }, { name });
   const player = mk(assets.forge, 'Forge');
   const opponent = mk(assets.ember, 'Ember');
+  const opponentForge = mk({ ...assets.forge, gltf: assets.forge2 }, 'Forge-opponent');
+  opponentForge.root.position.x = 0.24; // as the loop below places the other two (fall pivot behind the heels)
   app.rigs = { player, opponent };
+  app.oppRigs = { ember: opponent, forge: opponentForge };
   app.holders = {};
   for (const [key, rig] of Object.entries(app.rigs)) {
     const face = new THREE.Group();
@@ -182,6 +189,7 @@ async function buildWorld() {
     player: new FighterAnimator(player, { isBot: false, seed: 1 }),
     opponent: new FighterAnimator(opponent, { isBot: true, seed: 2 }),
   };
+  app.oppAnims = { ember: app.anim.opponent, forge: new FighterAnimator(opponentForge, { isBot: true, seed: 3 }) };
   app.bag = new HeavyBag();
   app.scene.add(app.bag.group);
   app.sparks = new Sparks(app.scene);
@@ -267,6 +275,10 @@ function startBout(versus, cfg) {
   if (app.builtQuality !== settings.quality) applyQuality(); // changed while the arena was still loading
   app.vis = null; // a new bout: the fighters start where the rules put them, no slide from the old positions
   const bout = { mode: (cfg && cfg.mode) || settings.mode, level: cfg && cfg.level !== undefined ? cfg.level : settings.level, tutorial: !!(cfg && cfg.tutorial) };
+  // the ladder (level -1): the rung given, else the next one (or the beaten one picked in the menu); training has no opponent
+  bout.rung = !online && bout.level < 0 && bout.mode !== 'training' ? (cfg && Number.isInteger(cfg.rung) ? cfg.rung : career.current()) : -1;
+  const foe = bout.rung >= 0 ? LADDER[bout.rung] : null;
+  useOpponent(foe);
   if (!bout.tutorial) endTutorial(); // a bout that is not the tutorial's own ends it
   app.boutCfg = bout;
   const mode = bout.mode === 'training' ? 1 : 0;
@@ -276,16 +288,18 @@ function startBout(versus, cfg) {
   app.roundLength = roundSeconds || 90;
   const seed = online ? online.seed : (Date.now() % 100000) + 1;
   if (online) app.core.init({ mode: 2, level: 1, seed, rounds: 0, roundSeconds });
-  else app.core.init({ mode, level: bout.level, seed, rounds: 0, roundSeconds });
+  else app.core.init({ mode, level: foe ? foe.level : Math.max(0, bout.level), seed, rounds: 0, roundSeconds, rung: bout.rung });
   ratingBegin(online, mode, seed, roundSeconds);
   app.boutStartedAt = performance.now();
   app.firstPunchSent = false;
   app.boutStats = { taken: { straight: 0, hook: 0, upper: 0, body: 0, kick: 0, elbow: 0, knee: 0 }, counters: 0, whiffs: 0, smothered: 0, gassed: 0 };
-  track('bout_start', { mode: online ? 'online' : bout.tutorial ? 'tutorial' : bout.mode, level: bout.level, online: !!online,
+  track('bout_start', { mode: online ? 'online' : bout.tutorial ? 'tutorial' : bout.mode, level: bout.level, rung: bout.rung, online: !!online,
     control: settings.control === 'camera' || settings.control === 'phone' ? 'camera' : (TOUCH ? 'touch' : 'keys') });
   app.anim.opponent.isBot = !online; // a human opponent winds up like a human
   app.hud.setNames(online ? (app.viewSlot === 0 ? `${NAMES[0]} · ТЫ` : NAMES[0]) : NAMES[0],
-    online ? (app.viewSlot === 1 ? `${NAMES[1]} · ТЫ` : NAMES[1]) : (app.training ? 'ГРУША' : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][bout.level]}`));
+    online ? (app.viewSlot === 1 ? `${NAMES[1]} · ТЫ` : NAMES[1]) : (app.training ? 'ГРУША' : foe ? `${foe.name} · ${bout.rung + 1}/${LADDER.length}`
+      : `${NAMES[1]} · ${['ЛЁГКИЙ', 'НОРМ', 'СЛОЖНЫЙ'][Math.max(0, bout.level)]}`));
+  showVsCard(foe ? bout.rung : -1);
   app.hud.resetTrail('p');
   app.hud.resetTrail('o');
   app.hud.hideResults();
@@ -405,6 +419,8 @@ function toMenu() {
   app.hud.show(false);
   $('#help').hidden = true;
   $('#pad').hidden = true;
+  $('#vs-card').hidden = true;
+  app.vsCardFor = -1;
   $('#menu').hidden = false;
   syncMenu();
 }
@@ -447,7 +463,7 @@ function tutorialStep(dt, snap) {
   if (!t) return;
   if (app.tutorialNext > 0) {
     app.tutorialNext -= dt;
-    if (app.tutorialNext <= 0) startBout(null, { mode: 'short', level: 0 });
+    if (app.tutorialNext <= 0) startBout(null, { mode: 'short', level: settings.level < 0 ? -1 : 0 }); // the ladder's first rung, short
     return;
   }
   if (snap.match.phaseName === 'Training') t.update(dt, snap);
@@ -485,8 +501,10 @@ function onCombat(e, snap) {
     app.firstPunchSent = true;
     track('first_punch', { ms: performance.now() - app.boutStartedAt, kind: e.kind });
   }
+  const pan = playerActs ? -0.2 : 0.25; // (sound) the camera stands behind the player's right shoulder
+  if (type === 'AttackStarted') app.sound.servo(e.hand === 1 ? 1.1 : 0.8, pan);
   if (type === 'AttackActive') {
-    app.sound.whoosh(e.hand === 1 ? 1.1 : 0.85);
+    app.sound.whoosh(e.hand === 1 ? 1.1 : 0.85, pan);
     return;
   }
   if (type === 'HitConfirmed') {
@@ -500,7 +518,7 @@ function onCombat(e, snap) {
     }
     const dir = stageDir().multiplyScalar(playerActs ? 1 : -1).setY(0.15).normalize();
     app.sparks.burst(at, dir, e.counter ? 'counter' : 'hit', 0.7 + 0.4 * power);
-    app.sound.hit(0.7 + 0.3 * power, !!e.counter);
+    app.sound.hit(0.7 + 0.3 * power, !!e.counter, pan, e.zone);
     if (app.training && target === 'opponent') app.bag.hit(power, e.hand === 0 ? 1 : -1);
     else app.anim[target].takeHit(e.hand, e.damage, !!e.counter, e.zone);
     if (e.kind !== 0) app.shake.add(target === me ? 0.25 : 0.12); // legs, elbows and knees land heavier
@@ -542,7 +560,7 @@ function onCombat(e, snap) {
     const at = app.training && target === 'opponent' ? stagePoint(snap.opponent.position - 0.18, 1.45)
       : rig.fistWorld('l').add(rig.fistWorld('r')).multiplyScalar(0.5);
     app.sparks.burst(at, stageDir().multiplyScalar(playerActs ? 1 : -1).setY(0.2).normalize(), 'block', 0.7);
-    app.sound.block(0.9);
+    app.sound.block(0.9, pan);
     if (!(app.training && target === 'opponent')) app.anim[target].takeBlocked(e.damage / 0.15);
     app.shake.add(target === me ? 0.12 : 0.05);
     if (!playerActs) app.hud.feed('БЛОК', 'good');
@@ -606,8 +624,14 @@ function onMatch(e, snap) {
     app.anim.opponent.outcome = m.hasWinner ? (m.winner === 1 ? 'win' : 'lose') : '';
     app.resultTimer = 2.6;
     const me = snap[meKey()];
+    const rung = app.boutCfg && !app.versus ? app.boutCfg.rung : -1;
+    if (rung >= 0 && m.hasWinner && m.winner === app.viewSlot) {
+      const title = rung === LADDER.length - 1 && !career.champion;
+      career.win(rung);
+      track('ladder_win', { rung, title });
+    }
     track('bout_end', { result: m.hasWinner ? (m.winner === app.viewSlot ? 'win' : 'loss') : 'draw', method: m.result, rounds: m.round,
-      seconds: (performance.now() - (app.boutStartedAt || performance.now())) / 1000, level: settings.level, online: !!app.versus,
+      seconds: (performance.now() - (app.boutStartedAt || performance.now())) / 1000, level: settings.level, rung, online: !!app.versus,
       control: app.cameraInput && app.cameraInput.active ? 'camera' : 'keys', thrown: me.thrown, landed: me.landed, knockdowns: snap[meKey() === 'player' ? 'opponent' : 'player'].knockdowns });
     track('strike_use', { counts: { hooks: me.hooksThrown, uppercuts: me.uppercutsThrown, kicks: me.kicksThrown, elbows: me.elbowsThrown,
       knees: me.kneesThrown, ducks: me.ducksMade, blocks: me.blocksMade, dodges: me.dodgesMade } });
@@ -628,17 +652,88 @@ function showResults(snap) {
   const me = snap[meKey()];
   const foe = snap[meKey() === 'player' ? 'opponent' : 'player'];
   const won = m.hasWinner ? m.winner === app.viewSlot : null;
-  const cfg = app.boutCfg || { mode: settings.mode, level: settings.level };
-  const tip = app.versus ? '' : resultTip(app.boutStats || {}, me, foe, { won, level: cfg.level, camera: controlKind() === 'camera' });
+  const cfg = app.boutCfg || { mode: settings.mode, level: settings.level, rung: -1 };
+  const rung = app.versus ? -1 : cfg.rung;
+  let tip = app.versus ? '' : resultTip(app.boutStats || {}, me, foe, { won, level: rung >= 0 ? LADDER[rung].level : cfg.level, camera: controlKind() === 'camera' });
+  let again = 'РЕВАНШ';
+  if (rung >= 0) {
+    // the ladder: a win opens the next opponent (named on the button), a loss gets the tip against this one
+    const last = rung === LADDER.length - 1;
+    if (won === true) {
+      const nx = LADDER[career.next];
+      tip = last ? `Ты — чемпион IRON ECHO. Пояс можно защищать: ${LADDER[rung].name} хочет реванша.`
+        : `Следующий — ${nx.name}, ${nx.title}. ${nx.style}`;
+      again = last ? 'ЗАЩИТИТЬ ТИТУЛ' : `ДАЛЬШЕ: ${nx.name}`;
+    } else {
+      tip = `Против ${LADDER[rung].name}: ${LADDER[rung].tip.charAt(0).toLowerCase()}${LADDER[rung].tip.slice(1)} ${tip}`.trim();
+    }
+  }
+  $('#rematch').textContent = again;
   $('#res-tip').textContent = tip;
   $('#res-tip').hidden = !tip;
-  $('#res-up').hidden = !(!app.versus && won === true && cfg.level < 2);
+  $('#res-up').hidden = !(!app.versus && rung < 0 && won === true && cfg.level >= 0 && cfg.level < 2);
   pageStore.set('ironecho.boutsDone', String(boutsDone() + 1));
   const askNick = rating.enabled && !rating.nick && !app.versus;
   $('#res-nick').hidden = !askNick;
   if (askNick) { $('#res-nick-note').textContent = ''; $('#res-nick-in').value = ''; }
 }
 const boutsDone = () => Number(pageStore.get('ironecho.boutsDone') || 0);
+
+// ---------------------------------------------------------------- the ladder (ladder.js): six opponents, one after another
+const career = new LadderProgress(pageStore);
+app.career = career;
+
+// The opponent's frame and paint: the ladder's rungs are built on the Forge or the Ember frame; a free fight and the online duel use Ember.
+function useOpponent(foe) {
+  if (!app.oppRigs) return;
+  const want = foe && foe.chassis === 'forge' ? app.oppRigs.forge : app.oppRigs.ember;
+  if (app.rigs.opponent !== want) {
+    const tilt = app.holders.opponent.tilt;
+    tilt.remove(app.rigs.opponent.root);
+    tilt.add(want.root);
+    app.rigs.opponent = want;
+    app.anim.opponent = want === app.oppRigs.forge ? app.oppAnims.forge : app.oppAnims.ember;
+  }
+  want.setLivery(foe ? foe.livery : null);
+  app.anim.opponent.setStyle(foe ? foe.body : null);
+}
+
+// The card before a ladder bout: who it is, how it fights, what works against it. Shown during the flyover and the countdown.
+function showVsCard(rung) {
+  const el = $('#vs-card');
+  if (rung < 0) { el.hidden = true; return; }
+  const f = LADDER[rung];
+  el.querySelector('.vs-n').textContent = rung === LADDER.length - 1 ? `БОЙ ЗА ТИТУЛ · ${rung + 1} из ${LADDER.length}` : `БОЙ ${rung + 1} из ${LADDER.length}`;
+  el.querySelector('.vs-name').textContent = f.name;
+  el.querySelector('.vs-title').textContent = f.title;
+  el.querySelector('.vs-style').textContent = f.style;
+  el.querySelector('.vs-tip').textContent = f.tip;
+  el.hidden = false;
+  app.vsCardFor = rung;
+}
+
+// The menu's ladder: six names, the beaten ones ticked, the next one lit; a beaten rung can be picked to fight again.
+function renderLadder() {
+  const box = $('#ladder');
+  if (!box) return;
+  box.hidden = settings.level >= 0 || settings.mode === 'training';
+  box.textContent = '';
+  const cur = career.current();
+  LADDER.forEach((f, r) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const done = career.beaten.includes(r);
+    const open = career.isOpen(r);
+    b.className = `rung${done ? ' done' : ''}${r === cur ? ' now' : ''}${open ? '' : ' locked'}`;
+    b.disabled = !open;
+    b.title = open ? `${f.name}, ${f.title}: ${f.style}` : 'Откроется, когда победишь предыдущего';
+    b.innerHTML = `<i>${r + 1}</i><b></b><small></small>`;
+    b.querySelector('b').textContent = open ? f.name : '???';
+    b.querySelector('small').textContent = done ? 'побеждён' : r === cur ? 'следующий' : open ? f.title : 'закрыт';
+    b.addEventListener('click', () => { career.pick = r === career.next ? null : r; syncMenu(); });
+    box.append(b);
+  });
+}
 
 // ---------------------------------------------------------------- rating
 // Solo bouts against the bot count in a table shared by everybody (server: api/ratings). The page only records the bout; the server plays the
@@ -663,7 +758,8 @@ function ratingNote(text, cls = '') {
 function ratingBegin(online, mode, seed, roundSeconds) {
   app.rated = null;
   $('#res-rating').textContent = '';
-  if (online || mode !== 0 || !rating.enabled || !rating.nick) return;
+  // the shared rating is for the fixed levels (the server replays a bout by its level); a ladder bout is the player's own progress
+  if (online || mode !== 0 || !rating.enabled || !rating.nick || settings.level < 0 || (app.boutCfg && app.boutCfg.rung >= 0)) return;
   app.core.recorder = new BoutRecorder({ v: 1, core: rating.coreId, level: settings.level, seed, roundSeconds, mode: settings.mode });
   app.rated = { level: settings.level, begun: false, sent: false };
 }
@@ -1263,6 +1359,7 @@ function step(dt, input, now) {
     for (const e of ev.match) onMatch(e, snap);
     tutorialStep(dt, snap);
     const phase = snap.match.phaseName;
+    if (app.vsCardFor >= 0 && phase !== 'WaitingForPlayer' && phase !== 'Countdown') { $('#vs-card').hidden = true; app.vsCardFor = -1; }
     if (phase === 'Fighting' || phase === 'Training') {
       app.helpTime = (app.helpTime || 0) + dt;
       if (app.helpTime > 15) $('#help').classList.add('dim'); // the keys stay readable but leave the ring alone
@@ -1395,7 +1492,10 @@ function syncMenu() {
   }
   // (how to play is not a setting to read here any more: the two buttons above this line say it, camera first)
   const ctl = CAMERA_READY ? '' : ` · ${TOUCH ? 'сенсор' : 'клавиатура'}`;
-  $('#menu-now').textContent = `${settings.mode === 'training' ? '' : `${LEVEL_LABEL[settings.level] || ''} · `}${MODE_LABEL[settings.mode] || ''}${ctl}`;
+  const r = career.current();
+  const who = settings.level < 0 ? `Бой ${r + 1} из ${LADDER.length}: ${LADDER[r].name}, ${LADDER[r].title}` : LEVEL_LABEL[settings.level] || '';
+  $('#menu-now').textContent = `${settings.mode === 'training' ? '' : `${who} · `}${MODE_LABEL[settings.mode] || ''}${ctl}`;
+  renderLadder();
   $('#profile').hidden = !(rating.enabled && (rating.nick || boutsDone() >= 1));
 }
 
@@ -1491,7 +1591,10 @@ function wireMenu() {
   $('#resume').addEventListener('click', resumeBout);
   $('#restart').addEventListener('click', () => startBout(null, app.boutCfg));
   $('#to-menu').addEventListener('click', toMenu);
-  $('#rematch').addEventListener('click', () => { track('rematch', {}); startBout(null, app.boutCfg); });
+  $('#rematch').addEventListener('click', () => {
+    track('rematch', {});
+    startBout(null, app.boutCfg && app.boutCfg.rung >= 0 ? { mode: app.boutCfg.mode, level: -1 } : app.boutCfg);
+  });
   $('#res-up').addEventListener('click', () => {
     settings.level = Math.min(2, ((app.boutCfg && app.boutCfg.level) || 0) + 1);
     saveSettings();

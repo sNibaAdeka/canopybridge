@@ -328,7 +328,8 @@ IE_EXPORT(ie_clear_events) void ie_clear_events()
 
 // (Re)creates the match. Mode: 0 bout, 1 training. Level: 0 Easy, 1 Normal, 2 Hard.
 // Rounds / RoundSeconds <= 0 keep the defaults (3 x 90 s).
-IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int32_t Rounds, double RoundSeconds)
+// Rung >= 0 (1.10): a ladder opponent (ApplyLadderRung) in place of the plain level; InLevel then only names the HUD's level
+IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int32_t Rounds, double RoundSeconds, int32_t Rung)
 {
 	if (Game != nullptr)
 	{
@@ -341,6 +342,10 @@ IE_EXPORT(ie_init) void ie_init(int32_t Mode, int32_t InLevel, double Seed, int3
 	Setup.Seed = static_cast<uint64_t>(Seed < 1.0 ? 1.0 : Seed);
 	Setup.Bot = MakeBotConfig(static_cast<BotLevel>(Level));
 	Setup.OpponentFighter = MakeBotFighterConfig(static_cast<BotLevel>(Level));
+	if (Setup.Mode == MatchMode::Bout)
+	{
+		ApplyLadderRung(Setup, Rung);
+	}
 	ApplyArcadeProfile(Setup); // 1.8: the browser game is hands-only boxing with the readable counter rule (Match.h)
 	if (Rounds > 0)
 	{

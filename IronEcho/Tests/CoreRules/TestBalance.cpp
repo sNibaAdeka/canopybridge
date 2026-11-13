@@ -93,3 +93,51 @@ IE_TEST(Balance_ArcadeProfileKeepsLevelsOrderedAndSpamUnrewarded)
 	IE_EXPECT(Wins(BotLevel::Hard, SpammerHuman()) <= N / 2);
 	IE_EXPECT_EQ(LegStrikes, 0);
 }
+
+IE_TEST(Balance_LadderGetsHarderRungByRungAndEachRungFightsItsOwnWay)
+{
+	MatchSetup Untouched;
+	IE_EXPECT(!ApplyLadderRung(Untouched, -1) && !ApplyLadderRung(Untouched, kLadderRungs));
+	const int N = 16;
+	struct Tally
+	{
+		int Wins = 0;
+		double Blocks = 0, Dodges = 0, Thrown = 0, Minutes = 0;
+		int LegStrikes = 0;
+	};
+	auto Run = [N](int32_t Rung, const HumanProfile& Profile) {
+		Tally T;
+		for (int Seed = 1; Seed <= N; ++Seed)
+		{
+			const BoutSummary B = RunBout(BotLevel::Normal, Profile, static_cast<uint64_t>(Seed), true, Rung);
+			T.Wins += (B.bHasWinner && B.Winner == FighterSlot::Player) ? 1 : 0;
+			T.Blocks += B.BotBlocks;
+			T.Dodges += B.BotDodges;
+			T.Thrown += B.BotThrown;
+			T.Minutes += B.FightSeconds / 60.0;
+			T.LegStrikes += B.BotLegAndElbowStrikes;
+		}
+		return T;
+	};
+	Tally Avg[kLadderRungs];
+	for (int32_t Rung = 0; Rung < kLadderRungs; ++Rung)
+	{
+		Avg[Rung] = Run(Rung, AverageHuman());
+		IE_EXPECT_EQ(Avg[Rung].LegStrikes, 0); // the arcade rules still hold on every rung
+	}
+	// a newcomer beats the first two; from there each rung is at least as hard as the one before (one bout of slack)
+	IE_EXPECT(Run(0, CasualHuman()).Wins >= N - 1);
+	IE_EXPECT(Run(1, CasualHuman()).Wins >= N * 3 / 4);
+	for (int32_t Rung = 1; Rung < kLadderRungs; ++Rung)
+	{
+		IE_EXPECT(Avg[Rung].Wins <= Avg[Rung - 1].Wins + 1);
+	}
+	IE_EXPECT(Avg[2].Wins >= N * 3 / 4); // the middle is learnable ...
+	IE_EXPECT(Avg[5].Wins <= N / 3);     // ... the champion is not given away
+	// the styles are not just numbers: the counter-puncher defends more than the rookie, the mover slips more than the
+	// slugger, the pressure fighter throws more a minute than the counter-puncher, and mashing does not beat the slugger
+	IE_EXPECT(Avg[2].Blocks + Avg[2].Dodges > 2.0 * (Avg[0].Blocks + Avg[0].Dodges));
+	IE_EXPECT(Avg[3].Dodges > 3.0 * Avg[1].Dodges);
+	IE_EXPECT(Avg[4].Thrown / Avg[4].Minutes > 1.3 * (Avg[2].Thrown / Avg[2].Minutes));
+	IE_EXPECT(Run(1, SpammerHuman()).Wins <= N * 3 / 4);
+}

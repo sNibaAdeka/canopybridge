@@ -134,7 +134,7 @@ async function ui(browser) {
     const d = document.querySelector('#menu-settings'); d.open = false; // as a player first sees it
     const m = document.querySelector('#menu'); const fits = m.scrollHeight <= m.clientHeight + 2; d.open = true; return fits; }));
   check('favicon present', await page.evaluate(() => (document.querySelector('link[rel=icon]')?.href || '').startsWith('data:image/png')));
-  check('Easy is the default opponent', await page.evaluate(() => document.querySelector('[data-group="level"] button.sel')?.dataset.value === '0'));
+  check('the ladder is the default opponent (1.10)', await page.evaluate(() => document.querySelector('[data-group="level"] button.sel')?.dataset.value === '-1'));
   await page.keyboard.press('Enter');
   await page.waitForSelector('#hud:not([hidden])');
   check('Enter starts the bout', true);
@@ -446,7 +446,7 @@ async function onboarding(browser) {
   });
   // 1.9.1: the camera is the game, so the one big button is the camera; the keyboard is the smaller button under it
   check('onboarding: the first screen has one big button, the camera, and the settings folded', first.big.join() === 'start-cam' && /камер/i.test(first.camText) && !first.settingsOpen && !first.level, JSON.stringify(first));
-  check('onboarding: one line under it says what it starts', /Лёгкий соперник/.test(first.now), first.now);
+  check('onboarding: one line under it says what it starts: the first of six opponents', /Бой 1 из 6: БОЛТ/.test(first.now), first.now);
   check('onboarding: no nickname field before the first bout; without a camera is one smaller button', !first.nick && first.alt.length === 1 && /^start: БЕЗ КАМЕРЫ/.test(first.alt[0]), first.alt.join());
   const cam2 = await page.evaluate(() => {
     const pick = (v) => document.querySelector(`[data-group="control"] button[data-value="${v}"]`).click();
@@ -464,20 +464,25 @@ async function onboarding(browser) {
     return { passed, outcome: tut.outcome, cfg: a.boutCfg, training: a.training, left: !!a.tutorial, card: !!document.querySelector('#tut'), saved: localStorage.getItem('ironecho.tutorial') };
   }, TUTOR);
   check('onboarding: the scripted player passes all six steps', t1.passed.join(',') === 'jab,cross,block,slip,hook,step' && t1.outcome === 'done', t1.passed.join(','));
-  check('onboarding: then a short bout against Easy starts by itself', !t1.training && !t1.left && !t1.card && t1.cfg.mode === 'short' && t1.cfg.level === 0, JSON.stringify(t1.cfg));
+  check('onboarding: then a short bout against the ladder\'s first opponent starts by itself', !t1.training && !t1.left && !t1.card && t1.cfg.mode === 'short' && t1.cfg.level === -1 && t1.cfg.rung === 0, JSON.stringify(t1.cfg));
   check('onboarding: the tutorial is remembered as done', t1.saved === 'done');
   const res = await page.evaluate((src) => {
     const a = globalThis.IRONECHO_APP; const fn = eval(src);
     for (let k = 0; k < 200 && a.state !== 'results'; k++) a.debugAdvance(5, fn);
     const m = a.core.snapshot().match; const vis = (s) => !document.querySelector(s).hidden;
     return { state: a.state, won: m.hasWinner && m.winner === 0, tip: vis('#res-tip') ? document.querySelector('#res-tip').textContent : '', chips: document.querySelectorAll('#results .res-chips span').length,
-      up: vis('#res-up'), nick: vis('#res-nick'), rating: a.rating.enabled };
+      up: vis('#res-up'), nick: vis('#res-nick'), rating: a.rating.enabled, again: document.querySelector('#rematch').textContent, beaten: a.career.beaten.slice(),
+      rig: a.rigs.opponent.name };
   }, PLAYER);
   check('onboarding: results show one tip and the key numbers', res.state === 'results' && res.tip.length > 15 && res.chips >= 5, `${res.chips} chips; ${res.tip}`);
-  check('onboarding: "a stronger opponent" only after a win', res.up === res.won, JSON.stringify({ won: res.won, up: res.up }));
+  check('onboarding: the ladder\'s rookie fights on the sparring frame', res.rig === 'Forge-opponent', res.rig);
+  check('onboarding: a ladder win opens the next opponent and the button names it, a loss is a rematch',
+    !res.up && (res.won ? res.beaten.includes(0) && /ДАЛЬШЕ: КУВАЛДА/.test(res.again) : !res.beaten.length && res.again === 'РЕВАНШ'), JSON.stringify(res));
   check('onboarding: the nickname card comes after the first finished bout', res.nick === res.rating, JSON.stringify({ nick: res.nick, rating: res.rating }));
   await page.click('#res-menu');
   check('onboarding: the menu now shows the nickname field', (await page.isVisible('#profile')) === res.rating);
+  const now2 = await page.textContent('#menu-now');
+  check('onboarding: the menu names the next opponent after the bout', res.won ? /Бой 2 из 6: КУВАЛДА/.test(now2) : /Бой 1 из 6: БОЛТ/.test(now2), now2);
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 240000 }); // the full run loads the machine: the default 30 s is not enough
   await page.waitForFunction(() => globalThis.IRONECHO_APP && globalThis.IRONECHO_APP.loaded, null, { timeout: 240000 });
   await page.click('#start');

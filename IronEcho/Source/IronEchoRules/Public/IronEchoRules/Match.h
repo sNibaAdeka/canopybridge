@@ -38,6 +38,14 @@ namespace IronEchoCore
 	// Applied on top of a setup whose level-dependent parts are already chosen. Versus uses PlayerFighter for both sides.
 	void ApplyArcadeProfile(MatchSetup& Setup);
 
+	// The ladder (1.10, the browser game): six opponents in a row, each a bot level plus a style of its own, so that every rung
+	// teaches one thing and the next one is harder. 0 a rookie who only jabs, 1 a slugger (big, slow hooks and crosses), 2 a
+	// counter-puncher (waits, blocks, answers), 3 a mover (circles, slips, throws in bunches), 4 a pressure fighter (cuts the ring
+	// off, goes to the body), 5 the champion (the Hard bot). Sets Setup.Bot and Setup.OpponentFighter; ApplyArcadeProfile goes on
+	// top of it. A rung outside 0..kLadderRungs-1 changes nothing and returns false.
+	inline constexpr int32_t kLadderRungs = 6;
+	bool ApplyLadderRung(MatchSetup& Setup, int32_t Rung);
+
 	struct MatchInput
 	{
 		FighterIntent PlayerIntent;

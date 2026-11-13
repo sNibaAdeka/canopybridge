@@ -227,6 +227,26 @@
   .go.go-alt { margin-top: 10px; padding: 12px; background: transparent; border: 1px solid var(--line); box-shadow: none; color: var(--ink);
     font-size: 15px; letter-spacing: 0.1em; }
   .go.go-alt:hover { border-color: var(--blue); filter: none; }
+  /* 1.10: the ladder in the menu and the card before a ladder bout */
+  .ladder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+  .ladder .rung { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 7px 2px 6px; border-radius: 6px;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--ink); cursor: pointer; font: 700 12px/1.1 var(--display); letter-spacing: 0.04em; }
+  .ladder .rung i { font-style: normal; font-size: 10px; color: var(--faint); }
+  .ladder .rung b { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .ladder .rung small { font: 500 10px/1.2 var(--text); color: var(--faint); letter-spacing: 0; }
+  .ladder .rung.done { border-color: rgba(94,224,138,0.45); }
+  .ladder .rung.done small { color: #8fe0a8; }
+  .ladder .rung.now { border-color: var(--red); background: rgba(255,75,43,0.12); }
+  .ladder .rung.locked { opacity: 0.45; cursor: default; }
+  @media (max-width: 560px) { .ladder { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  #vs-card { position: absolute; left: 24px; top: calc(env(safe-area-inset-top, 0px) + 104px); width: min(340px, calc(100vw - 48px)); padding: 16px 18px;
+    border-radius: 8px; background: rgba(10,11,14,0.82); border: 1px solid var(--line); border-left: 3px solid var(--red); pointer-events: none; }
+  #vs-card .vs-n { display: block; font: 700 12px/1 var(--display); letter-spacing: 0.16em; color: var(--faint); }
+  #vs-card .vs-name { display: block; margin-top: 6px; font: 800 40px/1 var(--display); letter-spacing: 0.04em; color: #ffd6cc; }
+  #vs-card .vs-title { display: block; margin-top: 2px; font: 700 15px/1.2 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+  #vs-card p { margin: 10px 0 0; font: 500 14px/1.4 var(--text); color: var(--ink); }
+  #vs-card .vs-tip { color: #cfe0ff; }
+  #vs-card .vs-tip::before { content: 'Совет: '; font-weight: 700; }
   .cam-note { margin: 10px 0 0; padding: 10px 12px; border: 1px solid rgba(255,190,90,0.55); border-radius: 6px; background: rgba(255,170,60,0.10);
     color: #ffe2b8; font: 500 13px/1.4 var(--text); }
   .cam-how li { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 10px; }
@@ -298,6 +318,7 @@
     <div id="combo"></div>
     <div id="training" hidden><span>ПОПАДАНИЙ</span><b id="training-hits">0</b></div>
     <div id="banner"><div id="banner-main"></div><div id="banner-sub"></div></div>
+    <div id="vs-card" hidden><span class="vs-n"></span><b class="vs-name"></b><span class="vs-title"></span><p class="vs-style"></p><p class="vs-tip"></p></div>
     <div id="count" hidden></div>
     <div id="getup" hidden><b>ДЕРЖИ БЛОК, ЧТОБЫ ВСТАТЬ</b><div class="gbar"><div id="getup-fill"></div></div></div>
     <div id="flash"></div>
@@ -318,6 +339,7 @@
     <p class="cam-note" id="cam-note" hidden></p>
     <button class="go go-big" id="start" type="button">В РИНГ</button>
     <button class="menu-now" id="menu-now" type="button" title="Изменить в настройках"></button>
+    <div class="ladder" id="ladder" aria-label="Лестница соперников" hidden></div>
     <nav class="menu-links" aria-label="Другие режимы">
       <button type="button" id="to-tutorial">Обучение</button>
       <button type="button" id="to-rating">Рейтинг</button>
@@ -331,6 +353,7 @@
     <details id="menu-settings">
     <summary>Настройки</summary>
     <div class="opt" data-group="level"><span>Соперник</span><div class="seg">
+      <button type="button" data-value="-1">ЛЕСТНИЦА<small>6 соперников по очереди</small></button>
       <button type="button" data-value="0">ЛЁГКИЙ<small>для первого боя</small></button>
       <button type="button" data-value="1">НОРМАЛЬНЫЙ<small>читает серии</small></button>
       <button type="button" data-value="2">СЛОЖНЫЙ<small>быстрый замах</small></button>
