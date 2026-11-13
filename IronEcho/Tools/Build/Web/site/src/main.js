@@ -588,7 +588,8 @@ function onCombat(e, snap) {
     app.shake.add(0.7 * (0.3 + 0.7 * calm()));
     app.slowmo = 0.45 * calm();
     app.punch = 1;
-    app.hud.banner('НОКДАУН', actor === me ? '' : (app.versus ? 'СОПЕРНИК' : NAMES[1]), 1.6, actor === me ? 'bad high' : 'good high');
+    const foeName = app.boutCfg && app.boutCfg.rung >= 0 ? LADDER[app.boutCfg.rung].name : NAMES[1];
+    app.hud.banner('НОКДАУН', actor === me ? '' : (app.versus ? 'СОПЕРНИК' : foeName), 1.6, actor === me ? 'bad high' : 'good high');
     return;
   }
   if (type === 'GotUp') {
@@ -647,7 +648,8 @@ function onMatch(e, snap) {
 // The core's numbers (hud.js), plus: one tip from what went wrong, "a stronger opponent" after a win, and after the first finished bout
 // the nickname card (the rating asks for a name only once the player has seen a whole bout).
 function showResults(snap) {
-  app.hud.results(snap, NAMES);
+  const ladderRung = !app.versus && app.boutCfg ? app.boutCfg.rung : -1;
+  app.hud.results(snap, ladderRung >= 0 ? [NAMES[0], LADDER[ladderRung].name] : NAMES);
   const m = snap.match;
   const me = snap[meKey()];
   const foe = snap[meKey() === 'player' ? 'opponent' : 'player'];
@@ -665,7 +667,7 @@ function showResults(snap) {
         : `Следующий — ${nx.name}, ${nx.title}. ${nx.style}`;
       again = last ? 'ЗАЩИТИТЬ ТИТУЛ' : `ДАЛЬШЕ: ${nx.name}`;
     } else {
-      tip = `Против ${LADDER[rung].name}: ${LADDER[rung].tip.charAt(0).toLowerCase()}${LADDER[rung].tip.slice(1)} ${tip}`.trim();
+      tip = `${LADDER[rung].name}: ${LADDER[rung].tip.charAt(0).toLowerCase()}${LADDER[rung].tip.slice(1)} ${tip}`.trim();
     }
   }
   $('#rematch').textContent = again;
