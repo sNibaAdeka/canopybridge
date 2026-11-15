@@ -27,10 +27,19 @@ export const TUTORIAL_STEPS = [
 
 export const TUTORIAL_KEY = 'ironecho.tutorial'; // 'done' | 'skipped'
 
+// 1.11: for a southpaw (right hand forward) the camera texts name the other hand: «левую» <-> «правую» and so on
+const HAND_SWAP = { левую: 'правую', правую: 'левую', левой: 'правой', правой: 'левой', левая: 'правая', правая: 'левая' };
+// (no look-behind in the pattern: Safari before 16.4 rejects it, and a syntax error here would stop the whole game)
+export const mirrorHands = (text) => text.replace(/(^|[^а-яё])(левую|правую|левой|правой|левая|правая)(?![а-яё])/gi, (_, pre, w) => {
+  const m = HAND_SWAP[w.toLowerCase()];
+  return pre + (w[0] === w[0].toUpperCase() ? m[0].toUpperCase() + m.slice(1) : m);
+});
+
 export class Tutorial {
   // root: the element to draw into (null in tests); onDone/onSkip: called once; onStep(i): a step was passed
-  constructor({ control = 'keys', root = null, onDone = () => {}, onSkip = () => {}, onStep = () => {}, slot = 0 } = {}) {
+  constructor({ control = 'keys', root = null, onDone = () => {}, onSkip = () => {}, onStep = () => {}, slot = 0, southpaw = false } = {}) {
     this.control = control;
+    this.southpaw = southpaw && control === 'camera';
     this.steps = TUTORIAL_STEPS.filter((s) => s[control]);
     this.slot = slot;
     this.index = 0;
@@ -142,8 +151,9 @@ export class Tutorial {
     el.n.textContent = `ОБУЧЕНИЕ · ${this.index + 1} из ${this.steps.length}`;
     el.t.textContent = s.title;
     const left = (s.need || 1) - this.count;
-    el.do.textContent = s[this.control] + (s.need > 1 && left > 0 ? ` · ещё ${left}` : '');
-    el.h.textContent = s.hint;
+    const say = (x) => (this.southpaw ? mirrorHands(x) : x);
+    el.do.textContent = say(s[this.control]) + (s.need > 1 && left > 0 ? ` · ещё ${left}` : '');
+    el.h.textContent = say(s.hint);
     el.dots.textContent = '';
     this.steps.forEach((_, i) => { const d = document.createElement('i'); if (i < this.index) d.className = 'on'; else if (i === this.index) d.className = 'now'; el.dots.append(d); });
   }
@@ -152,8 +162,8 @@ export class Tutorial {
 // ---------------------------------------------------------------- the results screen: one tip from what went wrong
 // st: what the page counted during the bout (main.js boutStats): { taken: {straight, hook, upper, body, kick, elbow, knee},
 // counters, whiffs, smothered, gassed }; me / foe: the fighters' snapshots at the end; won: true / false / null (draw).
-export function resultTip(st, me, foe, { won = null, level = 0, camera = false } = {}) {
-  const k = (keys, cam) => (camera ? cam : keys);
+export function resultTip(st, me, foe, { won = null, level = 0, camera = false, southpaw = false } = {}) {
+  const k = (keys, cam) => (camera ? (southpaw ? mirrorHands(cam) : cam) : keys);
   const taken = st.taken || {};
   const hits = Object.values(taken).reduce((a, b) => a + b, 0);
   const acc = me.thrown > 0 ? me.landed / me.thrown : 0;

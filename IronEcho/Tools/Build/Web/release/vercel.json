@@ -9,6 +9,12 @@
       "memory": 256
     }
   },
+  "crons": [
+    {
+      "path": "/api/ratings",
+      "schedule": "23 5 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/play/(.*)",
@@ -29,6 +35,24 @@
         {
           "key": "Cache-Control",
           "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/play/vendor/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800"
+        }
+      ]
+    },
+    {
+      "source": "/play/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400"
         }
       ]
     },

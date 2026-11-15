@@ -243,6 +243,32 @@ async function camera(browser) {
   check('camera: a player who left the frame is told so after 1.5 s, not before', lost.early !== 'Не вижу тебя' && lost.gone === 'Не вижу тебя', `status ${lost.status}; at once "${lost.early}", after 1.7 s "${lost.gone}"`);
   check('camera: the message goes away when he is back', lost.back === '', lost.back);
   check('camera: the light advice tells dark from backlit from fine', /Темно/.test(lost.tips[0]) && /Свет сзади/.test(lost.tips[1]) && /Тусклый/.test(lost.tips[2]) && lost.tips[3] === '', lost.tips.join(' | '));
+  // 1.11: «Стойка: левша» swaps the hands of whatever the camera reports (the right hand's straight is the jab); «Перенастроить камеру»
+  // is in the pause with the camera on, starts the set-up from scratch and lets the bout go on by itself
+  const st = await page.evaluate(() => {
+    const app = globalThis.IRONECHO_APP; const cam = app.cameraInput; cam.active = true; cam.hold = false;
+    const realPoll = cam.proc.poll.bind(cam.proc);
+    cam.proc.poll = () => ({ status: 7, lean: 0, leanForward: 0, block: 0, punchMask: 1 | 128, kickMask: 0, confidence: 1 });
+    const orth = cam.poll().punchMask;
+    document.querySelector('[data-group="stance"] button[data-value="southpaw"]').click();
+    const south = cam.poll().punchMask; const saved = JSON.parse(localStorage.getItem('ironecho.settings')).stance;
+    document.querySelector('[data-group="stance"] button[data-value="orthodox"]').click();
+    const back = cam.poll().punchMask;
+    cam.proc.poll = realPoll;
+    return { orth, south, saved, back, flag: cam.southpaw };
+  });
+  check('camera: «левша» swaps the hands (jab+rear hook -> cross+lead hook), saved, and back', st.orth === 129 && st.south === 66 && st.saved === 'southpaw' && st.back === 129 && !st.flag, JSON.stringify(st));
+  const rc = await page.evaluate(() => {
+    const app = globalThis.IRONECHO_APP; const cam = app.cameraInput;
+    if (app.state !== 'playing') return { state: app.state };
+    app.debugAdvance(0.1, () => app.currentInput());
+    document.querySelector('#pause-btn').click();
+    const shown = !document.querySelector('#pause').hidden && !document.querySelector('#recal').hidden;
+    const calBefore = !!cam.proc.cal;
+    document.querySelector('#recal').click();
+    return { shown, calBefore, calAfter: !!cam.proc.cal, state: app.state, pause: !document.querySelector('#pause').hidden, status: cam.poll().status };
+  });
+  check('camera: «Перенастроить камеру» in the pause restarts the set-up and closes the pause', rc.shown && rc.calBefore && !rc.calAfter && rc.state === 'playing' && !rc.pause && rc.status !== 7, JSON.stringify(rc));
   check('camera: no page errors', !page.errors.length, page.errors.slice(0, 3).join(' | '));
   await page.close();
 }
@@ -479,6 +505,27 @@ async function onboarding(browser) {
   check('onboarding: a ladder win opens the next opponent and the button names it, a loss is a rematch',
     !res.up && (res.won ? res.beaten.includes(0) && /ДАЛЬШЕ: КУВАЛДА/.test(res.again) : !res.beaten.length && res.again === 'РЕВАНШ'), JSON.stringify(res));
   check('onboarding: the nickname card comes after the first finished bout', res.nick === res.rating, JSON.stringify({ nick: res.nick, rating: res.rating }));
+  // 1.11: «Что мешало?» rides on the anonymous statistics: hidden while they are off, one tap + optional words when on, once a visit
+  const fb = await page.evaluate(() => {
+    const a = globalThis.IRONECHO_APP; const box = document.querySelector('#res-fb');
+    const offHidden = box.hidden;
+    if (!a.tele) return { offHidden, tele: false };
+    a.tele.endpoint = '/api/events'; a.tele.enabled = true; a.tele.queue = [];
+    a.feedbackAsk({ rung: 0, won: false, level: -1 });
+    const shown = !box.hidden; const moreBefore = !document.querySelector('#fb-more').hidden;
+    box.querySelector('[data-fb="camera"]').click(); box.querySelector('[data-fb="hard"]').click();
+    const moreAfter = !document.querySelector('#fb-more').hidden;
+    document.querySelector('#fb-text').value = '  джеб не ловит  ';
+    document.querySelector('#fb-send').click();
+    const ev = a.tele.queue.find((e) => e.type === 'feedback');
+    a.feedbackAsk({ rung: 0, won: false, level: -1 });
+    const again = !box.hidden;
+    a.tele.enabled = false; a.tele.queue = [];
+    return { offHidden, tele: true, shown, moreBefore, moreAfter, ev, note: document.querySelector('#fb-note').textContent, again };
+  });
+  check('onboarding: «Что мешало?» is hidden while the statistics are off', fb.offHidden, JSON.stringify(fb));
+  check('onboarding: «Что мешало?» with statistics on: chips, then words and «Отправить»; one event; once a visit', fb.tele && fb.shown && !fb.moreBefore && fb.moreAfter
+    && fb.ev && fb.ev.props.picks === 'camera,hard' && fb.ev.props.text === 'джеб не ловит' && fb.ev.props.rung === 0 && /Спасибо/.test(fb.note) && !fb.again, JSON.stringify(fb));
   await page.click('#res-menu');
   check('onboarding: the menu now shows the nickname field', (await page.isVisible('#profile')) === res.rating);
   const now2 = await page.textContent('#menu-now');

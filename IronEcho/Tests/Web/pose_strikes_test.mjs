@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, '..', '..', 'Tools', 'Build', 'Web', 'site', 'src');
-const { PoseProcessor } = await import(pathToFileURL(path.join(SRC, 'pose.js')));
+const { PoseProcessor, swapHands, CameraInput } = await import(pathToFileURL(path.join(SRC, 'pose.js')));
 const { Script, stream, calibration, rng } = await import(pathToFileURL(path.join(HERE, 'pose_sim.mjs')));
 globalThis.setTimeout = () => 0; // the processor clears its "ready" message later; nothing to wait for here
 
@@ -145,6 +145,35 @@ for (const [name, faults] of SETS) {
   const extra = runs.reduce((a, r) => a + r.extra.length, 0);
   check('hands-only: nothing fires while blocking, slipping, leaning, standing', quietFalse === 0, `${quietFalse}`);
   check('hands-only: few extra detections during the strikes', extra - quietFalse <= 6, `${extra - quietFalse}`);
+}
+
+// 1.11: the southpaw stance swaps every left / right pair of strike bits and nothing else
+{
+  const pairs = [[1, 2], [4, 8], [16, 32], [64, 128], [256, 512], [1024, 2048]];
+  check('southpaw: each pair swaps', pairs.every(([l, r]) => swapHands(l) === r && swapHands(r) === l));
+  check('southpaw: both hands stay both hands', swapHands(1 | 2 | 64 | 128) === (1 | 2 | 64 | 128));
+  check('southpaw: a mixed mask', swapHands(1 | 128 | 1024) === (2 | 64 | 2048), String(swapHands(1 | 128 | 1024)));
+  check('southpaw: higher bits and zero untouched', swapHands(0) === 0 && swapHands(4096 | 1) === (4096 | 2));
+  let all = true;
+  for (let m = 0; m < 4096; m++) if (swapHands(swapHands(m)) !== m) all = false;
+  check('southpaw: swapping twice gives the mask back (all 4096)', all);
+}
+
+// 1.11: the distance advice. A body standing 2 m away (shoulders a fifth of the frame) is fine; the same body at arm's length (shoulders
+// half the frame) is told to step back; a tiny one far away is told to come closer.
+{
+  const body = (scale) => {
+    const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.95 }));
+    const put = (i, x, y) => { lm[i] = { x: 0.5 + (x - 0.5) * scale, y: 0.5 + (y - 0.5) * scale, visibility: 0.95 }; };
+    put(0, 0.5, 0.2); put(11, 0.4, 0.33); put(12, 0.6, 0.33); put(13, 0.37, 0.45); put(14, 0.63, 0.45); put(15, 0.42, 0.3); put(16, 0.58, 0.3);
+    put(23, 0.44, 0.62); put(24, 0.56, 0.62); put(25, 0.44, 0.78); put(26, 0.56, 0.78); put(27, 0.44, 0.93); put(28, 0.56, 0.93);
+    return { landmarks: [lm] };
+  };
+  const q = (scale) => CameraInput.prototype._qualityOf.call({ procOpts: { handsOnly: true }, proc: {}, _lightTip: () => '' }, body(scale), 20).tip;
+  const fine = q(1); const close = q(2.3); const far = q(0.4);
+  check('distance advice: a player at the right distance is fine', fine === 'Отслеживание в норме', fine);
+  check('distance advice: too close is told to step back', /отойди на шаг/.test(close), close);
+  check('distance advice: too far is told to come closer', /Подойди ближе/.test(far), far);
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} checks passed`);

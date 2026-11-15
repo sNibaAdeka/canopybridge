@@ -17,7 +17,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.10.0"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.11.0"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
@@ -184,6 +184,10 @@ CAMERA_MENU = """<div class="opt" data-group="control"><span>Управлени�
       <button type="button" data-value="camera">КАМЕРА<small>бокс телом</small></button>
       <button type="button" data-value="phone" hidden>ТЕЛЕФОН<small>как камера</small></button>
     </div></div>
+    <div class="opt" data-group="stance"><span>Стойка (для камеры)</span><div class="seg">
+      <button type="button" data-value="orthodox">ПРАВША<small>левая рука впереди — джеб</small></button>
+      <button type="button" data-value="southpaw">ЛЕВША<small>правая рука впереди — джеб</small></button>
+    </div></div>
     <div class="opt" data-group="tracking"><span>Точность камеры</span><div class="seg">
       <button type="button" data-value="full">ОБЫЧНАЯ<small>быстрее</small></button>
       <button type="button" data-value="heavy">ВЫСОКАЯ<small>точнее, ~30 МБ</small></button>
@@ -266,7 +270,13 @@ STANDALONE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/m
                    f'"phonePage": "{PUBLIC_SITE}/phone/", "ratingApi": "{RATING_API}", "eventsApi": "{EVENTS_API}", "version": "{GAME_VERSION}", '
                    '"poseModel": "./vendor/pose_landmarker_full.task", "poseModelHeavy": "./vendor/pose_landmarker_heavy.task", '
                    '"peerjs": "./vendor/peerjs/peerjs.min.js", "glb": "plain"};</script>')
-# the single public page (the website's /play) keeps three.js / MediaPipe on their CDNs but serves PeerJS itself
+# the website's /play (1.11): the standalone folder, every file from the site's own domain. The heavy pose model (30 MB, only for
+# «Высокая» accuracy) is not shipped there: that one choice loads it from Google's storage, as before.
+SITE_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"mediapipe": "./vendor/mediapipe", "mediapipeWorker": "./vendor/mediapipe/vision_bundle_worker.js", '
+             '"qrcode": "./vendor/qrcode/qrcode.mjs", "phonePage": "../phone/", "privacyPage": "../privacy/", '
+             f'"ratingApi": "{RATING_API}", "eventsApi": "/api/events", "version": "{GAME_VERSION}", '
+             '"poseModel": "./vendor/pose_landmarker_full.task", "peerjs": "./vendor/peerjs/peerjs.min.js", "glb": "plain"};</script>')
+# the single public page (one HTML a host can import from a URL) keeps three.js / MediaPipe on their CDNs but serves PeerJS itself
 PUBLIC_DEPS = ('<script>globalThis.IRONECHO_DEPS = {"peerjs": "./peerjs.min.js", "qrcode": "./qrcode.mjs", "phonePage": "../phone/", '
                f'"ratingApi": "{RATING_API}", "eventsApi": "/api/events", "version": "{GAME_VERSION}", "mediapipeWorker": "./vision_bundle_worker.js"}};</script>')
 
@@ -351,6 +361,13 @@ def build_standalone(project: Path, here: Path, out_root: Path) -> Path | None:
     doc = full_document(page(template, out_root / "core", game, assets_script=STANDALONE_DEPS, camera_menu=CAMERA_MENU,
                              fonts=fonts, importmap=LOCAL_IMPORTMAP))
     (out / "index.html").write_text(doc, encoding="utf-8")
+    download_url = os.environ.get("IRONECHO_DOWNLOAD_URL")
+    if download_url:  # the website's own copy of the page (public_build.build_release serves it as /play/index.html)
+        menu = (f'<a class="ghost dl-win" href="{download_url}" download>СКАЧАТЬ ДЛЯ WINDOWS<small>IronEcho.exe, '
+                'без интернета</small></a>')
+        site_doc = full_document(page(template, out_root / "core", game, assets_script=SITE_DEPS, camera_menu=CAMERA_MENU,
+                                      fonts=fonts, importmap=LOCAL_IMPORTMAP, download_menu=menu))
+        (out_root / "standalone_site.html").write_text(site_doc, encoding="utf-8")
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print(f"[standalone] {out} {size // (1024 * 1024)} MB (no third-party hosts at run time)")
     return out

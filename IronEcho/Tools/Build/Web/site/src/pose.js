@@ -1037,12 +1037,40 @@ class PoseTap {
   }
 }
 
+// 1.11: while the player looks at the menu, the files the camera needs (MediaPipe's WebAssembly, the worker build and the pose model,
+// ~19 MB) go into the browser's cache at low priority, one after another, so «В ринг» with the camera does not wait for the download.
+// Not on a metered («экономия трафика») or slow connection, not from a file on disk.
+export async function prefetchPoseFiles(model = 'full') {
+  const c = globalThis.navigator && navigator.connection;
+  if (c && (c.saveData || ['slow-2g', '2g', '3g'].includes(c.effectiveType))) return { skipped: 'connection' };
+  if (location.protocol === 'file:') return { skipped: 'file' };
+  const urls = [`${MP_BASE}/wasm/vision_wasm_internal.wasm`, `${MP_BASE}/wasm/vision_wasm_internal.js`, WORKER_BUNDLE, MODELS[model] || MODELS.full];
+  const t0 = performance.now();
+  let bytes = 0;
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, { priority: 'low' });
+      if (r.ok) bytes += (await r.arrayBuffer()).byteLength;
+    } catch { return { skipped: 'network', bytes }; }
+  }
+  return { seconds: (performance.now() - t0) / 1000, bytes };
+}
+
+// 1.11: a southpaw leads with the right hand, so the right hand's straight is the jab. Every left / right pair of strike bits trades
+// places (1 / 2 straights, 4 / 8 to the body, 16 / 32 elbows, 64 / 128 hooks, 256 / 512 body hooks, 1024 / 2048 uppercuts).
+export function swapHands(mask) {
+  let out = mask & ~0xfff;
+  for (let b = 0; b < 12; b += 2) out |= (((mask >> b) & 1) << (b + 1)) | (((mask >> (b + 1)) & 1) << b);
+  return out;
+}
+
 // source: 'webcam' (getUserMedia on this computer) or 'phone' (a phone on the same Wi-Fi streams its camera to the
 // Windows app's local server; the app shows a QR code to pair it).
 export class CameraInput {
   constructor(source = 'webcam', opts = {}) {
     this.source = source;
     this.procOpts = { handsOnly: !!opts.handsOnly }; // the game: true (boxing with the hands); Collection Mode: false (it asks for elbows too)
+    this.southpaw = !!opts.southpaw; // 1.11: right hand forward (the jab is the right hand's)
     this.model = MODELS[opts.model] ? opts.model : 'full';
     this.inferMs = 0;      // moving average of one detection, ms
     this.quality = { level: 'wait', tip: '' };
@@ -1665,6 +1693,9 @@ export class CameraInput {
       const anklesSeen = vis(27) > 0.5 && vis(28) > 0.5;
       if (mean < 0.5) { level = 'bad'; tip = lightTip || 'Плохо видно: больше света, без окна за спиной'; }
       else if (!wristsSeen) { level = 'warn'; tip = 'Кисти выпали из кадра: отойди или встань по центру'; }
+      // 1.11: too close. At the distance the game wants (1.5–2.5 m) the shoulders take 15–25 % of the frame's width; at half that they take
+      // 40 % and more, and a straight punch at the screen leaves the frame before it is fully out
+      else if (vis(11) > 0.5 && vis(12) > 0.5 && Math.abs(lm[11].x - lm[12].x) > 0.42) { level = 'warn'; tip = 'Слишком близко: отойди на шаг назад'; }
       else if (height < 0.42) { level = 'warn'; tip = 'Подойди ближе: ты слишком мелкий в кадре'; }
       else if (xs.length && (Math.min(...xs) < 0.04 || Math.max(...xs) > 0.96)) { level = 'warn'; tip = 'Встань по центру кадра'; }
       else if (mean < 0.7) { level = 'warn'; tip = lightTip || 'Видимость средняя: добавь света'; }
@@ -1730,7 +1761,7 @@ export class CameraInput {
     const a = p.punches[p.punches.length - 1];
     const b = p.strikes[p.strikes.length - 1];
     const last = !b || (a && a[0] >= b[0]) ? { side: a[1], kind: 'straight' } : { side: b[1], kind: b[2] };
-    const name = last.kind === 'straight' ? (last.side === 0 ? 'ДЖЕБ' : 'КРОСС') : last.kind === 'upper' ? 'АППЕРКОТ' : 'ХУК';
+    const name = last.kind === 'straight' ? (last.side === (this.southpaw ? 1 : 0) ? 'ДЖЕБ' : 'КРОСС') : last.kind === 'upper' ? 'АППЕРКОТ' : 'ХУК';
     this.flash = { side: last.side, name, at: performance.now() };
   }
 
@@ -1830,6 +1861,7 @@ export class CameraInput {
     const r = this.proc.poll();
     // the decision is written with the capture time of the frame it came from and how long after that capture the game took it
     if (r.punchMask || r.kickMask) this.rec.note(this.lastT, r.punchMask, r.kickMask, performance.now() / 1000 - this.lastT);
+    if (this.southpaw && r.punchMask) return { ...r, punchMask: swapHands(r.punchMask) };
     return r;
   }
 

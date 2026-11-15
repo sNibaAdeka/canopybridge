@@ -12,7 +12,7 @@ if (!fs.existsSync(WASM)) { console.error(`no core at ${WASM}; run: python Tools
 globalThis.IRONECHO_CORE_WASM_B64 = fs.readFileSync(WASM).toString('base64');
 const imp = (f) => import(pathToFileURL(path.join(SRC, f)));
 const { loadCore } = await imp('core.js');
-const { Tutorial, TUTORIAL_STEPS, resultTip } = await imp('tutorial.js');
+const { Tutorial, TUTORIAL_STEPS, resultTip, mirrorHands } = await imp('tutorial.js');
 
 let pass = 0;
 let fail = 0;
@@ -96,6 +96,19 @@ check('a win below Hard: a stronger opponent', /сильнее/.test(resultTip({
 check('a win over Hard: rating and online', /рейтинг/.test(resultTip({ taken: taken({}) }, base, foe, { won: true, level: 2 })));
 check('an opponent who blocks a lot: uppercut / body', /апперкот/i.test(resultTip({ taken: taken({ straight: 2 }) }, base, { blocksMade: 9 }, { won: false })));
 check('a tip always exists', resultTip({}, { thrown: 0, landed: 0 }, {}, {}).length > 10);
+
+// 1.11: the southpaw (right hand forward) reads the other hand's name in the camera texts, nowhere else
+check('southpaw words: left <-> right', mirrorHands('Резко выпрями левую руку') === 'Резко выпрями правую руку'
+  && mirrorHands('Прямой правой: сильнее') === 'Прямой левой: сильнее' && mirrorHands('«левой, левой, правой»') === '«правой, правой, левой»');
+check('southpaw words: capitals kept, other words untouched', mirrorHands('Левой — хук. Леволевой нет. Направо') === 'Правой — хук. Леволевой нет. Направо');
+const jabStep = TUTORIAL_STEPS.find((s) => s.id === 'jab');
+const southCard = new Tutorial({ control: 'camera', southpaw: true });
+const keysCard = new Tutorial({ control: 'keys', southpaw: true });
+check('southpaw tutorial: camera says the right hand', southCard.southpaw && /левую/.test(jabStep.camera) && mirrorHands(jabStep.camera).includes('правую'));
+check('southpaw tutorial: keys ignore the stance', !keysCard.southpaw);
+const comboCam = resultTip({ taken: {} }, { thrown: 0, landed: 0 }, {}, { camera: true, southpaw: true });
+check('southpaw tip: «правой, правой, левой»', /правой, правой, левой/.test(comboCam), comboCam);
+check('southpaw tip with keys: J J K stays', /J J K/.test(resultTip({ taken: {} }, { thrown: 0, landed: 0 }, {}, { camera: false, southpaw: true })));
 
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);

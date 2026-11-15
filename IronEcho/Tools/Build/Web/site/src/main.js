@@ -19,7 +19,7 @@ const $ = (s) => document.querySelector(s);
 
 const TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 // Easy first: new players lose ~94% on Normal. fsStart: "В РИНГ" also goes full screen (desktop yes, phones no)
-const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off', shareVideo: true, fsStart: !TOUCH,
+const settings = { level: 0, mode: 'bout', quality: 'high', control: 'keys', tracking: 'full', camera2: 'off', shareVideo: true, fsStart: !TOUCH, stance: 'orthodox',
   effects: globalThis.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'calm' : 'full' };
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem('ironecho.settings') || '{}'));
@@ -199,6 +199,11 @@ async function buildWorld() {
   window.addEventListener('resize', resize);
   resize();
   app.loaded = true;
+  // 1.11: the camera's files load into the cache while the menu is up (the big button is the camera); see prefetchPoseFiles
+  setTimeout(() => {
+    if (!CAMERA_READY || typeof prefetchPoseFiles === 'undefined' || app.state !== 'menu' || app.cameraInput || app.cameraWanted) return;
+    prefetchPoseFiles(settings.tracking).then((r) => track('camera_step', { step: 'prefetch', ...r })).catch(() => {});
+  }, 2500);
   if (tele) {
     try {
       const gl = app.renderer.getContext();
@@ -335,7 +340,7 @@ function startBout(versus, cfg) {
   document.body.classList.toggle('pad-on', !$('#pad').hidden); // the pause button moves out from under the punch buttons
   app.cameraWanted = useCamera; // until the camera is up (permission, model, second phone) the fight must wait, not run on the keyboard
   if (useCamera && !app.cameraInput) {
-    app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait, onEvent: track, handsOnly: true });
+    app.cameraInput = new CameraInput(camSource, { model: settings.tracking, second, wait: secondWait, onEvent: track, handsOnly: true, southpaw: southpaw() });
     app.cameraInput.key = cameraKey;
     app.cameraInput.start().catch((err) => {
       console.error(err);
@@ -380,6 +385,7 @@ function togglePause() {
     for (const e of ev.match) onMatch(e, snap);
     app.state = 'paused';
     $('#pause').hidden = false;
+    $('#recal').hidden = !(app.cameraInput && app.cameraInput.active);
   } else if (app.state === 'paused') {
     resumeBout();
   }
@@ -428,11 +434,13 @@ function toMenu() {
 // ---------------------------------------------------------------- tutorial (tutorial.js): first "В РИНГ" of a new player, or the menu link
 const tutorialSeen = () => !!pageStore.get(TUTORIAL_KEY);
 const controlKind = () => (settings.control === 'camera' || settings.control === 'phone' ? 'camera' : TOUCH ? 'touch' : 'keys');
+// 1.11: «Стойка: левша» — the right hand forward. Only the camera cares (keys and buttons name the strikes, not the hands).
+const southpaw = () => settings.stance === 'southpaw';
 function startTutorial(where) {
   endTutorial();
   const startedAt = performance.now();
   const t = new Tutorial({
-    control: controlKind(), root: $('#stage'),
+    control: controlKind(), root: $('#stage'), southpaw: southpaw(),
     onStep: () => app.sound.ui(),
     onDone: () => {
       pageStore.set(TUTORIAL_KEY, 'done');
@@ -656,7 +664,7 @@ function showResults(snap) {
   const won = m.hasWinner ? m.winner === app.viewSlot : null;
   const cfg = app.boutCfg || { mode: settings.mode, level: settings.level, rung: -1 };
   const rung = app.versus ? -1 : cfg.rung;
-  let tip = app.versus ? '' : resultTip(app.boutStats || {}, me, foe, { won, level: rung >= 0 ? LADDER[rung].level : cfg.level, camera: controlKind() === 'camera' });
+  let tip = app.versus ? '' : resultTip(app.boutStats || {}, me, foe, { won, level: rung >= 0 ? LADDER[rung].level : cfg.level, camera: controlKind() === 'camera', southpaw: southpaw() });
   let again = 'РЕВАНШ';
   if (rung >= 0) {
     // the ladder: a win opens the next opponent (named on the button), a loss gets the tip against this one
@@ -677,9 +685,45 @@ function showResults(snap) {
   pageStore.set('ironecho.boutsDone', String(boutsDone() + 1));
   const askNick = rating.enabled && !rating.nick && !app.versus;
   $('#res-nick').hidden = !askNick;
+  feedbackAsk({ rung, won, level: cfg.level });
   if (askNick) { $('#res-nick-note').textContent = ''; $('#res-nick-in').value = ''; }
 }
 const boutsDone = () => Number(pageStore.get('ironecho.boutsDone') || 0);
+
+// 1.11: «Что мешало?» — the one question on the results screen, answered with a tap (and a line of text if the player wants). It goes
+// with the anonymous statistics (so only when they are on), once a visit; the answers are read with Tools/Build/Web/api/events_report.sql.
+function feedbackAsk(ctx) {
+  const box = $('#res-fb');
+  box.hidden = !tele || !tele.enabled || !!app.versus || !!app.feedbackSent;
+  if (box.hidden) return;
+  app.feedbackCtx = ctx;
+  for (const b of box.querySelectorAll('[data-fb]')) b.classList.remove('sel');
+  $('#fb-more').hidden = true;
+  $('#fb-text').value = '';
+  $('#fb-note').textContent = '';
+}
+function wireFeedback() {
+  const box = $('#res-fb');
+  for (const b of box.querySelectorAll('[data-fb]')) {
+    b.addEventListener('click', () => {
+      b.classList.toggle('sel');
+      if (b.dataset.fb === 'fine' && b.classList.contains('sel')) for (const o of box.querySelectorAll('[data-fb]')) if (o !== b) o.classList.remove('sel');
+      if (b.dataset.fb !== 'fine') box.querySelector('[data-fb="fine"]').classList.remove('sel');
+      $('#fb-more').hidden = !box.querySelector('[data-fb].sel');
+    });
+  }
+  $('#fb-send').addEventListener('click', () => {
+    const picks = [...box.querySelectorAll('[data-fb].sel')].map((o) => o.dataset.fb).join(',');
+    if (!picks) return;
+    const c = app.feedbackCtx || {};
+    track('feedback', { picks, text: $('#fb-text').value.trim().slice(0, 80), rung: c.rung ?? -1, level: c.level ?? 0,
+      won: c.won === true ? 1 : c.won === false ? 0 : -1, control: controlKind(), southpaw: southpaw() ? 1 : 0 });
+    app.feedbackSent = true;
+    for (const o of box.querySelectorAll('[data-fb]')) o.disabled = true;
+    $('#fb-more').hidden = true;
+    $('#fb-note').textContent = 'Спасибо — прочитаю и поправлю.';
+  });
+}
 
 // ---------------------------------------------------------------- the ladder (ladder.js): six opponents, one after another
 const career = new LadderProgress(pageStore);
@@ -1414,9 +1458,9 @@ function step(dt, input, now) {
   }
 }
 
-// F3: numbers for a bug report - frame rate of the game, and per camera the detector's rate, time per detection and whether it runs
+// F3 (or ?stats=1 in the address, for phones): numbers for a bug report - frame rate of the game, and per camera the detector's rate, time per detection and whether it runs
 // in a Web Worker; with two cameras also the fusion state.
-const perfView = { on: false, el: null, frames: 0, at: performance.now(), fps: 0, worst: 0, lastDt: 0 };
+const perfView = { on: PAGE_QUERY.has('stats'), el: null, frames: 0, at: performance.now(), fps: 0, worst: 0, lastDt: 0 };
 function perfOverlay(now, raw) {
   const pv = perfView;
   pv.frames++;
@@ -1560,6 +1604,10 @@ function wireMenu() {
   };
   pick('level', 'level', Number);
   pick('mode', 'mode');
+  pick('stance', 'stance');
+  for (const b of document.querySelectorAll('[data-group="stance"] button')) {
+    b.addEventListener('click', () => { if (app.cameraInput) app.cameraInput.southpaw = southpaw(); });
+  }
   pick('quality', 'quality');
   for (const b of document.querySelectorAll('[data-group="quality"] button')) b.addEventListener('click', applyQuality);
   // the phone camera needs the Windows app's local server (it relays the phone's frames)
@@ -1591,6 +1639,16 @@ function wireMenu() {
   $('#menu-now').addEventListener('click', () => { const d = $('#menu-settings'); d.open = true; d.scrollIntoView({ block: 'nearest' }); });
   if (globalThis.IRONECHO_OPEN_SETTINGS) $('#menu-settings').open = true; // tests pick settings directly
   $('#resume').addEventListener('click', resumeBout);
+  wireFeedback();
+  if (PAGE_DEPS.privacyPage) { $('#privacy-link').href = PAGE_DEPS.privacyPage; $('#privacy-link').hidden = false; } // the website only
+  // 1.11: the camera's set-up from scratch without leaving the bout (moved the laptop, the light changed, stepped back): the rules
+  // stay paused while the camera calibrates and the bout goes on by itself once it is done (the core resumes when the input is ready)
+  $('#recal').addEventListener('click', () => {
+    if (!(app.cameraInput && app.cameraInput.active)) return;
+    app.cameraInput.recalibrate();
+    track('camera_step', { step: 'recalibrate' });
+    resumeBout();
+  });
   $('#restart').addEventListener('click', () => startBout(null, app.boutCfg));
   $('#to-menu').addEventListener('click', toMenu);
   $('#rematch').addEventListener('click', () => {
@@ -1720,5 +1778,6 @@ ensureWorld().catch((err) => {
 });
 requestAnimationFrame(frame);
 globalThis.IRONECHO_APP = app; // for tests and the camera module
+app.tele = tele; app.feedbackAsk = feedbackAsk; // tests: the results-screen question
 // Windows app (Tools/Build/Desktop): its local server keeps running while the page is open.
 if (location.hostname === '127.0.0.1') setInterval(() => { fetch('/__ironecho').catch(() => {}); }, 3000);

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>IRON ECHO — приватность</title>
+<meta name="description" content="Что игра IRON ECHO делает с камерой и какие данные собирает.">
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="../media/icon.png">
+<link rel="stylesheet" href="../play/vendor/fonts/fonts.css">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d12; --panel: #12161e; --line: #232a36; --fg: #eef1f6; --muted: #98a2b3; --blue: #4a7dff; --gold: #f2c14e;
+    --display: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+    --text: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 var(--text); -webkit-font-smoothing: antialiased; }
+  main { max-width: 720px; margin: 0 auto; padding: calc(env(safe-area-inset-top, 0px) + 32px) 20px calc(env(safe-area-inset-bottom, 0px) + 48px); }
+  a { color: var(--blue); }
+  .back { font: 700 15px/1 var(--display); letter-spacing: .08em; text-decoration: none; color: var(--muted); }
+  h1 { font: 800 clamp(40px, 9vw, 64px)/0.95 var(--display); letter-spacing: .02em; margin: 22px 0 10px; text-wrap: balance; }
+  h2 { font: 700 24px/1.15 var(--display); letter-spacing: .04em; margin: 34px 0 8px; text-transform: uppercase; }
+  .lede { color: var(--muted); font-size: 17px; margin: 0; }
+  .key { margin-top: 26px; padding: 16px 18px; border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 0 8px 8px 0; background: var(--panel); }
+  .key p { margin: 0; }
+  ul { padding-left: 20px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  code { font: 13px/1.4 ui-monospace, 'SFMono-Regular', Consolas, monospace; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  .tbl { overflow-x: auto; margin-top: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  footer { margin-top: 44px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="../">← IRON ECHO</a>
+  <h1>Камера и данные</h1>
+  <p class="lede">Коротко и без юридического тумана: что игра делает с камерой, что сохраняет у тебя в браузере и что отправляет на сервер.</p>
+
+  <div class="key"><p><b>Видео с камеры никуда не уходит.</b> Распознавание движений работает прямо в браузере, на твоём компьютере:
+    из каждого кадра получаются 33 точки скелета, и по ним игра узнаёт удары, блоки и уклоны. Кадры не сохраняются и не отправляются.
+    Единственное исключение — онлайн-дуэль, если ты сам включил «Показывать моё видео сопернику» (ниже).</p></div>
+
+  <h2>Камера</h2>
+  <ul>
+    <li>Модель распознавания (MediaPipe Pose) и библиотеки загружаются с этого же сайта; кадры обрабатываются локально.</li>
+    <li>Доступ к камере браузер спрашивает сам; отозвать его можно в настройках сайта в браузере (значок слева от адреса).</li>
+    <li>Режим «Помочь улучшить камеру» (<code>?collect=1</code>) сохраняет у тебя файл с точками скелета — без видео. Отправить его или нет, решаешь ты.</li>
+  </ul>
+
+  <h2>Онлайн-дуэль и телефон как камера</h2>
+  <ul>
+    <li>Два браузера соединяются напрямую (WebRTC). По соединению идут вводы боя, а видео — только если включено «Показывать моё видео сопернику».</li>
+    <li>Чтобы найти друг друга, браузеры используют публичный сервер связи PeerJS (<code>0.peerjs.com</code>) и STUN-серверы Google и Twilio: они видят IP-адреса устройств, но не содержимое боя.</li>
+  </ul>
+
+  <h2>Анонимная статистика</h2>
+  <p>Чтобы понять, где игра ломается и что мешает людям, игра отправляет короткие события. Можно выключить: меню → «Настройки» → «Статистика: выкл».
+    Если в браузере включено «Не отслеживать» (Do Not Track), статистика выключена сама.</p>
+  <div class="tbl"><table>
+    <tr><th>Что отправляется</th><th>Чего нет</th></tr>
+    <tr><td>случайный номер браузера (создаётся в браузере, не связан с тобой), номер визита;<br>
+      этапы: открыл, нажал «В ринг», камера включилась или нет и почему, начал и закончил бой, реванш, пройденные соперники;<br>
+      частота кадров, тип браузера и системы (например, «chrome-win»), семейство видеокарты, страна по сети (две буквы), версия игры, ошибки страницы;<br>
+      ответ на «Что мешало в этом бою?» — если ты его отправил</td>
+      <td>имён, почты, IP-адресов, видео, точек скелета, cookies</td></tr>
+  </table></div>
+
+  <h2>Рейтинг</h2>
+  <ul>
+    <li>Только если ты вписал ник. Сохраняются ник, рейтинг и итог каждого боя. Запись боя (нажатия по времени) отправляется, чтобы сервер
+      проверил результат, пересчитав бой сам; хранится только её отпечаток.</li>
+    <li>Ник виден в общей таблице. Не используй своё настоящее имя, если не хочешь.</li>
+  </ul>
+
+  <h2>В твоём браузере</h2>
+  <p>В <code>localStorage</code> лежат настройки, прогресс по лестнице соперников, отметка о пройденном обучении, профиль рейтинга
+    и номер для статистики. Очистка данных сайта в браузере удаляет всё это.</p>
+
+  <h2>Где это хранится</h2>
+  <p>Сайт размещён на Vercel; статистика и рейтинг — в базе Supabase. У хостинга, как у любого сайта, есть свои технические журналы запросов.</p>
+
+  <footer>IRON ECHO · версия 1.11.0 · страница обновлена вместе с игрой</footer>
+</main>
+</body>
+</html>

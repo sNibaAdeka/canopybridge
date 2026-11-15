@@ -87,6 +87,9 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
     if "@@" in page:
         raise SystemExit("public/index.html: unfilled placeholder")
     (out / "index.html").write_text(page, encoding="utf-8")
+    privacy = (here / "public" / "privacy.html").read_text(encoding="utf-8").replace("@@VERSION@@", version)
+    (out / "privacy").mkdir(exist_ok=True)
+    (out / "privacy" / "index.html").write_text(privacy, encoding="utf-8")  # 1.11: what the camera and the statistics do
     (out / "_headers").write_text(HEADERS, encoding="utf-8")
     shutil.copy2(here / "public" / "netlify.toml", out / "netlify.toml")
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
@@ -96,14 +99,19 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
 
 # ------------------------------------------------------------------------------------------------------------- release
 # Tools/Build/Web/release: the deployable website, committed so a static host (Vercel, Netlify) can build it straight from
-# the public GitHub repository. Lighter than Build/Web/public: /play is the single-file game (Build/Web/IronEcho-Public.html,
-# assets inlined; three.js/MediaPipe from their CDNs), the Windows app is in /download.
+# the public GitHub repository. /play is the standalone game (1.11): the page, its assets and every library and the pose model from
+# the site's own domain, so a blocked or slow CDN cannot stop the camera; the Windows app is in /download.
 VERCEL_JSON = {
     "functions": {"api/ratings.mjs": {"maxDuration": 30, "memory": 1024},  # replays a whole bout on the rules core: about a second
                   "api/events.mjs": {"maxDuration": 10, "memory": 256}},       # anonymous telemetry batches
+    # once a day: a cheap read of the rating table, so that the free database is never idle long enough to be paused (Supabase pauses
+    # a free project after a week without activity: then the rating and the telemetry stop)
+    "crons": [{"path": "/api/ratings", "schedule": "23 5 * * *"}],
     "headers": [
         {"source": "/play/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}]},
         {"source": "/phone/(.*)", "headers": [{"key": "Permissions-Policy", "value": "camera=(self), microphone=()"}, {"key": "Cache-Control", "value": "no-cache"}]},
+        {"source": "/play/vendor/(.*)", "headers": [{"key": "Cache-Control", "value": "public, max-age=604800"}]},  # libraries, the model
+        {"source": "/play/assets/(.*)", "headers": [{"key": "Cache-Control", "value": "public, max-age=86400"}]},   # robots, arena
         {"source": "/download/(.*)", "headers": [{"key": "Content-Disposition", "value": "attachment"}]},
         {"source": "/(.*)", "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}]},
     ],
@@ -131,6 +139,7 @@ def build_rating_server(here: Path, out_root: Path, out: Path, game: Path) -> No
     (api / "core_build.mjs").write_text(f'export const CORE_WASM_B64 = "{b64}";\n', encoding="utf-8")
     shutil.copy2(here / "api" / "rating_schema.sql", out / "rating_schema.sql")
     shutil.copy2(here / "api" / "events_schema.sql", out / "events_schema.sql")
+    shutil.copy2(here / "api" / "events_report.sql", out / "events_report.sql")
     for name in ("core.js", "replay.js", "ratingrules.js", "rating.js", "telemetry.js"):
         shutil.copy2(here / "site" / "src" / name, lib / name)
     # the page modules are ES modules: the function's package says so
@@ -140,31 +149,26 @@ def build_rating_server(here: Path, out_root: Path, out: Path, game: Path) -> No
 def build_release(project: Path, here: Path, out_root: Path) -> Path:
     import json
 
-    from site_build import CDN_FONTS  # noqa: E402 (sibling module)
-
     public = out_root / "public"
-    game = out_root / "IronEcho-Public.html"
+    site_page = out_root / "standalone_site.html"
     if not (public / "index.html").exists():
         raise SystemExit("run build_web.py public first")
-    if not game.exists() or RELEASE_DOWNLOAD_URL not in game.read_text(encoding="utf-8"):
-        raise SystemExit(f"build the single page with IRONECHO_DOWNLOAD_URL={RELEASE_DOWNLOAD_URL} (build_web.py site)")
+    if not site_page.exists() or RELEASE_DOWNLOAD_URL not in site_page.read_text(encoding="utf-8"):
+        raise SystemExit(f"build the site with IRONECHO_DOWNLOAD_URL={RELEASE_DOWNLOAD_URL} and IRONECHO_WEBDEPS (build_web.py site)")
     out = here / "release"
     out.mkdir(exist_ok=True)
     for p in list(out.iterdir()):  # generated content; README.md stays
         if p.name == "README.md":
             continue
         shutil.rmtree(p) if p.is_dir() else p.unlink()
-    landing = (public / "index.html").read_text(encoding="utf-8")
-    local_fonts = '<link rel="stylesheet" href="play/vendor/fonts/fonts.css">'
-    if local_fonts not in landing:
-        raise SystemExit("landing page: fonts link not found")
-    (out / "index.html").write_text(landing.replace(local_fonts, CDN_FONTS), encoding="utf-8")
-    (out / "play").mkdir()
-    shutil.copy2(game, out / "play" / "index.html")
-    shutil.copy2(public / "play" / "vendor" / "peerjs" / "peerjs.min.js", out / "play" / "peerjs.min.js")  # online duel
-    shutil.copy2(public / "play" / "vendor" / "qrcode" / "qrcode.mjs", out / "play" / "qrcode.mjs")  # QR code of the phone camera
-    shutil.copy2(public / "play" / "vendor" / "mediapipe" / "vision_bundle_worker.js", out / "play" / "vision_bundle_worker.js")  # pose Web Worker
-    phone = (here / "site" / "phone.template.html").read_text(encoding="utf-8").replace("@@PEERJS@@", "../play/peerjs.min.js")
+    # 1.11: the landing keeps its own fonts (play/vendor/fonts, served by this site): no third-party host on any page
+    shutil.copy2(public / "index.html", out / "index.html")
+    shutil.copytree(public / "privacy", out / "privacy")
+    # the game: the standalone folder without the heavy model (SITE_DEPS sends «Высокая» to Google's storage for it)
+    shutil.copytree(out_root / "standalone", out / "play", ignore=shutil.ignore_patterns("pose_landmarker_heavy.task"))
+    shutil.copy2(site_page, out / "play" / "index.html")
+    game = out / "play" / "index.html"
+    phone = (here / "site" / "phone.template.html").read_text(encoding="utf-8").replace("@@PEERJS@@", "../play/vendor/peerjs/peerjs.min.js")
     (out / "phone").mkdir()
     (out / "phone" / "index.html").write_text(phone, encoding="utf-8")  # the phone's side of the second camera
     shutil.copytree(public / "media", out / "media")
