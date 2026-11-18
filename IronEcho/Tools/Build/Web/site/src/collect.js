@@ -212,13 +212,13 @@ export class CollectMode {
     const style = document.createElement('style');
     style.textContent = `#collect{position:absolute;inset:0;z-index:30;display:grid;place-items:center;pointer-events:none;font:500 15px/1.45 Inter,system-ui,sans-serif;color:#e8ecf2}
       #collect .cl-card{pointer-events:auto;width:min(92vw,620px);background:rgba(10,11,14,.95);border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:20px 22px}
-      #collect .cl-title{display:block;font:800 28px/1.1 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.04em;margin-bottom:10px}
+      #collect .cl-title{display:block;font:700 28px/1.1 Oswald,Arial Narrow,sans-serif;letter-spacing:.04em;margin-bottom:10px}
       #collect .cl-body p{margin:6px 0}#collect .cl-body label{display:block;margin:6px 0}#collect .cl-body select{margin-left:6px}
       #collect .cl-btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
       #collect button{background:#1d2530;color:#e8ecf2;border:1px solid rgba(255,255,255,.18);border-radius:6px;padding:9px 16px;font:700 14px Inter,system-ui,sans-serif;cursor:pointer}
       #collect button.primary{background:#3f7dff;border-color:#3f7dff}
       #collect .cl-cue{pointer-events:auto;position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);text-align:center;width:min(94vw,820px)}
-      #collect .cl-text{font:800 clamp(40px,7vw,86px)/1.05 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.03em;text-shadow:0 2px 14px #000}
+      #collect .cl-text{font:700 clamp(40px,7vw,86px)/1.05 Oswald,Arial Narrow,sans-serif;letter-spacing:.03em;text-shadow:0 2px 14px #000}
       #collect .cl-text.go{color:#c8f06a}#collect .cl-count{font:700 15px Inter,system-ui,sans-serif;color:#9aa3ae;margin-bottom:8px}
       #collect .cl-bar{height:6px;margin:16px auto 12px;width:60%;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden}#collect .cl-bar i{display:block;height:100%;width:0;background:#3f7dff}
       #collect .cl-ctl{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}`;

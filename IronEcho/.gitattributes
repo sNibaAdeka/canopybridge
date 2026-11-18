@@ -31,3 +31,5 @@ Docs/Reports/**/*.png -filter -diff -merge -text binary
 Docs/Reports/**/*.jpg -filter -diff -merge -text binary
 # deployable website (served straight from GitHub by static hosts): plain git, no LFS
 Tools/Build/Web/release/** -filter -diff -merge -text binary
+# the website's opponent portraits (Tools/Build/Web/portraits.js): small, copied into the site by the build — plain git, no LFS
+Tools/Build/Web/public/foes/** -filter -diff -merge -text binary

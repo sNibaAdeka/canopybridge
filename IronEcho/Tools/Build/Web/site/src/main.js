@@ -269,6 +269,16 @@ function resize() {
   app.baseFov = 46 + 20 * app.narrow;
   app.camera.fov = app.baseFov;
   app.camera.updateProjectionMatrix();
+  measureMenuEdge();
+}
+function measureMenuEdge() {
+  const m = $('#menu');
+  if (!m || m.hidden) return;
+  const w = Math.max(1, window.innerWidth);
+  app.menuEdge = Math.min(0.6, m.getBoundingClientRect().right / w);
+  const plate = $('#menu-foe');
+  const pr = plate && plate.offsetParent ? plate.getBoundingClientRect() : null;
+  app.menuPlate = pr && pr.width ? Math.max(app.menuEdge + 0.2, pr.left / w) : 1; // the robot stands between the sidebar and the plate
 }
 
 // ---------------------------------------------------------------- flow
@@ -314,6 +324,8 @@ function startBout(versus, cfg) {
   app.lastPhase = '';
   app.intro = 3.2;
   resetStage();
+  app.holders.player.face.visible = true; // the menu's showcase hides the player's robot
+  app.menuFoeShown = undefined;
   app.rigs.opponent.root.visible = !app.training;
   app.bag.group.visible = app.training;
   app.state = 'playing';
@@ -658,6 +670,9 @@ function onMatch(e, snap) {
 function showResults(snap) {
   const ladderRung = !app.versus && app.boutCfg ? app.boutCfg.rung : -1;
   app.hud.results(snap, ladderRung >= 0 ? [NAMES[0], LADDER[ladderRung].name] : NAMES);
+  const resPic = $('#res-pic'); // 1.12: the ladder opponent's portrait next to the verdict
+  resPic.src = ladderRung >= 0 ? portraitOf(ladderRung) : '';
+  resPic.hidden = !resPic.src;
   const m = snap.match;
   const me = snap[meKey()];
   const foe = snap[meKey() === 'player' ? 'opponent' : 'player'];
@@ -744,6 +759,76 @@ function useOpponent(foe) {
   app.anim.opponent.setStyle(foe ? foe.body : null);
 }
 
+// 1.12: a portrait of every ladder opponent, taken once from its own robot, paint and stance (the menu's ladder, the card before a bout,
+// the website). Drawn into the bottom-left corner of the canvas and copied out in the same task, so it has the ring's tone mapping and
+// colour; the next frame paints over the corner. Returns JPEG data URLs, or null when the window is too small to hold one (try later).
+function renderPortraits(w = 160, h = 200, quality = 0.86) {
+  const r = app.renderer;
+  const cv = r.domElement;
+  const pr = r.getPixelRatio();
+  if (cv.width < w * pr || cv.height < h * pr) return null;
+  const cam = new THREE.PerspectiveCamera(30, w / h, 0.05, 80);
+  const op = app.holders.opponent;
+  const keep = { player: app.holders.player.face.visible, bag: app.bag.group.visible, pos: op.face.position.clone(), rot: op.face.rotation.y };
+  app.holders.player.face.visible = false;
+  app.bag.group.visible = false;
+  const out = [];
+  try {
+    for (const f of LADDER) {
+      useOpponent(f);
+      app.rigs.opponent.root.visible = true;
+      op.face.position.set(0, 0, 0);
+      op.face.rotation.y = Math.PI;
+      op.tilt.rotation.z = 0;
+      for (let k = 0; k < 45; k++) app.anim.opponent.update(1 / 60, IDLE, { gap: 1.35, phase: 'Menu' });
+      // from his right-front: a boxer stands bladed, lead shoulder forward, so this is the side his chest and both gloves face
+      cam.position.set(-2.2, 1.42, -0.72); // a touch below the eyes and back far enough for the whole head with some air above it
+      cam.lookAt(0, 1.56, -0.04);
+      updateRingOcclusion(app.ring, cam.position, { x: 0, y: 1.3, z: 0 }, 1);
+      r.setScissorTest(true);
+      r.setViewport(0, 0, w, h);
+      r.setScissor(0, 0, w, h);
+      r.render(app.scene, cam);
+      const c = document.createElement('canvas');
+      c.width = Math.round(w * pr);
+      c.height = Math.round(h * pr);
+      c.getContext('2d').drawImage(cv, 0, cv.height - c.height, c.width, c.height, 0, 0, c.width, c.height);
+      out.push(c.toDataURL('image/jpeg', quality));
+    }
+  } finally {
+    r.setScissorTest(false);
+    const size = r.getSize(new THREE.Vector2());
+    r.setViewport(0, 0, size.x, size.y);
+    app.holders.player.face.visible = keep.player;
+    app.bag.group.visible = keep.bag;
+    op.face.position.copy(keep.pos);
+    op.face.rotation.y = keep.rot;
+    app.menuFoeShown = undefined; // the menu puts its own opponent back
+  }
+  return out;
+}
+app.renderPortraits = renderPortraits; // the website's opponent cards are made from these (Tools/Build/Web/portraits.js)
+const portraitOf = (rung) => (app.portraits && app.portraits[rung]) || '';
+
+// 1.12: the menu as a fighter-select screen. On a wide screen the menu is a sidebar and the next opponent stands in the ring to its right,
+// with a name plate; elsewhere (phones, narrow windows) the old slow orbit around both robots behind a centred menu.
+const menuFoe = () => (settings.level < 0 && settings.mode !== 'training' ? career.current() : -1);
+const showcaseOn = () => !!globalThis.matchMedia && matchMedia('(min-width: 900px) and (min-aspect-ratio: 6/5)').matches;
+function syncMenuFoe() {
+  const el = $('#menu-foe');
+  if (!el) return;
+  const r = menuFoe();
+  const f = r >= 0 ? LADDER[r] : null;
+  el.querySelector('.mf-n').textContent = settings.mode === 'training' ? 'ТРЕНИРОВКА' : f
+    ? (r === LADDER.length - 1 ? `БОЙ ЗА ТИТУЛ · ${r + 1} из ${LADDER.length}` : `СЛЕДУЮЩИЙ БОЙ · ${r + 1} из ${LADDER.length}`) : 'СВОБОДНЫЙ БОЙ';
+  el.querySelector('.mf-name').textContent = settings.mode === 'training' ? 'ГРУША' : f ? f.name : NAMES[1];
+  el.querySelector('.mf-title').textContent = settings.mode === 'training' ? 'без таймера' : f ? f.title : `${LEVEL_LABEL[Math.max(0, settings.level)] || ''}`;
+  el.querySelector('.mf-style').textContent = settings.mode === 'training' ? 'Отработай удары и серии: груша не бьёт в ответ.' : f ? f.style : 'Бой вне лестницы: идёт в общий рейтинг, если вписан ник.';
+  const pips = el.querySelector('.mf-pips');
+  pips.textContent = '';
+  if (f) LADDER.forEach((_, i) => { const p = document.createElement('i'); p.className = career.beaten.includes(i) ? 'done' : i === r ? 'now' : ''; pips.append(p); });
+}
+
 // The card before a ladder bout: who it is, how it fights, what works against it. Shown during the flyover and the countdown.
 function showVsCard(rung) {
   const el = $('#vs-card');
@@ -754,6 +839,9 @@ function showVsCard(rung) {
   el.querySelector('.vs-title').textContent = f.title;
   el.querySelector('.vs-style').textContent = f.style;
   el.querySelector('.vs-tip').textContent = f.tip;
+  const pic = el.querySelector('.vs-pic');
+  pic.src = portraitOf(rung);
+  pic.hidden = !pic.src;
   el.hidden = false;
   app.vsCardFor = rung;
 }
@@ -773,7 +861,9 @@ function renderLadder() {
     b.className = `rung${done ? ' done' : ''}${r === cur ? ' now' : ''}${open ? '' : ' locked'}`;
     b.disabled = !open;
     b.title = open ? `${f.name}, ${f.title}: ${f.style}` : 'Откроется, когда победишь предыдущего';
-    b.innerHTML = `<i>${r + 1}</i><b></b><small></small>`;
+    b.innerHTML = `<span class="pic"><img alt=""><i>${r + 1}</i></span><b></b><small></small>`;
+    const img = b.querySelector('img');
+    if (portraitOf(r)) img.src = portraitOf(r); else img.hidden = true;
     b.querySelector('b').textContent = open ? f.name : '???';
     b.querySelector('small').textContent = done ? 'побеждён' : r === cur ? 'следующий' : open ? f.title : 'закрыт';
     b.addEventListener('click', () => { career.pick = r === career.next ? null : r; syncMenu(); });
@@ -1446,15 +1536,47 @@ function step(dt, input, now) {
     app.hud.update(snap, dt, app.training, app.roundLength || 90);
     updateCamera(dt, snap);
   } else {
-    // menu: slow orbit around the ring
+    if (app.portraits === undefined && !app.debugNoRender && app.state === 'menu') {
+      try { app.portraits = renderPortraits() || undefined; } catch (err) { app.portraits = null; console.error(err); }
+      if (app.portraits) { renderLadder(); if (app.vsCardFor >= 0) showVsCard(app.vsCardFor); }
+    }
     const t = now / 1000;
-    app.camera.position.set(Math.cos(t * 0.08) * 6.5, 2.4, Math.sin(t * 0.08) * 6.5);
-    app.camera.lookAt(0, 1.0, 0);
-    updateRingOcclusion(app.ring, app.camera.position, { x: 0, y: 1, z: 0 }, dt);
-    app.anim.player.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
-    app.anim.opponent.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
     resetStage();
     placeFighters({ player: { position: -0.675 }, opponent: { position: 0.675 } });
+    const r = menuFoe();
+    if (app.state === 'menu' && app.menuFoeShown !== r) { // the next opponent's frame and paint stand in the ring
+      useOpponent(r >= 0 ? LADDER[r] : null);
+      app.rigs.opponent.root.visible = settings.mode !== 'training';
+      app.bag.group.visible = settings.mode === 'training';
+      app.bag.group.position.copy(stagePoint(0.775));
+      app.menuFoeShown = r;
+    }
+    const showcase = app.state === 'menu' && showcaseOn();
+    app.holders.player.face.visible = !showcase;
+    if (showcase) {
+      // three-quarter view of the opponent from the player's corner; the look point slides left so that he stands in the middle of the
+      // free part of the screen, right of the sidebar
+      const o = stagePoint(0.675);
+      const a = 0.42 + 0.07 * Math.sin(t * 0.17);
+      const d = 3.0 + 0.12 * Math.sin(t * 0.11);
+      app.camera.position.set(o.x - Math.cos(a) * d, 1.48, o.z - Math.sin(a) * d); // his right-front (see renderPortraits)
+      const look = new THREE.Vector3(o.x, 1.18, o.z);
+      const fwd = look.clone().sub(app.camera.position).normalize();
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+      const edge = app.menuEdge || 0.34; // the sidebar's right edge, as a share of the width
+      const want = edge + ((app.menuPlate || 1) - edge) / 2;
+      const tanH = Math.tan(THREE.MathUtils.degToRad(app.camera.fov / 2)) * app.camera.aspect;
+      look.addScaledVector(right, -(want - 0.5) * 2 * d * tanH);
+      app.camera.lookAt(look);
+      updateRingOcclusion(app.ring, app.camera.position, { x: o.x, y: 1.1, z: o.z }, dt);
+    } else {
+      // slow orbit around the ring
+      app.camera.position.set(Math.cos(t * 0.08) * 6.5, 2.4, Math.sin(t * 0.08) * 6.5);
+      app.camera.lookAt(0, 1.0, 0);
+      updateRingOcclusion(app.ring, app.camera.position, { x: 0, y: 1, z: 0 }, dt);
+    }
+    app.anim.player.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
+    app.anim.opponent.update(dt, IDLE, { gap: 1.35, phase: 'Menu' });
   }
 }
 
@@ -1542,6 +1664,8 @@ function syncMenu() {
   const who = settings.level < 0 ? `Бой ${r + 1} из ${LADDER.length}: ${LADDER[r].name}, ${LADDER[r].title}` : LEVEL_LABEL[settings.level] || '';
   $('#menu-now').textContent = `${settings.mode === 'training' ? '' : `${who} · `}${MODE_LABEL[settings.mode] || ''}${ctl}`;
   renderLadder();
+  syncMenuFoe();
+  requestAnimationFrame(measureMenuEdge);
   $('#profile').hidden = !(rating.enabled && (rating.nick || boutsDone() >= 1));
 }
 
@@ -1631,7 +1755,7 @@ function wireMenu() {
   $('#start').classList.toggle('go-alt', CAMERA_READY);
   if (CAMERA_READY) $('#start').textContent = TOUCH ? 'БЕЗ КАМЕРЫ — КНОПКИ НА ЭКРАНЕ' : 'БЕЗ КАМЕРЫ — КЛАВИАТУРА';
   if (TOUCH) $('#start-cam small').textContent = 'с камерой телефона: поставь его в 2 м и бей руками';
-  $('#cam-h').hidden = $('#cam-how').hidden = !CAMERA_READY; // a build without the camera shows the keys
+  $('#how-fold').hidden = !CAMERA_READY; // a build without the camera shows the keys
   $('#keys-fold').open = !CAMERA_READY;
   $('#start-cam').addEventListener('click', () => { pickControl(true); goRing('camera-main'); });
   $('#start').addEventListener('click', () => { if (CAMERA_READY) pickControl(false); goRing('menu'); });

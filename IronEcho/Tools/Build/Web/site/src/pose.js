@@ -1119,7 +1119,7 @@ export class CameraInput {
     style.textContent = `#cam{position:absolute;right:16px;top:calc(env(safe-area-inset-top,0px) + 92px);width:min(30vw,300px);aspect-ratio:4/3;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#000;z-index:5;pointer-events:none}
       #cam video,#cam canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
       #cam .cam-msg{position:fixed;left:50%;bottom:24%;transform:translateX(-50%);width:min(90vw,560px);text-align:center;background:rgba(10,11,14,.88);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:14px 18px}
-      #cam .cam-msg b{font:800 26px/1.15 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.05em;color:#fff}
+      #cam .cam-msg b{font:700 26px/1.15 Oswald,Arial Narrow,sans-serif;letter-spacing:.05em;color:#fff}
       #cam .cam-msg small{display:block;margin-top:8px;color:#9aa3ae;font:500 13px/1.35 Inter,system-ui,sans-serif}
       #cam .cam-bar{height:8px;margin-top:10px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
       #cam .cam-q{position:absolute;left:0;right:0;bottom:0;padding:3px 6px;background:rgba(10,11,14,.78);font:600 11px/1.3 Inter,system-ui,sans-serif;color:#e8ecf2}
@@ -1339,7 +1339,7 @@ export class CameraInput {
       #cam2 .cam-q.good i{background:#3ddc84}#cam2 .cam-q.warn i{background:#ffb020}#cam2 .cam-q.bad i{background:#ff4b3e}
       #cam-link{position:absolute;left:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:7;width:min(92vw,360px);
         background:rgba(10,11,14,.95);border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:12px 14px;color:#e8ecf2;font:500 13px/1.4 Inter,system-ui,sans-serif}
-      #cam-link b{font:800 20px/1.1 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.05em}
+      #cam-link b{font:700 20px/1.1 Oswald,Arial Narrow,sans-serif;letter-spacing:.05em}
       #cam-link .pp-row{display:flex;gap:10px;flex-direction:column;margin:8px 0}
       #cam-link .pp-ph{display:flex;gap:12px;align-items:center;min-width:0}
       #cam-link .pp-state{margin:4px 0 6px;font-weight:700;color:#c9d3e0}#cam-link .pp-state.ok{color:#3ddc84}#cam-link .pp-state.off{color:#ffb020}
@@ -1600,7 +1600,7 @@ export class CameraInput {
       font:500 14px/1.45 Inter,system-ui,sans-serif}
       #phone-pair .pp-qr{flex:none;background:#fff;padding:10px;border-radius:6px;line-height:0}
       #phone-pair .pp-qr img{width:220px;height:220px;image-rendering:pixelated}
-      #phone-pair b{font:800 26px/1.1 "Barlow Condensed",Arial Narrow,sans-serif;letter-spacing:.05em}
+      #phone-pair b{font:700 26px/1.1 Oswald,Arial Narrow,sans-serif;letter-spacing:.05em}
       #phone-pair ol{margin:10px 0 8px;padding-left:20px}#phone-pair .pp-status{margin:6px 0;color:#8fb3ff;font-weight:600}#phone-pair small{display:block;color:#9aa3ae;word-break:break-all}
       @media (max-width:640px){#phone-pair{flex-direction:column;text-align:left}}`;
     document.head.appendChild(style);
@@ -1785,7 +1785,7 @@ export class CameraInput {
     // the picture is shown mirrored (CSS): the words are drawn mirrored too, so that they read the right way round
     ctx.translate(x, y - 34);
     ctx.scale(-1, 1);
-    ctx.font = '800 26px Barlow Condensed, Inter, system-ui, sans-serif';
+    ctx.font = '700 26px Oswald, Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 6;
     ctx.strokeStyle = 'rgba(10,11,14,0.85)';

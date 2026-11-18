@@ -17,7 +17,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-GAME_VERSION = "1.11.0"  # shown in the menu, the Windows app and the website
+GAME_VERSION = "1.12.0"  # shown in the menu, the Windows app and the website
 HEAD_RENDER = Path(__file__).resolve().parents[3] / "Docs" / "Reports" / "2026-10-04_head_gloves_v3" / "head_closeup.jpg"
 MODULES = ["core", "rig", "anim", "arena", "fx", "audio", "input", "hud", "main"]
 CAMERA_MODULES = ["pose"]
@@ -123,7 +123,8 @@ def compress_for_camera(assets: Path, site_assets: Path, out: Path) -> None:
             shutil.copy2(p, out / p.name)
 
 
-FONTS_CSS_URL = ("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800"
+# 1.12: Oswald for the display type: Barlow Condensed has no Cyrillic, so every Russian heading fell back to a wide system font
+FONTS_CSS_URL = ("https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700"
                  "&family=Inter:wght@400;500;600&display=swap")
 CDN_FONTS = ('<link rel="preconnect" href="https://fonts.googleapis.com">\n'
              '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
@@ -285,6 +286,9 @@ def local_fonts(cache: Path, dst: Path) -> str:
     """Google Fonts CSS + woff2 files copied locally (cached in Build/Web/fonts); system fonts if offline."""
     import urllib.request
 
+    import hashlib
+
+    cache = cache / hashlib.sha1(FONTS_CSS_URL.encode()).hexdigest()[:10]  # a new font list fetches anew
     css_path = cache / "fonts.css"
     if not css_path.exists():
         try:

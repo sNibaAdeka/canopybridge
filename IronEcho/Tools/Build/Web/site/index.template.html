@@ -19,7 +19,7 @@
     --good: #5ee08a;
     --bad: #ff5a4a;
     --hp: linear-gradient(90deg, #e9edf2, #ffffff);
-    --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+    --display: "Oswald", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
     --text: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   }
   html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); overflow: hidden; }
@@ -304,6 +304,97 @@
   @media (max-height: 700px) { .go-big { padding: 14px; font-size: 28px; margin-top: 14px; } }
   /* touch screens: the keyboard table is noise; the on-screen pad has its own labels */
   @media (hover: none) and (pointer: coarse) { #menu .keys, #menu #keys-fold, #menu a.dl-win, #menu .menu-side > .side-h { display: none; } }
+
+  /* ---------- 1.12: the design pass ---------- */
+  /* Oswald (with Cyrillic) is the display face now; its 700 is the heaviest weight */
+  .brand { font-weight: 700; letter-spacing: 0.03em; }
+  .brand span { text-shadow: 0 0 34px rgba(255,75,43,0.35); }
+  /* banners: slanted, with a hard coloured shadow, slammed in */
+  #banner-main { display: inline-block; font: 700 clamp(44px, 8.5vw, 112px)/0.95 var(--display); letter-spacing: 0.02em; color: #fff;
+    transform: skewX(-7deg); text-shadow: 5px 5px 0 rgba(63,125,255,0.85), 0 10px 40px rgba(0,0,0,0.65); }
+  #banner.on #banner-main { animation: slam 420ms cubic-bezier(.2,.9,.3,1.15) both; }
+  @keyframes slam { 0% { opacity: 0; transform: skewX(-7deg) scale(1.4); } 55% { opacity: 1; transform: skewX(-7deg) scale(0.97); } 100% { transform: skewX(-7deg) scale(1); } }
+  #banner.good #banner-main { color: #fff; text-shadow: 5px 5px 0 rgba(255,75,43,0.9), 0 10px 40px rgba(0,0,0,0.65); }
+  #banner.bad #banner-main { color: #ffd2cb; text-shadow: 5px 5px 0 rgba(120,16,8,0.95), 0 10px 40px rgba(0,0,0,0.65); }
+  #banner.warn #banner-main { color: #ffe9c7; text-shadow: 5px 5px 0 rgba(150,90,0,0.9), 0 10px 40px rgba(0,0,0,0.65); }
+  #banner-sub { font: 600 15px/1.35 var(--text); color: #e3e7ed; letter-spacing: 0.03em; margin-top: 14px; text-shadow: 0 2px 10px #000; }
+  #banner.high #banner-main { font-size: clamp(44px, 7.5vw, 96px); }
+  #count { font-weight: 700; }
+  .callout { font-weight: 600; letter-spacing: 0.08em; }
+  #combo { font-weight: 700; transform: skewX(-7deg); }
+  .clock .time { font-weight: 600; }
+  .fighter .name { font-weight: 600; letter-spacing: 0.05em; }
+  /* the ladder: a portrait per opponent; the locked ones are dark with a question mark, the beaten ones ticked */
+  .ladder .rung { padding: 0 0 6px; gap: 0; overflow: hidden; background: #0c0e12; }
+  .ladder .rung .pic { position: relative; display: block; width: 100%; aspect-ratio: 4 / 5; overflow: hidden;
+    background: radial-gradient(120% 80% at 50% 25%, #2a303b, #0c0e12 72%); }
+  .ladder .rung .pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .ladder .rung .pic i { position: absolute; left: 5px; top: 4px; font: 700 12px/1 var(--display); color: #fff; text-shadow: 0 1px 4px #000; }
+  .ladder .rung b { margin-top: 6px; font: 700 13px/1 var(--display); letter-spacing: 0.04em; }
+  .ladder .rung small { margin-top: 3px; }
+  .ladder .rung.locked { opacity: 1; }
+  .ladder .rung.locked .pic img { filter: brightness(0.09) saturate(0); }
+  .ladder .rung.locked .pic::after { content: '?'; position: absolute; inset: 0; display: grid; place-items: center; font: 700 30px/1 var(--display);
+    color: rgba(255,255,255,0.3); }
+  .ladder .rung.locked b, .ladder .rung.locked small { color: var(--faint); }
+  .ladder .rung.done .pic::after { content: '✓'; position: absolute; right: 4px; top: 4px; width: 17px; height: 17px; border-radius: 50%;
+    background: var(--good); color: #052b14; font: 700 11px/17px var(--text); text-align: center; }
+  .ladder .rung.now { border-color: var(--red); box-shadow: 0 0 0 1px var(--red), 0 0 22px rgba(255,75,43,0.35); background: #170d0b; }
+  .ladder .rung.now small { color: #ffb3a6; }
+  /* the card before a ladder bout: portrait, slanted name */
+  #vs-card { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: end; }
+  #vs-card .vs-pic { width: 84px; height: 105px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
+  #vs-card .vs-head { min-width: 0; }
+  #vs-card .vs-pic[hidden] + .vs-head { grid-column: 1 / -1; }
+  #vs-card p { grid-column: 1 / -1; }
+  #vs-card .vs-name { font: 700 46px/0.95 var(--display); color: #fff; transform: skewX(-6deg); transform-origin: left bottom;
+    text-shadow: 3px 3px 0 rgba(255,75,43,0.85); }
+  /* results: no empty rows, the verdict slanted, the opponent's portrait beside it */
+  #results .res-rating:empty, #results .res-judges:empty { display: none; }
+  #results .res-title { font-weight: 700; transform: skewX(-6deg); transform-origin: left bottom; margin-right: 92px; }
+  #results .res-title.win { color: #fff; text-shadow: 4px 4px 0 rgba(36,160,90,0.9), 0 0 30px rgba(94,224,138,0.3); }
+  #results .res-title.lose { color: #ffd6d0; text-shadow: 4px 4px 0 rgba(120,16,8,0.95); }
+  #results .res-pic { float: right; width: 76px; height: 95px; margin: 0 0 6px 12px; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); }
+  #results .res-pic[hidden] + .res-title { margin-right: 0; }
+  #results .res-chips { clear: both; }
+  /* the opponent's name plate on the stage (wide screens): see #menu-foe below */
+  #menu-foe { display: none; }
+  /* a soft shadow behind the plate: its words often fall on the light canvas of the ring */
+  #menu-foe::before { content: ''; position: absolute; inset: -48px -36px -40px -90px; z-index: -1;
+    background: radial-gradient(closest-side, rgba(5,6,9,0.62), rgba(5,6,9,0.38) 60%, transparent); }
+  #menu-foe .mf-n, #menu-foe .mf-title { text-shadow: 0 1px 2px #000, 0 2px 12px rgba(0,0,0,0.9); }
+  #menu-foe .mf-n { display: block; font: 600 13px/1 var(--display); letter-spacing: 0.22em; color: var(--amber); text-transform: uppercase; }
+  #vs-card .vs-n { text-transform: uppercase; }
+  #menu-foe .mf-name { display: block; margin-top: 10px; font: 700 clamp(60px, 7.2vw, 108px)/0.9 var(--display); letter-spacing: 0.02em; color: #fff;
+    transform: skewX(-6deg); transform-origin: right bottom; text-shadow: 5px 5px 0 rgba(255,75,43,0.85), 0 12px 40px rgba(0,0,0,0.6); }
+  #menu-foe .mf-title { display: block; margin-top: 12px; font: 600 17px/1 var(--display); letter-spacing: 0.22em; text-transform: uppercase; color: #ffd6cc; }
+  #menu-foe .mf-style { margin: 10px 0 0 auto; max-width: 30ch; font: 500 14px/1.45 var(--text); color: #c9d0d9; text-shadow: 0 2px 10px rgba(0,0,0,0.9); }
+  #menu-foe .mf-pips { display: flex; justify-content: flex-end; gap: 5px; margin-top: 14px; }
+  #menu-foe .mf-pips i { width: 24px; height: 5px; border-radius: 2px; background: rgba(255,255,255,0.18); }
+  #menu-foe .mf-pips i.done { background: var(--good); }
+  #menu-foe .mf-pips i.now { background: var(--red); box-shadow: 0 0 10px rgba(255,75,43,0.7); }
+  .how-fold summary, #keys-fold summary { color: var(--dim); }
+  /* wide screens: the menu is a sidebar and the ring with the next opponent fills the rest */
+  @media (min-width: 900px) and (min-aspect-ratio: 6/5) {
+    #menu { left: 0; top: 0; bottom: 0; transform: none; width: clamp(380px, 34vw, 460px); height: 100%; max-height: none; box-sizing: border-box;
+      display: block; border: 0; border-right: 1px solid var(--line); border-radius: 0; padding: calc(env(safe-area-inset-top, 0px) + 28px) 30px 22px;
+      background: linear-gradient(180deg, rgba(8,9,12,0.95), rgba(8,9,12,0.86)); box-shadow: 30px 0 90px rgba(0,0,0,0.5); }
+    #menu .menu-side { border: 0; padding: 0; margin-top: 4px; }
+    #menu .brand { font-size: 70px; }
+    #menu .lede { margin: 10px 0 0; font-size: 13.5px; }
+    #menu .go-big { margin-top: 18px; padding: 16px 14px; font-size: 32px; }
+    #menu #profile { margin-top: 14px !important; }
+    #menu .menu-now { display: none; } /* the plate on the stage says it */
+    #menu .seg button { font-size: 15px; letter-spacing: 0.02em; padding-inline: 4px; }
+    #menu [data-group="level"] .seg button { flex: 1 1 calc(50% - 3px); } /* four opponents: two rows of two in the sidebar */
+    #menu a.dl-win { margin: 12px 0 0; padding: 9px; font-size: 14px; }
+    #menu a.dl-win small { display: inline; margin: 0 0 0 8px; }
+    #menu .more-keys { margin-top: 10px; }
+    #menu #menu-settings { margin-top: 14px; }
+    #menu-foe { display: block; position: absolute; z-index: 1; right: clamp(28px, 4vw, 72px); bottom: calc(env(safe-area-inset-bottom, 0px) + 44px);
+      width: min(360px, 27vw); text-align: right; pointer-events: none; }
+    #menu[hidden] + #menu-foe { display: none; }
+  }
 </style>
 
 <div id="stage">
@@ -327,7 +418,7 @@
     <div id="combo"></div>
     <div id="training" hidden><span>ПОПАДАНИЙ</span><b id="training-hits">0</b></div>
     <div id="banner"><div id="banner-main"></div><div id="banner-sub"></div></div>
-    <div id="vs-card" hidden><span class="vs-n"></span><b class="vs-name"></b><span class="vs-title"></span><p class="vs-style"></p><p class="vs-tip"></p></div>
+    <div id="vs-card" hidden><img class="vs-pic" alt="" hidden><div class="vs-head"><span class="vs-n"></span><b class="vs-name"></b><span class="vs-title"></span></div><p class="vs-style"></p><p class="vs-tip"></p></div>
     <div id="count" hidden></div>
     <div id="getup" hidden><b>ДЕРЖИ БЛОК, ЧТОБЫ ВСТАТЬ</b><div class="gbar"><div id="getup-fill"></div></div></div>
     <div id="flash"></div>
@@ -393,7 +484,7 @@
       <div class="nick-row"><input id="nick" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Введи ник — бои пойдут в рейтинг"><button class="ghost" id="nick-ok" type="button">ОК</button></div>
       <small class="note" id="nick-note"></small></div>
     @@DOWNLOAD_MENU@@
-    <h3 class="side-h cam-h" id="cam-h">Как драться перед камерой</h3>
+    <details class="more-keys how-fold" id="how-fold"><summary>Как драться перед камерой</summary>
     <ul class="tips cam-how" id="cam-how">
       <li><b>Встань в 2–3 м</b><span>в кадре голова, плечи и руки до пояса</span></li>
       <li><b>Джеб, кросс</b><span>резко выпрями руку к экрану</span></li>
@@ -403,6 +494,7 @@
       <li><b>Уклон, нырок</b><span>наклонись вбок, присядь</span></li>
       <li><b>Шаг</b><span>наклонись к экрану или от него</span></li>
     </ul>
+    </details>
     <details class="more-keys" id="keys-fold"><summary>Без камеры: клавиши</summary>
     <div class="keys" style="margin-top:12px">
       <kbd>J / K</kbd><span>джеб / кросс</span>
@@ -427,9 +519,10 @@
       <li><b>От хука</b> — нырок или блок, <b>от апперкота</b> — уклон.</li>
     </ul>
     </details>
-    </div>
    </div>
   </div>
+
+  <div id="menu-foe" aria-live="polite"><span class="mf-n"></span><b class="mf-name"></b><span class="mf-title"></span><p class="mf-style"></p><div class="mf-pips"></div></div>
 
   <div id="loading" class="panel" hidden>
     <h2 class="brand" style="font-size:44px">ЗАГРУЗКА</h2>
@@ -471,6 +564,7 @@
   </div>
 
   <div id="results" class="panel" hidden>
+    <img id="res-pic" class="res-pic" alt="" hidden>
     <div class="res-title">ПОБЕДА</div>
     <div class="res-how"></div>
     <div class="res-rating" id="res-rating"></div>

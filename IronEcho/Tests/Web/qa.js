@@ -134,6 +134,22 @@ async function ui(browser) {
     const d = document.querySelector('#menu-settings'); d.open = false; // as a player first sees it
     const m = document.querySelector('#menu'); const fits = m.scrollHeight <= m.clientHeight + 2; d.open = true; return fits; }));
   check('favicon present', await page.evaluate(() => (document.querySelector('link[rel=icon]')?.href || '').startsWith('data:image/png')));
+  // 1.12: the design pass. Oswald (Cyrillic) is the display face; the game photographs its six opponents for the ladder; on a wide screen the
+  // menu is a sidebar and the next opponent's plate stands on the stage, gone once the bout starts
+  const look = await page.evaluate(async () => {
+    const a = globalThis.IRONECHO_APP;
+    await document.fonts.ready;
+    for (let k = 0; k < 4 && !a.portraits; k++) a.debugAdvance(0.1);
+    const tiles = [...document.querySelectorAll('#ladder .rung img')];
+    const plate = document.querySelector('#menu-foe');
+    const menu = document.querySelector('#menu').getBoundingClientRect();
+    return { oswald: document.fonts.check('700 32px Oswald') && getComputedStyle(document.querySelector('.brand')).fontFamily.includes('Oswald'),
+      portraits: (a.portraits || []).length, tiles: tiles.filter((i) => !i.hidden && i.src.startsWith('data:image/jpeg')).length,
+      plate: getComputedStyle(plate).display !== 'none' && plate.querySelector('.mf-name').textContent, sidebar: Math.round(menu.left) === 0 && menu.width < 480 };
+  });
+  check('design: the display face is Oswald (Cyrillic), loaded from the page', look.oswald, JSON.stringify(look));
+  check('design: six opponent portraits, one on every ladder tile', look.portraits === 6 && look.tiles === 6, JSON.stringify(look));
+  check('design: a wide menu is a sidebar with the next opponent\'s plate on the stage', look.sidebar && look.plate === 'БОЛТ', JSON.stringify(look));
   check('the ladder is the default opponent (1.10)', await page.evaluate(() => document.querySelector('[data-group="level"] button.sel')?.dataset.value === '-1'));
   await page.keyboard.press('Enter');
   await page.waitForSelector('#hud:not([hidden])');
@@ -161,6 +177,12 @@ async function ui(browser) {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   check('Esc on the results screen = menu', await page.isVisible('#menu'));
+  check('design: the plate is back with the menu and hidden in a bout', await page.evaluate(() => {
+    const shown = getComputedStyle(document.querySelector('#menu-foe')).display !== 'none';
+    document.querySelector('#start').click();
+    const hidden = getComputedStyle(document.querySelector('#menu-foe')).display === 'none';
+    document.querySelector('#pause-btn').click(); document.querySelector('#to-menu').click();
+    return shown && hidden; }));
   for (const [w, h] of [[390, 844], [844, 390]]) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(200);

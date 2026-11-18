@@ -93,6 +93,8 @@ export class Hud {
   banner(main, sub = '', seconds = 1.6, tone = '') {
     this.el.bannerMain.textContent = main;
     this.el.bannerSub.textContent = sub;
+    this.el.banner.className = ''; // restart the entrance (the same banner twice in a row slams in twice)
+    void this.el.banner.offsetWidth;
     this.el.banner.className = `on ${tone}`;
     this.bannerTimer = seconds;
   }

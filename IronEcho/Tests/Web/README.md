@@ -47,6 +47,7 @@ IRONECHO_SYNTHETIC=Build/Web/check/synthetic_session.json node Tests/Web/qa.js  
 перехватываются и обслуживаются тем же серверным кодом). База и сеть в этих тестах не участвуют.
 Хранилище: `node Tests/Web/rating_store_test.mjs` — один и тот же набор условий для `MemoryStore` и для `SupabaseStore`, который говорит с самодельной заменой REST-интерфейса Supabase
 (`postgrest_standin.mjs`: фильтры, сортировка, встроенный select, Prefer/Range, 409 при нарушении уникальности). Это модель PostgREST, а не он сам: настоящий проект Supabase прогоняется отдельно.
+Портреты соперников для сайта (1.12): `NODE_PATH=<playwright> node Tools/Build/Web/portraits.js` после `build_web.py site` — игра снимает шестерых своей камерой, файлы `Tools/Build/Web/public/foes/<1..6>.jpg`; перезапускать, если менялись роботы, окраска или свет. В `qa.js --only=ui` (1.12): шрифт Oswald загружен, 6 портретов на плитках лестницы, меню — боковая панель с табличкой соперника, табличка прячется в бою.
 Сайт без чужих серверов (1.11): `NODE_PATH=<playwright> node Tests/Web/release_offline_e2e.js [папка для снимков]` (после `build_web.py release`) — главная, «Камера и данные», игра и камера (поддельная веб-камера Chromium) при заблокированных внешних хостах: three.js, MediaPipe, модель позы, шрифты — из `/play/vendor`; в паузе с камерой — «Перенастроить камеру».
 Собранный сайт: `node Tests/Web/release_api_smoke.mjs` (после `build_web.py release`) — функция `release/api/ratings.mjs` вызывается так, как её вызывает Vercel, с ядром из релиза; бой записан, проигран, оценён.
 

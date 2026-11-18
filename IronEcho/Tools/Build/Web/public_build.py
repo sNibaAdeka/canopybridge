@@ -33,6 +33,34 @@ HEADERS = """/*
 """
 
 
+def foe_cards(here: Path, media: Path) -> str:
+    """1.12: the landing page's six opponents: names and lines from the game's own ladder (site/src/ladder.js), portraits made by the game
+    (Tools/Build/Web/portraits.js -> public/foes/<rung>.jpg). A card without its portrait is an error: run portraits.js."""
+    import html
+
+    src = (here / "site" / "src" / "ladder.js").read_text(encoding="utf-8")
+    body = src[src.index("export const LADDER"):src.index("];")]
+    names = re.findall(r"name: '([^']+)', title: '([^']+)'", body)
+    styles = re.findall(r"style: '([^']+)'", body)
+    tips = re.findall(r"tip: '([^']+)'", body)
+    if not (len(names) == len(styles) == len(tips) == 6):
+        raise SystemExit(f"ladder.js: expected 6 opponents, read {len(names)}/{len(styles)}/{len(tips)}")
+    (media / "foes").mkdir(exist_ok=True)
+    cards = []
+    for i, ((name, title), style, tip) in enumerate(zip(names, styles, tips), 1):
+        pic = here / "public" / "foes" / f"{i}.jpg"
+        if not pic.exists():
+            raise SystemExit(f"no portrait {pic}: run node Tools/Build/Web/portraits.js")
+        shutil.copy2(pic, media / "foes" / pic.name)
+        last = i == len(names)
+        n = f"{'Бой за титул' if last else f'Бой {i} из {len(names)}'} · {title}"
+        e = html.escape
+        cards.append(f'<article class="foe{" champ" if last else ""}"><img src="media/foes/{i}.jpg" alt="{e(name)}, {e(title)}" width="680" height="850" '
+                     f'loading="lazy"><div class="foe-body"><span class="foe-n">{e(n)}</span><h3>{e(name)}</h3><p>{e(style)}</p>'
+                     f'<p class="tip"><b>Против него:</b> {e(tip[0].lower() + tip[1:])}</p></div></article>')
+    return "".join(cards)
+
+
 def gameplay_video(frames: Path, media: Path) -> str:
     """Frames (f000.jpg ...) at 30 fps -> H.264 MP4 + poster. Returns the <video> markup, or '' without ffmpeg."""
     ffmpeg = shutil.which("ffmpeg")
@@ -84,6 +112,7 @@ def build_public(project: Path, here: Path, out_root: Path) -> Path:
     version = GAME_VERSION
     page = (here / "public" / "index.html").read_text(encoding="utf-8")
     page = page.replace("@@VIDEO@@", video).replace("@@ZIP_MB@@", zip_mb).replace("@@VERSION@@", version)
+    page = page.replace("@@FOES@@", foe_cards(here, media))
     if "@@" in page:
         raise SystemExit("public/index.html: unfilled placeholder")
     (out / "index.html").write_text(page, encoding="utf-8")
